@@ -1,0 +1,19 @@
+tiny-paper display: whose files these are
+
+Ours (the tiny-paper authors), generated from the tiny-paper main repository:
+- firmware/ : GPL-3.0-or-later (firmware/LICENSE), except firmware/third_party/
+- everything else (python/, site/, docs/, .github/, the files at the top): MIT (LICENSE)
+
+From others, under their own licences, which stay with them:
+- firmware/third_party/picpak/bwry_luts.h : the PicPak's fast-refresh waveform tables, from
+  varanu5/picpak-tesserae-client (https://github.com/varanu5/picpak-tesserae-client). AGPL-3.0-or-later
+  (firmware/third_party/picpak/LICENSE, README.md there). A PicPak image built with this file is conveyed under the
+  AGPL terms for that part; the other boards' images do not contain it.
+
+Not in this repository, fetched by the build or loaded by the page:
+- ESP-IDF v5.5.1, Espressif (Apache-2.0): the firmware's platform, linked into every image
+- FastEPD, bitbank2 (Apache-2.0), pinned commit in firmware/components/epd/idf_component.yml: TRMNL X panel driver
+- joltwallet/littlefs 1.20.4 (MIT component, LittleFS BSD-3-Clause): firmware/components/hal_esp/idf_component.yml
+- Unity v2.6.0, ThrowTheSwitch (MIT): host tests only
+- esptool-js 0.7.0, Espressif (Apache-2.0): loaded by the flash page (site/index.html) from jsDelivr
+- pyserial (BSD-3-Clause): the Python package's one dependency

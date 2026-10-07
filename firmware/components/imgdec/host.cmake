@@ -1,0 +1,11 @@
+target_include_directories(tiny_core PUBLIC "${dir}/include")
+# Same public entry points with WebP disabled, independent of the normal all-format host build.
+set(no_webp_srcs ${srcs})
+list(FILTER no_webp_srcs EXCLUDE REGEX "/imgwebp\\.c$")
+add_library(tiny_imgdec_no_webp STATIC ${no_webp_srcs})
+target_include_directories(tiny_imgdec_no_webp PUBLIC "${dir}/include" "${TINY_FW}/include")
+target_compile_definitions(tiny_imgdec_no_webp PUBLIC IMGDEC_WEBP=0)
+add_executable(imgdec_no_webp "${dir}/test/webp_disabled.c")
+target_link_libraries(imgdec_no_webp PRIVATE tiny_imgdec_no_webp tiny_core tiny_hal_sim unity)
+target_compile_definitions(imgdec_no_webp PRIVATE TINY_ROOT="${TINY_ROOT}" IMGDEC_WEBP=0)
+add_test(NAME imgdec_no_webp COMMAND imgdec_no_webp)

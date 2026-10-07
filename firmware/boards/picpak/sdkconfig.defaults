@@ -1,0 +1,34 @@
+# PicPak board defaults (ESP-IDF v5.5.1). Projects list this first in SDKCONFIG_DEFAULTS,
+# then their own file. Paths are relative to the project directory (firmware/<project>).
+CONFIG_IDF_TARGET="esp32c3"
+
+# Flash: 16 MB of the 32 MB chip (the upper half is not reachable: docs/hardware/picpak-flash.md), DIO. Stock and
+# open-PicPak run 80 MHz, so do we (40 MHz was a bring-up choice).
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../boards/picpak/partitions.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x8000
+
+# Console on the native USB Serial/JTAG
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# No secure boot, no flash encryption, ever (plan 7)
+# CONFIG_SECURE_BOOT is not set
+# CONFIG_SECURE_FLASH_ENC_ENABLED is not set
+
+# Internal 150 kHz RC as slow clock (no 32 kHz crystal documented)
+CONFIG_RTC_CLK_SRC_INT_RC=y
+
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+# open-PicPak: WiFi events log through the USB console VFS; 2304 B overflowed there
+CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
+
+# WiFi TX power from the PHY init on (calibration, first frames), as board.h BOARD_WIFI_MAX_TX_QDBM (10 dBm): the
+# board browns out at the TX peak above ~14 dBm (open-PicPak). hal_esp net.c also caps every radio start.
+CONFIG_ESP_PHY_MAX_WIFI_TX_POWER=10
+
+# No Bluetooth: no NimBLE or controller in the image, its RAM left to the heap (hal_esp Kconfig TINY_BLE)
+CONFIG_BT_ENABLED=n

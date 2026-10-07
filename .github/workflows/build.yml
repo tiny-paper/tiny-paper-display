@@ -1,0 +1,79 @@
+# Tests and the three firmware images on every push; a tag v* publishes the images as a GitHub release, each board's
+# files under `<board>__<file>` with its flash layout `<board>__flash.txt`, then the Pages site picks the release up.
+name: build
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - run: make test
+
+  firmware:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        board: [trmnl_og, picpak, trmnl_x]
+    env:
+      TINY_IDF_CACHE: ${{ github.workspace }}/.idf-cache
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .idf-cache
+          key: idf-${{ hashFiles('firmware/tools/idf/idf.sh', 'firmware/tools/idf/Dockerfile') }}
+      - run: make -C firmware esp-setup
+      - run: make -C firmware esp BOARD=${{ matrix.board }}
+      - name: Collect the files of this board
+        run: |
+          dist=firmware/build/esp/display-${{ matrix.board }}/dist
+          [ "${{ matrix.board }}" = trmnl_og ] && dist=firmware/build/esp/display/dist
+          mkdir out
+          for f in "$dist"/*; do cp "$f" "out/${{ matrix.board }}__$(basename "$f")"; done
+          TINY_DIST="$dist" node --test site/test/*.test.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: display-${{ matrix.board }}
+          path: out/
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, firmware]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls out/trmnl_og__flash.txt out/picpak__flash.txt out/trmnl_x__flash.txt
+          gh release create "$GITHUB_REF_NAME" out/* --title "$GITHUB_REF_NAME" \
+            --notes "Display firmware for TRMNL OG, PicPak and TRMNL X. Install from the flash page, or with esptool: the \`# separate:\` line of \`<board>__flash.txt\` (it keeps the device's settings). $(cat SOURCE | head -1)."
+
+  pages:
+    needs: release
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml

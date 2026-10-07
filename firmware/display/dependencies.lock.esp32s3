@@ -1,0 +1,29 @@
+dependencies:
+  bitbank2/fastepd:
+    component_hash: 5cae4c10d37805e27411b4f5a43da04c904e7aed2982dfc4385af6f8d75878b8
+    dependencies: []
+    source:
+      git: https://github.com/bitbank2/FastEPD.git
+      path: .
+      type: git
+    version: 8dc8c74394c2ebd28b7283c048c0f283601ab476
+  idf:
+    source:
+      type: idf
+    version: 5.5.1
+  joltwallet/littlefs:
+    component_hash: dcea25bcef2de023f089f5f01e8d8c46ad1b8ffef75861ad5ffb4098555839df
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.20.4
+direct_dependencies:
+- bitbank2/fastepd
+- joltwallet/littlefs
+manifest_hash: e4b73e74b29ae3599116c8961b0ee66e9e45e9afede5ced5ede23b97e59a5ec0
+target: esp32s3
+version: 2.0.0

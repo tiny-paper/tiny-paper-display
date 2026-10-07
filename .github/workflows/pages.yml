@@ -1,0 +1,46 @@
+# The GitHub Pages site: the flash page and the API page (site/), with the files of the published releases copied next
+# to them (fw/<tag>/), because a browser cannot read release downloads from another origin. Runs after a release, on a
+# change of site/ on main, and by hand. Publishes only when Pages is switched on for the repository (source: GitHub
+# Actions).
+name: pages
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['site/**', '.github/workflows/pages.yml']
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Site and the newest releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p _site/fw
+          cp site/index.html site/api.html site/flash.js site/reset.js site/md5.js _site/
+          gh release list --exclude-drafts --exclude-pre-releases --limit 5 --json tagName,publishedAt > _site/fw/releases.json
+          for tag in $(gh release list --exclude-drafts --exclude-pre-releases --limit 5 --json tagName --jq '.[].tagName'); do
+            gh release download "$tag" --dir "_site/fw/$tag"
+          done
+          cat _site/fw/releases.json
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

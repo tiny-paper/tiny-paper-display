@@ -1,0 +1,39 @@
+# TRMNL OG board defaults (ESP-IDF v5.5.1). Projects list this first in SDKCONFIG_DEFAULTS,
+# then their own file. Paths are relative to the project directory (firmware/<project>).
+CONFIG_IDF_TARGET="esp32c3"
+
+# Flash: 4 MB, DIO at 40 MHz (stock: QIO 40 MHz; DIO is the safe choice for bring-up)
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../boards/trmnl_og/partitions.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x8000
+
+# Console on the native USB Serial/JTAG (the only USB on the OG)
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# No secure boot, no flash encryption, ever (plan 7)
+# CONFIG_SECURE_BOOT is not set
+# CONFIG_SECURE_FLASH_ENC_ENABLED is not set
+
+# Internal 150 kHz RC as slow clock (no 32 kHz crystal known, plan 3.2)
+CONFIG_RTC_CLK_SRC_INT_RC=y
+
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# No Bluetooth: no NimBLE or controller in the image, its RAM left to the heap (hal_esp Kconfig TINY_BLE)
+CONFIG_BT_ENABLED=n
+
+# No photo album (docs/spec/album.md, hal_esp Kconfig TINY_ALBUM): its ~21 KiB of code overflow the app slot by
+# 7.6 KiB (2026-09-27). On again once that much is found; the web app then shows the Album section.
+# CONFIG_TINY_ALBUM is not set
+
+# English only (docs/spec/firmware.md "Languages", hal_esp Kconfig TINY_LANG_PACKS): the pack loader, link strings_put
+# and plugin strings files take ~2.6 KiB, the app slot had 5 KiB left (2026-09-28); a real language also needs Latin-1
+# glyphs in the OS font. On again once the room is found.
+# CONFIG_TINY_LANG_PACKS is not set
+
+# Error-name table off: the app slot (0x190000) overflowed by 320 bytes on 2026-10-02; logs show 0x codes instead of names.
+CONFIG_ESP_ERR_TO_NAME_LOOKUP=n

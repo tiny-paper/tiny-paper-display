@@ -1,0 +1,12 @@
+menu "tiny-paper imgdec"
+
+config IMGDEC_PROGRESSIVE
+    bool "Progressive JPEG decoding (docs/spec/assets.md \"JPEG\")"
+    default y
+    help
+        Progressive JPEGs (Nextcloud's previews): with PSRAM (trmnl_x, xteink_x4pro) through a coefficient store of
+        the whole image (up to 4 MiB, plugin_host tph_image.c); on the ESP32-C3 boards in bands of rows from the
+        file on flash within the 24 KiB decoder budget (assets.md "JPEG" Progressive bands). Off: the define
+        IMGDEC_NO_PROGRESSIVE, progressive JPEGs refused (IMGDEC_E_PROGRESSIVE, "progressive JPEG").
+
+endmenu

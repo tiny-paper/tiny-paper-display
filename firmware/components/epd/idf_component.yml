@@ -1,0 +1,7 @@
+# FastEPD (Apache-2.0) for parallel panels, pinned to the commit stock trmnl-firmware f5f87b7 uses.
+dependencies:
+  bitbank2/fastepd:
+    git: https://github.com/bitbank2/FastEPD.git
+    version: 8dc8c74394c2ebd28b7283c048c0f283601ab476
+    rules:
+      - if: "target == esp32s3"

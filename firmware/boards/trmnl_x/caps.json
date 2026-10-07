@@ -1,0 +1,43 @@
+{
+  "board": "trmnl_x",
+  "name": "TRMNL X",
+  "chip": "esp32s3",
+  "flash_mb": 16,
+  "app_slot_bytes": 3145728,
+  "slot_headroom_bytes": 4096,
+  "ram_internal_bytes": 524288,
+  "psram_bytes": 8388608,
+  "panel": {
+    "w": 1872,
+    "h": 1404,
+    "depths": [
+      1,
+      2,
+      4
+    ]
+  },
+  "grid": {
+    "cols": 12,
+    "rows": 9,
+    "cell": 156,
+    "gaps": [
+      0,
+      8,
+      16,
+      24
+    ],
+    "pad": 12
+  },
+  "inputs": [
+    "button",
+    "touch_bar"
+  ],
+  "app_bands": 1,
+  "app_fb_max_bytes": 1314144,
+  "link_log_lines": 128,
+  "net_block_bytes": 36864,
+  "net_free_bytes": 86016,
+  "battery": true,
+  "partial_refresh": true,
+  "layout_margin": 18
+}

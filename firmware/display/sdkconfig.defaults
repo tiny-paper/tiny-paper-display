@@ -1,0 +1,22 @@
+# tiny-paper display firmware, on top of boards/<board>/sdkconfig.defaults
+
+# No radio, ever: hal_esp builds its network calls as stubs (Kconfig TINY_NO_WIFI) and nothing references the WiFi
+# stack, so the linker leaves it out. tools/check_no_radio.py reads the link map after every build (tools/idf/build.sh).
+CONFIG_TINY_NO_WIFI=y
+CONFIG_BT_ENABLED=n
+
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+# unplugged it wakes every few seconds to look for a USB host (main/main.c): no image check on those wakes
+CONFIG_BOOTLOADER_SKIP_VALIDATE_IN_DEEP_SLEEP=y
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# The display loop runs in the main task (PNG decode, panel driver)
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+# Task watchdog on the idle task and the display loop (hal_esp sys.c): a hang restarts instead of freezing
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=60
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
+
+# LittleFS on "storage" (hal_esp mounts it; the display writes nothing there)
+CONFIG_LITTLEFS_MAX_PARTITIONS=1

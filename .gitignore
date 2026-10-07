@@ -1,0 +1,9 @@
+build/
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+sdkconfig
+sdkconfig.old
+managed_components/
+_site/

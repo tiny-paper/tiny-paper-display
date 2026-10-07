@@ -1,0 +1,15 @@
+# TRMNL X, 16 MB. Same offsets as stock (trmnl-firmware f5f87b7 boards/trmnl_x_partitions.csv:
+# nvs 0xE000/0x5000, otadata 0x13000, app0/app1 3 MB each, spiffs 0x620000 size 9898K), so a later
+# dual boot (plan 7) can keep stock in one slot. Our storage runs to the end of flash. No phy_init
+# partition (PHY data built in, as in stock).
+# The stock nvs (0xE000) is full of stock's data (WiFi, device key; 2026-09-25: our writes failed with
+# ESP_ERR_NVS_NOT_ENOUGH_SPACE, settings and `!tp fast 1` never stuck). It stays as it is, renamed nvs_stk and
+# readonly (kept for a dual boot), and our own nvs is the last 64 KiB of flash, taken from storage (LittleFS
+# reformats once after this change: installed plugins must be reinstalled).
+# Name,   Type, SubType,  Offset,   Size,     Flags
+nvs_stk,  data, nvs,      0xe000,   0x5000,   readonly
+otadata,  data, ota,      0x13000,  0x2000
+app0,     app,  ota_0,    0x20000,  0x300000
+app1,     app,  ota_1,    0x320000, 0x300000
+storage,  data, littlefs, 0x620000, 0x9d0000
+nvs,      data, nvs,      0xff0000, 0x10000

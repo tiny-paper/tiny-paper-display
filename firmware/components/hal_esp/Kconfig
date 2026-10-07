@@ -1,0 +1,107 @@
+menu "tiny-paper HAL (hal_esp)"
+
+config TINY_LINK_UART0
+    bool "Link and console on UART0 instead of USB Serial/JTAG (QEMU)"
+    default n
+    help
+        Espressif QEMU emulates UART0 but not the USB Serial/JTAG. Implies stay-awake.
+
+config TINY_PANEL_STUB
+    bool "No panel: log the refresh instead of driving the UC8179"
+    default n
+
+config TINY_FORCE_STAY_AWAKE
+    bool "Never deep sleep or light sleep (debug; also on battery)"
+    default n
+    help
+        Normally the device stays awake only while a USB host is attached (the C3's USB
+        Serial/JTAG disappears in sleep). This forces it on battery too.
+
+config TINY_NO_WIFI
+    bool "No WiFi (QEMU): network calls fail with HAL_E_IO"
+    default n
+    help
+        Espressif QEMU has no WiFi, and linking the WiFi stack pulls in an ADC2 calibration
+        constructor that hangs there.
+
+config TINY_HEAP_CHECK
+    bool "Checked build (testing only): heap_caps_check_integrity_all at every heap probe"
+    default n
+    help
+        A failed check logs "E heap corrupt at=<step>" and panics. Set by app/sdkconfig.checked
+        (build.sh "checked"), never in a release build.
+
+config TINY_FAULT_OVERRUN
+    bool "Guard self-test (testing only): a deliberate one-byte heap overrun at the third heap probe"
+    depends on TINY_HEAP_CHECK
+    default n
+    help
+        Plants the fault the checked build must catch (build.sh "fault"): the QEMU session must then end red.
+        Never in a release build.
+
+config TINY_STACK_REPORT
+    bool "Log every task's stack high-water mark with each wake summary (QEMU)"
+    default n
+    help
+        `stack task=<name> free=<bytes>` per FreeRTOS task (esp/stacks.c). Set by app/sdkconfig.qemu:
+        tools/idf/qemu_heap.py fails a session in which a task has less than its floor left
+        (tools/diag/qemu.floors.json).
+
+config TINY_FAULT_SMALL_STACK
+    bool "Guard self-test (testing only): a task with a deliberately small stack"
+    depends on TINY_STACK_REPORT
+    default n
+    help
+        Plants the fault the stack floor must catch (build.sh "stackfault"): the QEMU session must then end red.
+        Never in a release build.
+
+config TINY_FAULT_SMALL_STACK_BYTES
+    int "Stack of the planted task, bytes"
+    depends on TINY_FAULT_SMALL_STACK
+    default 640
+    help
+        The task uses about 212 bytes (QEMU, 2026-10-05: 768 left 556 free, above the 512 floor, and the
+        self-test said so); 640 leaves about 428.
+
+config TINY_FAULT_BOOT_HOLD
+    bool "Guard self-test (testing only): 30 KB of heap held from boot"
+    default n
+    help
+        Plants the fault the heap floors must catch (build.sh "heapfault", esp/fault_hold.c): the QEMU session
+        must then end red. Never in a release build.
+
+config TINY_BLE
+    bool "Bluetooth config mode (link over BLE, esp/ble_link.c)"
+    depends on BT_NIMBLE_ENABLED
+    default y
+    help
+        Off on every board (CONFIG_BT_ENABLED=n in boards/*/sdkconfig.defaults): no NimBLE or controller in
+        the image, a 3 s hold opens the WiFi setup portal (docs/spec/setup.md), ble_setup answers UNSUPPORTED.
+        On: build with app/sdkconfig.ble appended (firmware/README.md). Core define TINY_BLE (tiny/hal.h).
+
+config TINY_ALBUM
+    bool "Photo album (docs/spec/album.md: /album/ rasters, link commands 0x28..0x2F, album mode of steps tasks)"
+    default y
+    help
+        About 21 KiB of code. Off: the core define TINY_ALBUM=0 (tiny/album.h), as firmware without the album.
+
+config TINY_PHOTO_PART
+    bool "Photo partition (docs/spec/store.md: raw `photos` partition, report, factory reset erase; PicPak)"
+    default n
+    help
+        The raw data partition `photos` through hal_part_* (esp/part.c) and the "!tp flash", "!tp photos" text
+        commands; the core define TINY_PHOTO_PART=1 (store component). On the PicPak only (boards/picpak/sdkconfig.app,
+        with its 32 MB chip driver esp/flash_chip.c); off: no code for it (the OG's app slot is full).
+
+config TINY_LANG_PACKS
+    bool "Language packs (docs/spec/firmware.md \"Languages\": a pack for the firmware's texts, plugin strings files)"
+    default y
+    help
+        About 2.6 KiB of code. Off: English only (the texts are compiled in either way), link strings_put answers
+        UNSUPPORTED, plugins get no sys.strings; the core define TINY_LANG_PACKS=0 (i18n.h).
+
+config TINY_CLOCK_ESP_TIMER
+    bool "hal_rtc_us from esp_timer plus a base kept in RTC memory (QEMU: no RTC timer)"
+    default n
+
+endmenu

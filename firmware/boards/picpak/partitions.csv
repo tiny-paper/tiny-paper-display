@@ -1,0 +1,19 @@
+# PicPak, 16 MB used of the 32 MB chip (MX25L25635F/45G, JEDEC 0xc22019). Nothing above 0x1000000: esptool's reads
+# there wrap onto the bootloader, and our 4-byte-address access did not work (docs/hardware/picpak-flash.md).
+# Stock V0.5.0 (open-PicPak device.md 7.1): nvs 0x9000 256K, otadata 0x49000, phy 0x4b000,
+# ota_0 0x50000 1.5M, ota_1 0x1d0000 1.5M, storage 0x350000 12M.
+# stock_nvs keeps the unit's serial, RF calibration and BLE keys where stock put them: never mounted or
+# erased by us. Flash the separate bins to keep its bytes; the merged image pads it with 0xff.
+# otadata and phy_init stay at the stock offsets.
+# code: plugin wasm module as loaded by WAMR, run from a flash mapping (store.md), first 64 KiB of the old storage.
+# Firmware updates over WiFi never change the table: a PicPak flashed with the 32 MB test image (builds 2252-2351) keeps
+# its `photos` row until the next USB flash; this firmware ignores it.
+# Name,    Type, SubType,  Offset,    Size
+stock_nvs, data, nvs,      0x9000,    0x40000
+otadata,   data, ota,      0x49000,   0x2000
+phy_init,  data, phy,      0x4b000,   0x1000
+nvs,       data, nvs,      0x4c000,   0x4000
+app0,      app,  ota_0,    0x50000,   0x200000
+app1,      app,  ota_1,    0x250000,  0x200000
+code,      data, 0x40,     0x450000,  0x10000
+storage,   data, littlefs, 0x460000,  0xba0000

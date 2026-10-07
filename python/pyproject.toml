@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tinypaper-display"
+version = "0.1.0"
+description = "Show pictures on a tiny-paper display over its USB cable"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = ["pyserial>=3.5"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+
+[project.scripts]
+tinypaper-show = "tinypaper_display.show:main"
+tinypaper-movie = "tinypaper_display.movie:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

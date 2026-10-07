@@ -1,0 +1,44 @@
+# TRMNL X board defaults (ESP-IDF v5.5.1). Values from stock trmnl-firmware f5f87b7
+# sdkconfigs/sdkconfig.TRMNL_X unless noted. Projects list this first in SDKCONFIG_DEFAULTS, then their own file.
+CONFIG_IDF_TARGET="esp32s3"
+
+# Flash: 16 MB. Stock: QIO 80 MHz; DIO 80 MHz is the safe choice for bring-up.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../boards/trmnl_x/partitions.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x8000
+
+# PSRAM: 8 MB octal (esp32s3_n16r8), 80 MHz, in the heap (framebuffers: plan 4.1)
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_BOOT_INIT=y
+CONFIG_SPIRAM_USE_MALLOC=y
+# No PSRAM test at boot: it costs most of a second on every wake (the bring-up's `psram` command tests it)
+CONFIG_SPIRAM_MEMTEST=n
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
+CONFIG_ESP32S3_DATA_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y
+
+# Console on the native USB Serial/JTAG only. Stock uses UART0 as console, but UART0 (GPIO43/44) is
+# wired to the ESP32-C5 modem (ESP-AT): never print there.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# No secure boot, no flash encryption, ever (plan 7)
+# CONFIG_SECURE_BOOT is not set
+# CONFIG_SECURE_FLASH_ENC_ENABLED is not set
+
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_RTC_CLK_SRC_INT_RC=y
+CONFIG_ESP_BROWNOUT_DET=y
+CONFIG_ESP_BROWNOUT_DET_LVL_SEL_7=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# No Bluetooth: no NimBLE or controller in the image, its RAM left to the heap (hal_esp Kconfig TINY_BLE)
+CONFIG_BT_ENABLED=n

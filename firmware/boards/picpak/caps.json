@@ -1,0 +1,29 @@
+{
+  "board": "picpak",
+  "name": "PicPak",
+  "chip": "esp32c3",
+  "flash_mb": 16,
+  "app_slot_bytes": 2097152,
+  "slot_headroom_bytes": 4096,
+  "ram_internal_bytes": 409600,
+  "psram_bytes": 0,
+  "panel": {
+    "w": 400,
+    "h": 300,
+    "depths": [
+      1,
+      2
+    ]
+  },
+  "inputs": [
+    "button"
+  ],
+  "app_bands": 6,
+  "app_fb_max_bytes": 8000,
+  "link_log_lines": 32,
+  "net_block_bytes": 36864,
+  "net_free_bytes": 86016,
+  "battery": true,
+  "partial_refresh": false,
+  "layout_margin": 9
+}

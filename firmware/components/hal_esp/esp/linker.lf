@@ -1,0 +1,6 @@
+# The PicPak's flash chip list (esp/flash_chip.c) runs with the cache off: in IRAM/DRAM, as ESP-IDF's own drivers
+[mapping:hal_esp]
+archive: libhal_esp.a
+entries:
+    if SPI_FLASH_OVERRIDE_CHIP_DRIVER_LIST = y:
+        flash_chip (noflash)

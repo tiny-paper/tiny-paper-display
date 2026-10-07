@@ -1,0 +1,109 @@
+<!doctype html>
+<!-- tiny-paper display: install the display firmware from the browser (Web Serial). Static: the images are the
+     repository's releases, copied next to this page by the Pages workflow (fw/). Uses esptool-js 0.7.0
+     (Espressif, Apache-2.0) from jsDelivr, loaded when Install is pressed. SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tiny-paper display: install</title>
+<style>
+  :root { --bg: #fff; --fg: #111; --mut: #666; --line: #ccc; --bad: #b00020; --ok: #0a7a2f; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #141414; --fg: #eee; --mut: #999; --line: #444; --bad: #ff6b81; --ok: #5fd38a; } }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; margin: 0 auto; max-width: 760px; padding: 16px; }
+  h1 { font-size: 22px; } h2 { font-size: 17px; margin-top: 24px; }
+  section { border: 1px solid var(--line); border-radius: 6px; padding: 12px; margin: 12px 0; }
+  select, button { font: inherit; padding: 6px 12px; margin: 4px 8px 4px 0; }
+  button:disabled { opacity: .5; }
+  #log { border: 1px solid var(--line); max-height: 220px; overflow: auto; padding: 8px; white-space: pre-wrap; font: 12px/1.4 ui-monospace, monospace; }
+  .warn { color: var(--bad); font-weight: 600; } .ok { color: var(--ok); font-weight: 600; } .mut { color: var(--mut); }
+  progress { width: 100%; }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+<h1>tiny-paper display</h1>
+<p>Turns a TRMNL OG, a PicPak or a TRMNL X into a plain e-paper display: plug it into a computer with its USB cable
+and send it a picture. <a href="api.html">The API</a> is three commands.</p>
+<p id="nosupport" class="warn" hidden></p>
+
+<section>
+  <h2>Install</h2>
+  <label>Board <select id="board">
+    <option value="">find it for me</option>
+    <option value="trmnl_og">TRMNL OG</option>
+    <option value="picpak">PicPak</option>
+    <option value="trmnl_x">TRMNL X</option>
+  </select></label>
+  <label>Release <select id="release"></select></label>
+  <button id="install" disabled>Install</button>
+  <progress id="prog" max="1" value="0"></progress>
+  <div id="state" class="mut">Plug the device in with a USB data cable, then press Install and pick its port
+  ("USB JTAG/serial debug unit").</div>
+  <div id="log" hidden></div>
+</section>
+
+<section>
+  <h2>What happens to the device</h2>
+  <ul>
+    <li>The firmware on it is replaced. After that it does one thing: show the picture you send over the cable.
+    No WiFi, no account, no apps, no updates over the air.</li>
+    <li>Settings the previous firmware stored are left alone: only the firmware's own files are written. The previous
+    firmware itself is gone until you install it again.</li>
+    <li>The device is checked first. If it is not the board you chose, or not one of the three, nothing is written.</li>
+    <li>If the port does not show up: switch the device off, hold its button, switch it on with the cable in, release.</li>
+  </ul>
+  <h2>How to go back</h2>
+  <ul>
+    <li>Install the firmware the device had, with that firmware's own installer. The display firmware does not stop
+    you: the device can always be flashed again over USB.</li>
+    <li>To be sure you can, read a backup of the whole flash before the first install and keep it:
+    <code>esptool read_flash 0 ALL backup.bin</code> (PicPak: add <code>--no-stub</code> and read the first 16 MB).
+    Writing that file back at 0 restores the device exactly.</li>
+  </ul>
+</section>
+
+<p class="mut">This page loads one library, <a href="https://github.com/espressif/esptool-js">esptool-js</a> 0.7.0 by
+Espressif (Apache License 2.0), from jsDelivr when you press Install. Nothing is sent anywhere: the firmware files are
+read from this site and written to the device by your browser.</p>
+
+<script type="module">
+import { ESPTOOL_JS, BOARDS, install, supportNote } from './flash.js';
+
+const $ = (id) => document.getElementById(id);
+const say = (text, cls) => { $('state').textContent = text; $('state').className = cls || 'mut'; };
+const log = (s) => { $('log').hidden = false; $('log').textContent += s + '\n'; $('log').scrollTop = $('log').scrollHeight; };
+
+const note = supportNote(navigator);
+if (note) { $('nosupport').textContent = note; $('nosupport').hidden = false; }
+
+try {
+  const r = await fetch('fw/releases.json');
+  const releases = r.ok ? await r.json() : [];
+  for (const rel of releases) $('release').add(new Option(rel.tagName, rel.tagName));
+  if (!releases.length) say('No release is published yet.', 'warn');
+  else if (!note) $('install').disabled = false;
+} catch {
+  say('The list of releases could not be read.', 'warn');
+}
+
+$('install').onclick = async () => {
+  $('install').disabled = true;
+  try {
+    const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] });
+    say('Loading the flasher...');
+    const esptool = await import(ESPTOOL_JS.url);
+    say('Writing. Do not unplug.');
+    const done = await install({
+      port, esptool, fetchFn: (u) => fetch(u), base: '', tag: $('release').value, board: $('board').value || null,
+      log, progress: (p) => { $('prog').value = p; },
+    });
+    say(`Done: ${BOARDS[done.board].title} now runs the display firmware ${done.version}. Send it a picture.`, 'ok');
+  } catch (e) {
+    say(e && e.message ? e.message : String(e), 'warn');
+  }
+  $('install').disabled = false;
+};
+</script>
+</body>
+</html>

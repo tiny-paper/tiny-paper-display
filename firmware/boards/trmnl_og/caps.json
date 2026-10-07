@@ -1,0 +1,29 @@
+{
+  "board": "trmnl_og",
+  "name": "TRMNL OG",
+  "chip": "esp32c3",
+  "flash_mb": 4,
+  "app_slot_bytes": 1638400,
+  "slot_headroom_bytes": 49152,
+  "ram_internal_bytes": 409600,
+  "psram_bytes": 0,
+  "panel": {
+    "w": 800,
+    "h": 480,
+    "depths": [
+      1,
+      2
+    ]
+  },
+  "inputs": [
+    "button"
+  ],
+  "app_bands": 6,
+  "app_fb_max_bytes": 8000,
+  "link_log_lines": 32,
+  "net_block_bytes": 36864,
+  "net_free_bytes": 86016,
+  "battery": true,
+  "partial_refresh": true,
+  "layout_margin": 10
+}
