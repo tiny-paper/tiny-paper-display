@@ -1,18 +1,16 @@
 # USB display protocol, version 1
 
-The whole API of the display firmware (`firmware/display`): a board as a plain display
-driven over its USB cable. Commands: `hello`, `have`, `show` (a whole picture or a rectangle, with a refresh mode), `clear`,
-`set`. Vectors: `vectors/usb-display.json` (`gen_usb_display.py`), replayed by
-`firmware/components/usbdisp/test/test_usbdisp.c`, and `python/tests/test_display_fw.py`. The corpus also has codec-only fault replies (`refusals`) for IO and NOMEM. Code:
-`firmware/components/usbdisp`.
+The byte-level reference of the display firmware: a board as a plain display driven over its USB cable (and over
+Bluetooth). It is for people writing their own client. To use the display, read [the guide](../site/api.html).
 
-The browser shows a USB display page for `project: "display"`: fit or fill, conversion with the album photo pipeline,
-an exact pixel preview, Show and Clear. Returning to the app uses Flash. The debug relay's bounded `display`
-command carries a source PNG to that same browser conversion (docs/relay.md "USB display"). No wire change.
+Commands: `hello`, `have`, `show` (a whole picture or a rectangle, with a refresh mode), `clear`, `set`, `bt`.
+Vectors: `vectors/usb-display.json` (`gen_usb_display.py`), replayed by the firmware's host test and by
+`python/tests/test_display_fw.py`. The corpus also has codec-only fault replies (`refusals`) for IO and NOMEM.
+Code: `firmware/components/usbdisp`.
 
 ## Frames
 
-As the link protocol (link-protocol.md "Frame"): USB CDC byte stream, any baud rate.
+USB CDC byte stream, any baud rate.
 
 | Off | Size | Field |
 |---|---|---|
@@ -135,7 +133,7 @@ frame. A whole picture without a mode gives up the frame kept when memory is sho
 | `x`, `y`, `w`, `h` | the area driven (all 0 with `none`) |
 | `same` | true with `mode: "none"` |
 | `passes` | with the mode `passes` |
-| `ckv` | TRMNL X: `{ edges: uint, frames: uint, per: uint, rows: uint, ok: bool }`, the gate clock edges the firmware counted over the last refresh of the update, the drive frames, edges a frame, the panel's rows; `ok` false when a frame did not clock once per row (issue #203: the picture is then drawn at the wrong height). Log: `# display W show ... WRONG` |
+| `ckv` | TRMNL X: `{ edges: uint, frames: uint, per: uint, rows: uint, ok: bool }`, the gate clock edges the firmware counted over the last refresh of the update, the drive frames, edges a frame, the panel's rows; `ok` false when a frame did not clock once per row (the picture is then drawn at the wrong height). Log: `# display W show ... WRONG` |
 
 `full_every` (default 20, `set`): the count of partial updates since the last full refresh; a named mode is run as
 named and counts, except an unchanged `partial` which uses no count.
@@ -185,12 +183,12 @@ named and counts, except an unchanged `partial` which uses no count.
 The X driver takes partials at 2 and 4 bit (`epdp_gray_partial`). In the display firmware it is on by default, because the
 Sketch page draws grays with it; the result is not yet seen on a real panel. The firmware reports what the board's
 `hal_panel_gray_partial` says, so `partial_depths` is 1, 2, 4. The console command `!tp gpart off` switches it off again
-(kept across restarts; `!tp gpart on` back); there is no `set` key for it. The X keeps its redrive bitmap in RAM only here (`hal_panel_fresh_ram`, issue #214):
+(kept across restarts; `!tp gpart on` back); there is no `set` key for it. The X keeps its redrive bitmap in RAM only here (`hal_panel_fresh_ram`):
 no flash file is written per partial update.
 
 ## Bluetooth
 
-The same firmware also takes the same frames over Bluetooth Low Energy. Off by default (owner decision 2026-10-08).
+The same firmware also takes the same frames over Bluetooth Low Energy. Off by default.
 Radio behaviour is unproven until a person has tried it on a device; every number of "Cost" is an estimate.
 
 ### Setting

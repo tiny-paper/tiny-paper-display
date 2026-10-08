@@ -11,15 +11,23 @@ import { fileURLToPath } from 'node:url';
 const SITE = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (name) => readFileSync(join(SITE, name), 'utf8');
 const PAGES = ['index.html', 'sketch.html', 'api.html'];
-const NAV = [['index.html', 'Flash'], ['sketch.html', 'Sketch'], ['api.html', 'API']];
+const NAV = [['index.html', 'Flash'], ['sketch.html', 'Sketch'], ['api.html', 'Use it']];
 
-test('navigation: Flash, Sketch, API on every page, the page itself marked', () => {
+test('navigation: Flash, Sketch, Use it on every page, the page itself marked', () => {
   for (const page of PAGES) {
     const nav = read(page).match(/<nav>(.*?)<\/nav>/s);
     assert.ok(nav, `${page}: no <nav>`);
     const links = [...nav[1].matchAll(/<a href="([^"]+)"( aria-current="page")?>([^<]+)<\/a>/g)].map((m) => [m[1], m[3], !!m[2]]);
     assert.deepEqual(links, NAV.map(([href, name]) => [href, name, href === page]), page);
   }
+});
+
+test('the protocol page: same navigation, none marked, linked from the guide and not from the navigation', () => {
+  const nav = read('protocol.html').match(/<nav>(.*?)<\/nav>/s)[1];
+  const links = [...nav.matchAll(/<a href="([^"]+)"( aria-current="page")?>([^<]+)<\/a>/g)].map((m) => [m[1], m[3], !!m[2]]);
+  assert.deepEqual(links, NAV.map(([href, name]) => [href, name, false]));
+  assert.match(read('api.html'), /<a href="protocol\.html">/);
+  for (const page of PAGES) assert.doesNotMatch(read(page).match(/<nav>(.*?)<\/nav>/s)[1], /protocol/, page);
 });
 
 /** The site's own files a page or script loads: script src, module imports, links to pages. */
@@ -69,7 +77,9 @@ test('the Sketch page loads only the site\'s own files: its policy says so and n
 test('the whole site loads one thing from elsewhere: esptool-js from jsDelivr, on the flash page', () => {
   const urls = new Set();
   for (const f of readdirSync(SITE).filter((n) => /\.(html|js)$/.test(n))) {
-    for (const m of read(f).matchAll(/https?:\/\/[^\s"'<>)]+/g)) urls.add(m[0]);
+    // the Markdown pages load nothing (checked in generated.test.mjs); the addresses in their text are examples to type
+    const text = ['api.html', 'protocol.html'].includes(f) ? read(f).replace(/<pre>[^]*?<\/pre>/g, '') : read(f);
+    for (const m of text.matchAll(/https?:\/\/[^\s"'<>)]+/g)) urls.add(m[0]);
   }
   assert.deepEqual([...urls].sort(), ['https://cdn.jsdelivr.net/npm/esptool-js@0.7.0/bundle.js', 'https://github.com/espressif/esptool-js']);
 });
