@@ -129,7 +129,11 @@ First step, in the firmware: the tuning key `driver` (spec "Tuning"), `ours` (de
 |---|---|
 | full refresh, 1 bit or gray | one `fullUpdate`, gray through `setCustomMatrix` (`gray_table`, `gray_row`), `clear` as its argument |
 | 1 bit partial | one `partialUpdate` over the changed rows, `passes_partial` passes; `rails_hold_ms` above 0 is its keep-on |
-| gray partial | not offered: hello lists 1 bit only, a changed gray picture is a full refresh (`why: depth`) |
+| gray partial | not offered: hello lists partial updates at 1 bit only |
+| a changed area at 2 or 4 bit, a rectangle sent with `full` at any depth | one `fullUpdate` with that rectangle (`why: area`, hello `full_area`): clearing and passes inside it, the rest of the panel sent neutral |
+
+Gray areas go through the library's rectangle full update. Our own gray partial is correct only on white (compared
+with epdiy: it runs the table from white without clearing first) and leaves with `ours`.
 
 | `plain` leaves out | |
 |---|---|
@@ -148,6 +152,18 @@ rows and the power up and down) against 1.45 s. Read in the library's source (th
 seen: with a row range `partialUpdate` clears only one of its two row buffers, so every second row below the changed
 rows would be sent the last changed row again (thin lines under a stroke). The glass decides; if it shows, the choices
 are every row named in the call (as the stock firmware) or a fix in the library.
+
+The rectangle full update, read in the same source, not seen. Expected time about 1.7 s whatever the size (27 scans
+of all rows with the fast clearing, 9 passes of the stock table; 43 scans, about 2.6 s, with `clear: slow`). x and
+width need no alignment in the library (it masks to the pixel); ours are multiples of 8, height at least 2. To look
+for on glass:
+
+| Where | What | Why it could happen |
+|---|---|---|
+| the rectangle's place | the flash and the picture at the mirror position left to right | the library masks the row data by position and the X sends rows last pixel first; we hand it the mirrored x. If that reading is wrong, the place is |
+| left and right of the rectangle, in its rows | every second row a little lighter or darker than its neighbours | in the 4 bit passes the mask is put on the first of the library's two row buffers only, so every other row is sent the picture's codes across the whole width, without clearing; the frame holds the true picture there, so black and white should not move, mid grays may |
+| above and below | nothing | those rows are sent neutral |
+| the rectangle's edges | a clean edge, no flash outside | the clearing scans use the same mask on every row |
 
 Not built, with the reason: `fastUpdate` (drives every pixel of the panel, one flash: not a partial), the library's
 2 bit partial (our gray frames are 4 bit; needs its 2 bit frames end to end), `startVideo` (a thread that scans without

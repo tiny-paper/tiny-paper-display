@@ -186,6 +186,10 @@ static const char *const W_WORK[] = {"whole", "rows"};
 static uint8_t s_driver = EPD_DRIVER_DEFAULT; /* driver: who drives the glass (epd_driver.h) */
 /* plain has no gray partial (epd_driver.h); hello and the choice of refresh follow the key at once */
 uint8_t hal_panel_partial_now(uint8_t depths) { return epd_driver_partial_depths(s_driver, depths); }
+/* plain: a full refresh of one rectangle alone, the library's own (epd_par.h epdp_full_rect) */
+uint8_t hal_panel_full_area_now(uint8_t depths) { return epd_driver_full_area_depths(s_driver, depths); }
+static bool s_area;         /* this full refresh drives s_area_r only */
+static tiny_rect_t s_area_r;
 static uint8_t s_work; /* frame_work: the passes over the frames of a 1 bit partial cover whole frames, or its rows */
 static const struct {
     hal_tune_t t;
@@ -472,6 +476,7 @@ int hal_panel_begin(uint8_t depth, hal_refresh_t mode)
     }
     s_depth = depth;
     s_mode = mode;
+    s_area = false;
     s_y0 = INT_MAX;
     s_y1 = -1;
     hal_stats.refresh_kind = mode == HAL_REFRESH_FULL ? 1 : 2;
@@ -581,6 +586,20 @@ static int panel_write(const tiny_rect_t *r, const uint8_t *prev, const uint8_t 
     return HAL_OK;
 }
 
+int hal_panel_full_area(const tiny_rect_t *r)
+{
+    if (!s_begun || s_mode != HAL_REFRESH_FULL || !epd_driver_full_area_depths(s_driver, 7))
+        return HAL_E_FAIL;
+    if (s_held)
+        return HAL_OK;
+    if (r->x < 0 || r->y < 0 || r->x % 8 || r->w % 8 || r->w < 8 || r->h < 2 || r->x + r->w > epdp_width() ||
+        r->y + r->h > epdp_height())
+        return HAL_E_FAIL;
+    s_area = true;
+    s_area_r = *r;
+    return HAL_OK;
+}
+
 static bool s_new_image; /* hal_panel_new_image: the frame being written is new image content */
 static char s_clear_buf[24];
 
@@ -673,6 +692,21 @@ int hal_panel_refresh(void)
             hal_esp_par_log_scan();
             hal_esp_par_log_time(&s_split, s_t_begin, tl);
         }
+    } else if (s_area) {
+        /* the rectangle alone: the clearing scans as set, fast when the key says auto (the slow ones are for a whole
+         * new picture); the counts of full refreshes and of partials since one are those of the whole panel */
+        const int cm = s_clear == CLEAR_NONE_ ? EPDP_CLEAR_NONE : s_clear == CLEAR_SLOW_ ? EPDP_CLEAR_SLOW : EPDP_CLEAR_FAST;
+        rc = epdp_full_rect(cm, s_area_r.x, s_area_r.y, s_area_r.w, s_area_r.h);
+        s_new_image = false;
+        s_area = false;
+        int64_t tl = esp_timer_get_time();
+        hal_stats.refresh_ms = (uint32_t)((tl - t) / 1000);
+        char gb[64];
+        hal_logf("panel full driver=%s area=%d,%d,%u,%u depth=%u ms=%u clear=%s gray=%s rc=%d", epd_driver_name(epdp_driver()),
+                 s_area_r.x, s_area_r.y, s_area_r.w, s_area_r.h, s_depth, (unsigned)hal_stats.refresh_ms,
+                 cm == EPDP_CLEAR_NONE ? "none" : cm == EPDP_CLEAR_SLOW ? "slow" : "fast", gray_str(gb, sizeof gb), rc);
+        hal_esp_par_log_drive(true);
+        hal_esp_par_log_time(&s_split, s_t_begin, tl);
     } else {
         rc = epdp_full(clear_mode());
         s_new_image = false;

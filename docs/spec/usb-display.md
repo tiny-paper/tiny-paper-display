@@ -29,7 +29,7 @@ cache: after a lost answer send `hello` and start the picture again.
 
 | cmd | Name | Request | Answer |
 |---|---|---|---|
-| 0x01 | hello | any map (the app's `{ proto: 1, app: tstr }` is fine) | `{ proto: 1, project: "display", fw: tstr, board: tstr, w: uint, h: uint, depths: [uint], colors?: [tstr], max_payload: 6144, max_png: uint, chunk: 4096, partial_depths: [uint], modes: [tstr], full_every: uint, fingerprint_hash: "fnv1a64", fingerprint?: tstr, bt?: tstr, partial_max?: map, tuning?: map }` (`partial_max`: "Area and refresh mode"; `tuning`: "Tuning") |
+| 0x01 | hello | any map (the app's `{ proto: 1, app: tstr }` is fine) | `{ proto: 1, project: "display", fw: tstr, board: tstr, w: uint, h: uint, depths: [uint], colors?: [tstr], max_payload: 6144, max_png: uint, chunk: 4096, partial_depths: [uint], modes: [tstr], full_every: uint, fingerprint_hash: "fnv1a64", fingerprint?: tstr, bt?: tstr, partial_max?: map, tuning?: map, full_area?: [uint] }` (`partial_max`, `full_area`: "Area and refresh mode"; `tuning`: "Tuning") |
 | 0x08 | show_begin | `{ size: uint, x?: uint, y?: uint, mode?: tstr, passes?: uint }`: the PNG's bytes, where it goes and how ("Area and refresh mode") | `{ chunk: 4096, next: 0 }`; replaces an open transfer (which counts as cut) |
 | 0x09 | show_chunk | `{ off: uint, data: bstr }` | `{ next: uint }`. `off` must be `next`; the first chunk holds at least the PNG's first 29 bytes and is checked at once (size, depth) |
 | 0x0A | show_end | `{}` | `{ depth: uint, ms: uint, mode: tstr, why: tstr, x: uint, y: uint, w: uint, h: uint, passes?: uint, ckv?: map, warn?: tstr, same?: true }` after the refresh ("The answer") |
@@ -119,6 +119,20 @@ multiple of 8, all of it lies inside the panel, its depth is in `partial_depths`
 Without them the rectangle is the whole panel. `full` with a rectangle refreshes the whole panel with the rectangle put
 into the frame kept.
 
+`hello.full_area` (the TRMNL X while the tuning key `driver` is `plain`; absent: none) lists the depths at which the
+device refreshes one rectangle fully, alone: the clearing flash and the full waveform inside the rectangle, the rest of
+the panel left as it is, so the grays come out right whatever was there. The frame is kept at those depths too, and a
+rectangle may have such a depth. Then, when the frame kept is known:
+
+| Sent | Runs | Answer |
+|---|---|---|
+| a picture or rectangle without a mode, at a depth in `full_area` and not in `partial_depths` | one full refresh of the changed rectangle (at least 2 rows) | `mode: "full"`, `why: "area"`, the area the rectangle |
+| a rectangle with `full`, at a depth in `full_area` | one full refresh of that rectangle | the same |
+| a whole picture with `full`; any picture when the frame kept is not known; the refresh after `full_every` | the whole panel, as without `full_area` | |
+
+A rectangle's full refresh counts towards `full_every` as a partial update does. It takes as long as a full refresh
+with the same clearing (every scan covers all rows): the clearing is `fast` unless the key `clear` says `none` or `slow`.
+
 A gray partial update (2 or 4 bit; `partial_depths` lists them) keeps copies of old and new pixels of its rectangle in RAM, so
 its changed rectangle may have at most 262144 pixels on the TRMNL X (512 x 512, about a tenth of the 1872 x 1404 panel; 256
 KiB of copies at 4 bit). The device finds the rectangle before it touches the panel. With no mode named, a larger change is a
@@ -141,7 +155,7 @@ frame. A whole picture without a mode gives up the frame kept when memory is sho
 | Key | Value |
 |---|---|
 | `mode` | what ran: `full`, `partial`, `partial_all`, `inverse`, `passes`, or `none` (the picture is what the panel shows: nothing driven) |
-| `why` | `asked` (the mode named), `changed`, `unchanged`, or for a full refresh nobody named: `first`, `refused`, `cut`, `failed`, `memory` (why the frame kept was not known), `depth` (another depth than the picture shown, or one outside `partial_depths`), `board` (no partial refresh), `cleanup` (`full_every` reached), `large` (too much changed for a gray partial update: the whole panel was refreshed) |
+| `why` | `asked` (the mode named), `changed`, `unchanged`, or for a full refresh nobody named: `first`, `refused`, `cut`, `failed`, `memory` (why the frame kept was not known), `depth` (another depth than the picture shown, or one outside `partial_depths`), `board` (no partial refresh), `cleanup` (`full_every` reached), `large` (too much changed for a gray partial update: the whole panel was refreshed), `area` (a full refresh of the answer's rectangle alone, `hello.full_area`) |
 | `x`, `y`, `w`, `h` | the area driven (all 0 with `none`) |
 | `same` | true with `mode: "none"` |
 | `passes` | with the mode `passes` |
@@ -183,7 +197,7 @@ the driver's `!tp` console commands, with the bounds those commands check.
 | `scan_min_ms` | 0 to 150 | 0 | with `row_skip`: a scan lasts at least this long (it waits after its last row); about 120 gives every frame the time it has without skipping. Tells a weak drive (cured by it) from a misplaced row (not cured) |
 | `frame_work` | `whole`, `rows` | `whole` | the passes over the two 328 KB frames around the scans of a 1 bit partial update (copies, the search for new blacks, the codes of each step, the redrive counts, setting the frames white) cover whole frames, or only the changed rows (with `wave_redrive` above 0 joined with the rows of the blacks still to be driven again). The library is handed the same frames either way (host-tested byte for byte), so the panel shows the same; `rows` takes the pause between steps (`gap=`) from about 110 ms to a few. With `rows` the fingerprints of the `panel given` line cover the worked rows only. Watch for: anything that differs from `whole` |
 | `rails_hold_ms` | 0 to 10000 | 0 | milliseconds the panel's supply rails stay up after a partial update, so the next one inside that time skips the power up (`up=` in the `panel time` line shows what that is worth). 0: down at the end of every update. They come down when the time passes, at once when an update fails or the key is set to 0, before a full refresh, a restart and any sleep. Watch for: the picture fading or graying while the rails are held (nothing is driven then, but the supply is on), and battery use |
-| `driver` | `ours`, `plain` | `ours` | who drives the glass. `ours`: this firmware's own row control, bus setup, waveform steps and scans around the panel library; every other key applies. `plain`: the panel library's public calls only, as the stock firmware uses them: a full refresh is one `fullUpdate` (grays through the table of `gray_table` and `gray_row`), a 1 bit partial update is one `partialUpdate` over the changed rows, with the library's own row control, bus clock, timing and power up and down. No gray partial update: `partial_depths` in hello is `[1]` while it lasts, a changed gray picture is a full refresh (`why: "depth"`), `partial` named at 2 or 4 bit is refused. Of the other keys only `gray_table`, `gray_row`, `passes_partial`, `passes_full`, `clear` and `rails_hold_ms` (the library's own keep-on) do anything then; the stock firmware runs 3 and 3 passes. Watch for: thin lines on every second row below a stroke (read in the library's source, not seen), blacks lighter than under `ours` (no frames before the passes, no redrive), traces of erased strokes, the time (`ms`) |
+| `driver` | `ours`, `plain` | `ours` | who drives the glass. `ours`: this firmware's own row control, bus setup, waveform steps and scans around the panel library; every other key applies. `plain`: the panel library's public calls only, as the stock firmware uses them: a full refresh is one `fullUpdate` (grays through the table of `gray_table` and `gray_row`), a 1 bit partial update is one `partialUpdate` over the changed rows, with the library's own row control, bus clock, timing and power up and down. No gray partial update: `partial_depths` in hello is `[1]` while it lasts and `partial` named at 2 or 4 bit is refused; a changed gray area is one `fullUpdate` with its rectangle (`full_area` in hello is `[1, 2, 4]`, `why: "area"`, "Area and refresh mode"). Of the other keys only `gray_table`, `gray_row`, `passes_partial`, `passes_full`, `clear` and `rails_hold_ms` (the library's own keep-on) do anything then; the stock firmware runs 3 and 3 passes. Watch for: thin lines on every second row below a stroke; a rectangle's full refresh landing mirrored left to right, or changing every second row left and right of the rectangle (all three read in the library's source, not seen); blacks lighter than under `ours` (no frames before the passes, no redrive), traces of erased strokes, the time (`ms`) |
 
 `step_neutral` to `scan_min_ms` are the scans of a partial update. With their defaults the scans are the library's own: every step is its
 drive frames and then one neutral scan, every scan writes all 1404 rows with the timed row step. The gate driver gets one

@@ -104,6 +104,7 @@ public:
     }
     bool soft_cs() const { return _state.panelDef.flags & BB_PANEL_FLAG_SLOW_SPH; }
     bool mirror_y() const { return _state.iFlags & BB_PANEL_FLAG_MIRROR_Y; }
+    bool mirror_x() const { return _state.iFlags & BB_PANEL_FLAG_MIRROR_X; }
     /* One FastEPD partial over the `careful` rows of a scan plan (epd_scan.h), `passes` drive frames (0: only its
      * neutral scan), rails left on. FastEPD 8dc8c74 bbepPartialUpdate and bbepClear take the rows to write and
      * their count from the state on every scan, so for the call the frames start at the first careful row and the
@@ -789,13 +790,15 @@ static int plain_end(int rc, uint32_t scans, int64_t t0)
     return rc == BBEP_SUCCESS ? EPDP_OK : EPDP_E_IO;
 }
 
-static int plain_full(int lib_clear, int clear_mode)
+/* rect: nullptr the whole panel, else the library's own rectangle (its clearing scans and its passes drive only
+ * inside it; rows outside are sent neutral, columns outside masked to neutral; every scan still covers all rows). */
+static int plain_full(int lib_clear, int clear_mode, BB_RECT *rect)
 {
     int64_t t0 = esp_timer_get_time();
     split_begin();
     stats_begin();
     const int passes = s_epd.getMode() == BB_MODE_1BPP ? s_full_passes : s_matrix_passes;
-    int rc = lib_call(EPD_SPLIT_PREP, [&] { return s_epd.fullUpdate(lib_clear, false); });
+    int rc = lib_call(EPD_SPLIT_PREP, [&] { return s_epd.fullUpdate(lib_clear, false, rect); });
     return plain_end(rc, epd_driver_lib_scans(false, clear_mode, passes), t0);
 }
 
@@ -823,22 +826,45 @@ static int plain_partial(int y0, int y1)
 }
 /* plain: end */
 
-extern "C" int epdp_full(int clear_mode)
+static const int CLEAR_MODES[] = { CLEAR_NONE, CLEAR_FAST, CLEAR_SLOW, CLEAR_WHITE };
+
+/* Before a full refresh, whole or of a rectangle: rails a partial kept up come down (the library powers up and down
+ * itself), the redrive bitmap is empty, the frames are no longer what our bookkeeping left. */
+static void full_begin(void)
 {
-    if (!s_open) return EPDP_E_STATE;
-    static const int modes[] = { CLEAR_NONE, CLEAR_FAST, CLEAR_SLOW, CLEAR_WHITE };
-    if (clear_mode < 0 || clear_mode > 3) return EPDP_E_ARG;
-    if (!iox_alive()) return EPDP_E_IO;
-    if (driver_sync()) return EPDP_E_IO;
-    int64_t t0 = esp_timer_get_time();
-    rails_off(); /* kept up by a partial: the library's full refresh powers up and down itself */
+    rails_off();
     if (s_fresh) memset(s_fresh, 0, EPD_FRESH_PLANES * (size_t)(s_epd.width() / 8) * s_epd.height()); /* all driven by the full waveform */
     epd_parjob_fresh_none(&s_job);
     epd_parjob_touched(&s_job);
     s_fresh_dirty = false;
-    if (!s_parts.row_hook) return plain_full(modes[clear_mode], clear_mode);
+}
+
+extern "C" int epdp_full_rect(int clear_mode, int x, int y, int w, int h)
+{
+    if (!s_open) return EPDP_E_STATE;
+    if (clear_mode < 0 || clear_mode > 3) return EPDP_E_ARG;
+    /* the library refuses a rectangle one pixel wide or high */
+    if (x < 0 || y < 0 || w < 2 || h < 2 || x + w > s_epd.width() || y + h > s_epd.height()) return EPDP_E_ARG;
+    if (!iox_alive()) return EPDP_E_IO;
+    if (driver_sync()) return EPDP_E_IO;
+    if (s_parts.row_hook) return EPDP_E_STATE; /* plain only */
+    full_begin();
+    BB_RECT r = {epd_driver_lib_rect_x(s_epd.width(), s_epd.mirror_x(), x, w), y, w, h};
+    return plain_full(CLEAR_MODES[clear_mode], clear_mode, &r);
+}
+
+extern "C" int epdp_full(int clear_mode)
+{
+    if (!s_open) return EPDP_E_STATE;
+    if (clear_mode < 0 || clear_mode > 3) return EPDP_E_ARG;
+    if (!iox_alive()) return EPDP_E_IO;
+    if (driver_sync()) return EPDP_E_IO;
+    int64_t t0 = esp_timer_get_time();
+    full_begin();
+    if (!s_parts.row_hook) return plain_full(CLEAR_MODES[clear_mode], clear_mode, nullptr);
+    split_begin();
     rows_begin(false);
-    int rc = lib_call(EPD_SPLIT_PREP, [&] { return s_epd.fullUpdate(modes[clear_mode], false); });
+    int rc = lib_call(EPD_SPLIT_PREP, [&] { return s_epd.fullUpdate(CLEAR_MODES[clear_mode], false); });
     rows_end();
     rails_down(EPD_SPLIT_AFTER);
     s_last_ms = (uint32_t)((esp_timer_get_time() - t0) / 1000);

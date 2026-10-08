@@ -73,7 +73,7 @@ cache: after a lost answer send <code>hello</code> and start the picture again.<
 <td>0x01</td>
 <td>hello</td>
 <td>any map (the app&#39;s <code>{ proto: 1, app: tstr }</code> is fine)</td>
-<td><code>{ proto: 1, project: &quot;display&quot;, fw: tstr, board: tstr, w: uint, h: uint, depths: [uint], colors?: [tstr], max_payload: 6144, max_png: uint, chunk: 4096, partial_depths: [uint], modes: [tstr], full_every: uint, fingerprint_hash: &quot;fnv1a64&quot;, fingerprint?: tstr, bt?: tstr, partial_max?: map, tuning?: map }</code> (<code>partial_max</code>: &quot;Area and refresh mode&quot;; <code>tuning</code>: &quot;Tuning&quot;)</td>
+<td><code>{ proto: 1, project: &quot;display&quot;, fw: tstr, board: tstr, w: uint, h: uint, depths: [uint], colors?: [tstr], max_payload: 6144, max_png: uint, chunk: 4096, partial_depths: [uint], modes: [tstr], full_every: uint, fingerprint_hash: &quot;fnv1a64&quot;, fingerprint?: tstr, bt?: tstr, partial_max?: map, tuning?: map, full_area?: [uint] }</code> (<code>partial_max</code>, <code>full_area</code>: &quot;Area and refresh mode&quot;; <code>tuning</code>: &quot;Tuning&quot;)</td>
 </tr>
 <tr>
 <td>0x08</td>
@@ -259,6 +259,36 @@ do is refused (err 36), and the answer says which refresh ran and why.</p>
 multiple of 8, all of it lies inside the panel, its depth is in <code>partial_depths</code> and is the depth of the picture shown.
 Without them the rectangle is the whole panel. <code>full</code> with a rectangle refreshes the whole panel with the rectangle put
 into the frame kept.</p>
+<p><code>hello.full_area</code> (the TRMNL X while the tuning key <code>driver</code> is <code>plain</code>; absent: none) lists the depths at which the
+device refreshes one rectangle fully, alone: the clearing flash and the full waveform inside the rectangle, the rest of
+the panel left as it is, so the grays come out right whatever was there. The frame is kept at those depths too, and a
+rectangle may have such a depth. Then, when the frame kept is known:</p>
+<table>
+<thead>
+<tr>
+<th>Sent</th>
+<th>Runs</th>
+<th>Answer</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>a picture or rectangle without a mode, at a depth in <code>full_area</code> and not in <code>partial_depths</code></td>
+<td>one full refresh of the changed rectangle (at least 2 rows)</td>
+<td><code>mode: &quot;full&quot;</code>, <code>why: &quot;area&quot;</code>, the area the rectangle</td>
+</tr>
+<tr>
+<td>a rectangle with <code>full</code>, at a depth in <code>full_area</code></td>
+<td>one full refresh of that rectangle</td>
+<td>the same</td>
+</tr>
+<tr>
+<td>a whole picture with <code>full</code>; any picture when the frame kept is not known; the refresh after <code>full_every</code></td>
+<td>the whole panel, as without <code>full_area</code></td>
+<td></td>
+</tr>
+</tbody></table>
+<p>A rectangle&#39;s full refresh counts towards <code>full_every</code> as a partial update does. It takes as long as a full refresh
+with the same clearing (every scan covers all rows): the clearing is <code>fast</code> unless the key <code>clear</code> says <code>none</code> or <code>slow</code>.</p>
 <p>A gray partial update (2 or 4 bit; <code>partial_depths</code> lists them) keeps copies of old and new pixels of its rectangle in RAM, so
 its changed rectangle may have at most 262144 pixels on the TRMNL X (512 x 512, about a tenth of the 1872 x 1404 panel; 256
 KiB of copies at 4 bit). The device finds the rectangle before it touches the panel. With no mode named, a larger change is a
@@ -288,7 +318,7 @@ frame. A whole picture without a mode gives up the frame kept when memory is sho
 </tr>
 <tr>
 <td><code>why</code></td>
-<td><code>asked</code> (the mode named), <code>changed</code>, <code>unchanged</code>, or for a full refresh nobody named: <code>first</code>, <code>refused</code>, <code>cut</code>, <code>failed</code>, <code>memory</code> (why the frame kept was not known), <code>depth</code> (another depth than the picture shown, or one outside <code>partial_depths</code>), <code>board</code> (no partial refresh), <code>cleanup</code> (<code>full_every</code> reached), <code>large</code> (too much changed for a gray partial update: the whole panel was refreshed)</td>
+<td><code>asked</code> (the mode named), <code>changed</code>, <code>unchanged</code>, or for a full refresh nobody named: <code>first</code>, <code>refused</code>, <code>cut</code>, <code>failed</code>, <code>memory</code> (why the frame kept was not known), <code>depth</code> (another depth than the picture shown, or one outside <code>partial_depths</code>), <code>board</code> (no partial refresh), <code>cleanup</code> (<code>full_every</code> reached), <code>large</code> (too much changed for a gray partial update: the whole panel was refreshed), <code>area</code> (a full refresh of the answer&#39;s rectangle alone, <code>hello.full_area</code>)</td>
 </tr>
 <tr>
 <td><code>x</code>, <code>y</code>, <code>w</code>, <code>h</code></td>
@@ -450,7 +480,7 @@ the driver&#39;s <code>!tp</code> console commands, with the bounds those comman
 <td><code>driver</code></td>
 <td><code>ours</code>, <code>plain</code></td>
 <td><code>ours</code></td>
-<td>who drives the glass. <code>ours</code>: this firmware&#39;s own row control, bus setup, waveform steps and scans around the panel library; every other key applies. <code>plain</code>: the panel library&#39;s public calls only, as the stock firmware uses them: a full refresh is one <code>fullUpdate</code> (grays through the table of <code>gray_table</code> and <code>gray_row</code>), a 1 bit partial update is one <code>partialUpdate</code> over the changed rows, with the library&#39;s own row control, bus clock, timing and power up and down. No gray partial update: <code>partial_depths</code> in hello is <code>[1]</code> while it lasts, a changed gray picture is a full refresh (<code>why: &quot;depth&quot;</code>), <code>partial</code> named at 2 or 4 bit is refused. Of the other keys only <code>gray_table</code>, <code>gray_row</code>, <code>passes_partial</code>, <code>passes_full</code>, <code>clear</code> and <code>rails_hold_ms</code> (the library&#39;s own keep-on) do anything then; the stock firmware runs 3 and 3 passes. Watch for: thin lines on every second row below a stroke (read in the library&#39;s source, not seen), blacks lighter than under <code>ours</code> (no frames before the passes, no redrive), traces of erased strokes, the time (<code>ms</code>)</td>
+<td>who drives the glass. <code>ours</code>: this firmware&#39;s own row control, bus setup, waveform steps and scans around the panel library; every other key applies. <code>plain</code>: the panel library&#39;s public calls only, as the stock firmware uses them: a full refresh is one <code>fullUpdate</code> (grays through the table of <code>gray_table</code> and <code>gray_row</code>), a 1 bit partial update is one <code>partialUpdate</code> over the changed rows, with the library&#39;s own row control, bus clock, timing and power up and down. No gray partial update: <code>partial_depths</code> in hello is <code>[1]</code> while it lasts and <code>partial</code> named at 2 or 4 bit is refused; a changed gray area is one <code>fullUpdate</code> with its rectangle (<code>full_area</code> in hello is <code>[1, 2, 4]</code>, <code>why: &quot;area&quot;</code>, &quot;Area and refresh mode&quot;). Of the other keys only <code>gray_table</code>, <code>gray_row</code>, <code>passes_partial</code>, <code>passes_full</code>, <code>clear</code> and <code>rails_hold_ms</code> (the library&#39;s own keep-on) do anything then; the stock firmware runs 3 and 3 passes. Watch for: thin lines on every second row below a stroke; a rectangle&#39;s full refresh landing mirrored left to right, or changing every second row left and right of the rectangle (all three read in the library&#39;s source, not seen); blacks lighter than under <code>ours</code> (no frames before the passes, no redrive), traces of erased strokes, the time (<code>ms</code>)</td>
 </tr>
 </tbody></table>
 <p><code>step_neutral</code> to <code>scan_min_ms</code> are the scans of a partial update. With their defaults the scans are the library&#39;s own: every step is its

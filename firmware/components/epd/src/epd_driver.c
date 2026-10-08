@@ -29,6 +29,10 @@ uint8_t epd_driver_partial_depths(int driver, uint8_t depths)
     return (uint8_t)(epd_driver_parts(driver).gray_partial ? depths : depths & 1);
 }
 
+uint8_t epd_driver_full_area_depths(int driver, uint8_t depths) { return driver == EPD_DRIVER_PLAIN ? depths : 0; }
+
+int epd_driver_lib_rect_x(int panel_w, bool mirror_x, int x, int w) { return mirror_x ? panel_w - x - w : x; }
+
 uint32_t epd_driver_lib_scans(bool partial, int clear, int passes)
 {
     static const uint8_t CLEAR[] = {0, 16, 32, 8}; /* EPDP_CLEAR_NONE, _FAST, _SLOW, _WHITE */

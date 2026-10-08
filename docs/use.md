@@ -130,6 +130,7 @@ the panel took.
 | `unchanged` | the picture is the one already shown |
 | `first` | full because nothing was known yet (after power-on) |
 | `depth` | full because the bit depth changed |
+| `area` | full, but only the area in the answer: the device refreshes a rectangle fully on its own (TRMNL X with the tuning key `driver` set to `plain`) |
 | `cleanup` | full because the count of partial updates since the last full one was reached (20 unless changed) |
 | `board` | full because this board has no partial refresh |
 | `refused`, `cut`, `failed`, `memory` | full to recover after a refused or cut transfer, a panel failure, or too little memory to keep the last frame |

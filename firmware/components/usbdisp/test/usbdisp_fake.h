@@ -25,6 +25,9 @@ static struct {
     /* partial updates: the glass changes only where the driver is told to drive */
     usbdisp_drive_t drive;
     int fulls, partials;   /* refreshes of each kind */
+    bool area_on;          /* this full refresh drives F.area alone */
+    tiny_rect_t area;
+    int area_fulls;        /* full refreshes of a rectangle alone (counted in fulls too) */
     int stale;             /* pixels of a partial whose `prev` was not what the glass showed */
     int driven;            /* pixels the last partial drove */
     tiny_rect_t rect;      /* of the last partial */
@@ -100,6 +103,7 @@ static inline int f_begin(void *ctx, uint8_t depth, bool bwry, bool image, usbdi
     F.bwry = bwry;
     F.image = image;
     F.next_row = C.rows_bottom_up ? C.h : 0;
+    F.area_on = false;
     if (drive == USBDISP_DRIVE_FULL)
         memset(F.pending, 0xEE, sizeof F.pending);
     else
@@ -153,6 +157,20 @@ static inline int f_write_rows(void *ctx, const tiny_rect_t *r, const uint8_t *p
     return 0;
 }
 
+/* cfg panel_area: only between the begin of a full refresh and its rows; as the X, a rectangle at least 2 rows high */
+static inline int f_area(void *ctx, const tiny_rect_t *r)
+{
+    (void)ctx;
+    if (F.drive != USBDISP_DRIVE_FULL || F.next_row != (C.rows_bottom_up ? C.h : 0) || F.area_on || r->x % 8 || r->w % 8 ||
+        !r->w || r->h < 2 || r->x < 0 || r->y < 0 || r->x + r->w > C.w || r->y + r->h > C.h) {
+        F.order_errors++;
+        return -1;
+    }
+    F.area_on = true;
+    F.area = *r;
+    return 0;
+}
+
 static inline int f_refresh(void *ctx)
 {
     (void)ctx;
@@ -169,7 +187,14 @@ static inline int f_refresh(void *ctx)
         return -1;
     if (F.drive == USBDISP_DRIVE_FULL && F.next_row != (C.rows_bottom_up ? 0 : C.h))
         F.order_errors++;
-    memcpy(F.shown, F.pending, sizeof F.shown);
+    if (F.area_on) { /* the glass changes inside the rectangle only */
+        for (uint16_t j = 0; j < F.area.h; j++)
+            memcpy(F.shown + (size_t)(F.area.y + j) * C.w + F.area.x, F.pending + (size_t)(F.area.y + j) * C.w + F.area.x, F.area.w);
+        F.area_fulls++;
+        F.rect = F.area;
+    } else {
+        memcpy(F.shown, F.pending, sizeof F.shown);
+    }
     memmove(F.hist[1], F.hist[0], 3 * sizeof F.hist[0]);
     memcpy(F.hist[0], F.shown, sizeof F.shown);
     F.refreshes++;

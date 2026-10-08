@@ -7,6 +7,8 @@ export interface DisplayHello {
   proto: number; project: 'display'; fw: string; board: string; w: number; h: number;
   depths: number[]; colors?: string[]; max_payload: number; max_png: number; chunk: number;
   partial_depths: number[]; modes: string[]; full_every: number;
+  /** The depths at which the device refreshes one rectangle fully, alone (usb-display.md "Area and refresh mode"); absent: none. */
+  full_area?: number[];
   /** The panel tuning now (usb-display.md "Tuning"), only where the board has knobs. */
   tuning?: Record<string, number | string>;
   /** The picture the device keeps (and its depth is in the hash), absent when it keeps none or does not know it. */
@@ -41,6 +43,7 @@ export function displayHello(value: unknown): DisplayHello {
       !Array.isArray(h.depths) || !h.depths.length || h.depths.some((d) => ![1, 2, 4].includes(d)) ||
       !Array.isArray(h.modes) || h.modes.some((m) => !(DISPLAY_MODES as readonly string[]).includes(m)) || !h.modes.includes('full') ||
       !Array.isArray(h.partial_depths) || h.partial_depths.some((d) => !h.depths.includes(d)) ||
+      (h.full_area !== undefined && (!Array.isArray(h.full_area) || h.full_area.some((d) => !h.depths.includes(d)))) ||
       !Number.isInteger(h.full_every) || h.full_every < 0 || h.full_every > 250 ||
       (h.colors !== undefined && (!Array.isArray(h.colors) || h.colors.join(',') !== 'black,white,red,yellow'))) throw new Error('The display firmware sent invalid panel limits');
   return h;
@@ -78,7 +81,7 @@ export class DisplayClient {
   }
   private finish(r: CborMap): CborMap {
     if (!['full', 'partial', 'partial_all', 'inverse', 'passes', 'none'].includes(String(r.mode)) ||
-        !['asked', 'changed', 'unchanged', 'first', 'refused', 'cut', 'failed', 'memory', 'depth', 'board', 'cleanup', 'large'].includes(String(r.why)) ||
+        !['asked', 'changed', 'unchanged', 'first', 'refused', 'cut', 'failed', 'memory', 'depth', 'board', 'cleanup', 'large', 'area'].includes(String(r.why)) ||
         ![1, 2, 4].includes(Number(r.depth)) || ['ms', 'x', 'y', 'w', 'h'].some((k) => typeof r[k] !== 'number' || !Number.isSafeInteger(r[k]) || Number(r[k]) < 0)) throw new Error('Invalid display answer; check the panel before sending again');
     return r;
   }
@@ -89,7 +92,12 @@ const reasons: Record<string, string> = {
   refused: 'recovering after a refused transfer', cut: 'recovering after an interrupted transfer', failed: 'recovering after a panel failure',
   memory: 'no memory for the previous frame', depth: 'the bit depth changed', board: 'this panel needs a full refresh', cleanup: 'the periodic full refresh',
   large: 'too much changed for a partial update: refreshed the whole panel',
+  area: 'refreshed this area fully',
 };
+/** The depths a rectangle can be sent at: those of partial updates and those of a rectangle's full refresh. */
+export function areaDepths(hello: DisplayHello): number[] {
+  return [...new Set([...hello.partial_depths, ...(hello.full_area ?? [])])].sort((a, b) => a - b);
+}
 export function displayAnswer(r: CborMap): string {
   const modes: Record<string, string> = { full: 'Full refresh', partial: 'Changed area refreshed', partial_all: 'Whole area refreshed', inverse: 'Inverse then picture refreshed', passes: 'Repeated area refresh', none: 'No refresh needed' };
   return `${modes[String(r.mode)] ?? String(r.mode)}: ${reasons[String(r.why)] ?? String(r.why)} (${r.ms} ms).${r.warn ? ` Check the panel: ${r.warn}.` : ''}${r.ckv && typeof r.ckv === 'object' && 'ok' in r.ckv && r.ckv.ok === false ? ' The panel clock check failed; inspect the panel.' : ''}`;

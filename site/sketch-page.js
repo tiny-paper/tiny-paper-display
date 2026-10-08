@@ -5,7 +5,7 @@
 // Every failure ends as plain words on the page.
 import { DisplayLink } from './bt-setup.js';
 import {
-  BRUSH_NAMES, DEBUG_DEFAULTS, DisplayClient, FULL_AFTER, MOCK_PANELS, MockDisplayDevice, SketchPen, checkSketch, displayHello, parseDebug,
+  BRUSH_NAMES, DEBUG_DEFAULTS, DisplayClient, areaDepths, FULL_AFTER, MOCK_PANELS, MockDisplayDevice, SketchPen, checkSketch, displayHello, parseDebug,
   reportText, sketchInk, sketchSession, testOf, testPlan, tuningRequest, tuningResults,
 } from './sketch.js';
 
@@ -151,14 +151,14 @@ export function startSketchPage(env) {
   /** The depth strokes go out at: the Debug depth, else 1 bit where the device does partial updates at it (the best looking and fastest on the X), grays when asked for. */
   const depthFor = (hello) => {
     if (state.dbg.depth !== null) return state.dbg.depth;
-    const d = hello.partial_depths || [];
+    const d = areaDepths(hello);
     return state.grays && d.some((x) => x > 1) ? Math.max(...d) : d.includes(1) ? 1 : undefined;
   };
   function show(hello, client, note = '') {
     const prev = state.sender;
     const sender = sketchSession(hello, depthFor(hello));
     if (prev && prev !== sender && prev.model.w === sender.model.w && prev.model.h === sender.model.h) sender.model.adopt(prev.model); // another depth: the same drawing
-    const gray = (hello.partial_depths || []).some((x) => x > 1) && !hello.colors;
+    const gray = areaDepths(hello).some((x) => x > 1) && !hello.colors;
     $('graysrow').hidden = !gray;
     $('grays').checked = state.grays;
     const pen = new SketchPen(sender);

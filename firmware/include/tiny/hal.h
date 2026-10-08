@@ -211,6 +211,13 @@ bool hal_panel_gray_partial(void);
 /* Of `depths` (bit0 = 1, bit1 = 2, bit2 = 4 bit), those a partial refresh takes right now: a setting that lasts until
  * the next restart may take some away (TRMNL X, tuning key `driver`: plain has no gray partial). Other boards: depths. */
 uint8_t hal_panel_partial_now(uint8_t depths);
+/* A full refresh of one rectangle alone (TRMNL X with the tuning key `driver` plain: the panel library's full update
+ * takes a rectangle). hal_panel_full_area_now: of `depths`, those it is on offer at right now (other boards: 0).
+ * hal_panel_full_area: after hal_panel_begin(depth, HAL_REFRESH_FULL) and before the refresh; the whole picture is
+ * written as for any full refresh, the refresh then clears and drives only the rectangle (x and w multiples of 8,
+ * h at least 2), the rest of the panel stays as it is. HAL_E_FAIL: not on offer, nothing set. */
+uint8_t hal_panel_full_area_now(uint8_t depths);
+int hal_panel_full_area(const tiny_rect_t *r);
 
 /* Panel tuning for experiments from a host (TRMNL X; usbdisp `set { tuning }`): the driver's knobs of the `!tp` console
  * commands as named integers, each with its range and default. A value applies from the next refresh and is NOT stored

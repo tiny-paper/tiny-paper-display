@@ -160,6 +160,11 @@ uint8_t usbdisp_pdepths(const usbdisp_t *d)
     return d->c.partial_now ? (uint8_t)(d->c.partial_depths & d->c.partial_now(d->c.ctx, d->c.partial_depths)) : d->c.partial_depths;
 }
 
+uint8_t usbdisp_fadepths(const usbdisp_t *d)
+{
+    return d->c.full_area_now && d->c.panel_area && !d->c.bwry ? (uint8_t)(d->c.depths & d->c.full_area_now(d->c.ctx, d->c.depths)) : 0;
+}
+
 /* partial_max: { "2": px, "4": px } the most pixels a partial update takes in its rectangle at each gray depth that has a limit */
 static size_t pmax_n(const usbdisp_t *d)
 {
@@ -216,7 +221,7 @@ static void hello(usbdisp_t *d, const link_frame_t *f)
     static const char *const bwry[] = {"black", "white", "red", "yellow"};
     cbor_w_t w;
     cbor_w_init(&w, d->tx, sizeof d->tx);
-    cbor_put_map(&w, (size_t)(13 + (d->c.bwry ? 1 : 0) + (d->c.bt_open ? 1 : 0)) + 1 + (d->fingerprint[0] != 0) + (tune_n(d) > 0) + (pmax_n(d) > 0));
+    cbor_put_map(&w, (size_t)(13 + (d->c.bwry ? 1 : 0) + (d->c.bt_open ? 1 : 0)) + 1 + (d->fingerprint[0] != 0) + (tune_n(d) > 0) + (pmax_n(d) > 0) + (usbdisp_fadepths(d) != 0));
     cbor_put_str(&w, "proto");
     cbor_put_uint(&w, LINK_PROTO);
     cbor_put_str(&w, "project");
@@ -284,6 +289,14 @@ static void hello(usbdisp_t *d, const link_frame_t *f)
         put_tuning(d, &w);
     if (pmax_n(d))
         put_pmax(d, &w);
+    const uint8_t fa = usbdisp_fadepths(d);
+    if (fa) { /* full_area: [depths] a rectangle's full refresh is on offer at */
+        cbor_put_str(&w, "full_area");
+        cbor_put_array(&w, (size_t)((fa & 1) + (fa >> 1 & 1) + (fa >> 2 & 1)));
+        for (unsigned b = 0; b < 3; b++)
+            if (fa >> b & 1)
+                cbor_put_uint(&w, 1u << b);
+    }
     usbdisp_send(d, f, &w);
 }
 

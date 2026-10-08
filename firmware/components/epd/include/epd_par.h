@@ -131,6 +131,10 @@ const epd_scan_stats_t *epdp_last_scan(epd_scan_cfg_t *used, bool *skipped);
  * epdp_partial is one library partial update over the rows given (kick, extra, redrive, rows, drive, scan and work
  * do nothing; a rails hold time is the library's keep-on), epdp_full one library full update, epdp_gray_partial answers EPDP_E_STATE. */
 int epdp_set_driver(int driver);
+/* Under plain only (else EPDP_E_STATE): a full refresh of the rectangle x, y, w, h alone, one library fullUpdate
+ * with it. The buffer holds the picture at the active depth as for epdp_full (whole rows are read in the rows of
+ * the rectangle). w and h at least 2. */
+int epdp_full_rect(int clear_mode, int x, int y, int w, int h);
 int epdp_driver(void); /* of the last update (before the open: as set) */
 /* LCD bus before epdp_open_trmnl_x: hz with hardware chip select (default EPDP_BUS_HW_CS, FastEPD 8f76e90's TRMNL X
  * setting), 10..40 MHz, or 0 = FastEPD 8dc8c74 as stock pins it (20 MHz, SPH by software from the DMA interrupt). */

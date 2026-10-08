@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { startSketchPage } from '../sketch-page.js';
-import { fingerprintOf, testPlan } from '../sketch.js';
+import { DEBUG_DEFAULTS, MockDisplayDevice, areaDepths, checkSketch, fingerprintOf, sketchInk, testPlan } from '../sketch.js';
 import { inflateSync } from 'node:zlib';
 import { FakeImageData, fakeDocument, pointer } from './fake-dom.mjs';
 import { fakeDisplay } from './fake-display.mjs';
@@ -750,11 +750,29 @@ test('The fingerprint of the page is the one of the spec: the vectors', async ()
   assert.ok(n >= 6);
 });
 
+test('A device that refreshes an area fully at 4 bit and partially at 1 bit only takes strokes at 4 bit', () => {
+  const hello = { ...new MockDisplayDevice('x').hello, partial_depths: [1], full_area: [1, 2, 4] };
+  assert.deepEqual(areaDepths(hello), [1, 2, 4]);
+  assert.equal(sketchInk(hello, 4).depth, 4);
+  assert.equal(checkSketch({ depth: 4 }, hello, DEBUG_DEFAULTS).results[0].applied, true);
+  const none = { ...hello, full_area: undefined };
+  assert.equal(sketchInk(none, 4).depth, 1);
+  assert.equal(checkSketch({ depth: 4 }, none, DEBUG_DEFAULTS).results[0].applied, false);
+});
+
 test('A full refresh the device chose because too much changed is said in words, not as an invalid answer', async () => {
   const { dev, el, stroke } = await connected(495, XDEV);
   dev.refuse = { mode: 'full', why: 'large', depth: 4, ms: 2585, x: 0, y: 0, w: 1872, h: 495 };
   stroke([[300, 200], [340, 240]]);
   await until('the answer', () => /too much changed for a partial update: refreshed the whole panel/.test(el('status').textContent));
+  assert.equal(el('status').dataset.state, 'ok');
+});
+
+test('A full refresh of the stroke\'s area alone is said in words, not as an invalid answer', async () => {
+  const { dev, el, stroke } = await connected(495, XDEV);
+  dev.refuse = { mode: 'full', why: 'area', depth: 4, ms: 1700, x: 496, y: 96, w: 72, h: 72 };
+  stroke([[500, 100], [560, 160]]);
+  await until('the answer', () => /Full refresh: refreshed this area fully/.test(el('status').textContent));
   assert.equal(el('status').dataset.state, 'ok');
 });
 

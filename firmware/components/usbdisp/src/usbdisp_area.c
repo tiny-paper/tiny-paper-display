@@ -19,6 +19,9 @@ int usbdisp_mode_check(const usbdisp_t *d, usbdisp_mode_t m, bool area, uint8_t 
     if (!area && (m == USBDISP_MODE_AUTO || m == USBDISP_MODE_FULL))
         return 0; /* a whole picture: every board shows it */
     const uint8_t pd = usbdisp_pdepths(d);
+    /* a rectangle at a depth with a full refresh of a rectangle alone: shown without a mode, or with full */
+    if (area && (m == USBDISP_MODE_AUTO || m == USBDISP_MODE_FULL) && depth && (usbdisp_fadepths(d) & depth))
+        return 0;
     *why = msg;
     if (!pd) {
         *why = "this board has no partial refresh: send the whole picture, without a mode or with full";
@@ -258,7 +261,9 @@ void usbdisp_show_end(usbdisp_t *d, const link_frame_t *f)
     int err = usbdisp_head_check(d, d->png, d->size, &pi, &why);
     const uint8_t depth = pi.depth;
     /* the frame is kept, and compared with, only at a depth the panel refreshes partially */
-    const bool keep = !err && !d->c.bwry && (usbdisp_pdepths(d) & depth);
+    const uint8_t fa = usbdisp_fadepths(d);
+    const bool part = usbdisp_pdepths(d) & depth; /* a partial refresh at this depth */
+    const bool keep = !err && !d->c.bwry && ((usbdisp_pdepths(d) | fa) & depth);
     bool have = keep && d->prev && d->prev_depth == depth;
     tiny_rect_t whole = {0, 0, d->c.w, d->c.h}, r = whole;
     if (area)
@@ -315,10 +320,16 @@ void usbdisp_show_end(usbdisp_t *d, const link_frame_t *f)
      * copies of its pixels (usbdisp.h USBDISP_GRAY_PARTIAL_MAX_PX) is a full refresh, or with `partial` named a refusal */
     tiny_rect_t chg = {0, 0, 0, 0};
     bool chg_found = false;
+    /* a full refresh of one rectangle alone (cfg panel_area), where the rest of the panel is known: the changed
+     * rectangle at a depth without a partial refresh, or the rectangle sent with `full` */
+    bool rect_full = false;
+    tiny_rect_t fr = whole;
     if (!err && run == USBDISP_MODE_PARTIAL) {
         chg_found = changed_rect(d, d->prev, next, stride, depth, &chg);
         if (!chg_found) {
             run = USBDISP_MODE_NONE, because = "unchanged";
+        } else if (!part) {
+            run = USBDISP_MODE_FULL, because = "area", rect_full = true, fr = chg;
         } else if (depth > 1 && d->c.gray_partial_max_px && (uint32_t)chg.w * chg.h > d->c.gray_partial_max_px) {
             if (mode == USBDISP_MODE_PARTIAL) {
                 snprintf(msg, sizeof msg, "a partial update at %u bit takes at most %lu changed pixels in its rectangle, this one has %lu: use full",
@@ -329,13 +340,23 @@ void usbdisp_show_end(usbdisp_t *d, const link_frame_t *f)
             }
         }
     }
+    else if (!err && run == USBDISP_MODE_FULL && mode == USBDISP_MODE_FULL && area && have && (fa & depth)) {
+        because = "area", rect_full = true, fr = r;
+    }
+    if (rect_full && fr.h < 2) { /* a panel takes no rectangle one row high: the row below it too, or the one above */
+        if (fr.y + 2 > d->c.h)
+            fr.y--;
+        fr.h = 2;
+    }
     uint32_t ms = 0;
     const uint32_t pre_ms = (uint32_t)((d->c.now_us(d->c.ctx) - t_pre) / 1000);
     tiny_rect_t drv = whole;
     if (!err && run == USBDISP_MODE_NONE) {
         drv = (tiny_rect_t){0, 0, 0, 0};
     } else if (!err && run == USBDISP_MODE_FULL) {
-        if (usbdisp_panel_full(d, depth, true, next, NULL, stride, &ms, &why))
+        if (rect_full)
+            drv = fr;
+        if (usbdisp_panel_full(d, depth, true, next, NULL, stride, rect_full ? &fr : NULL, &ms, &why))
             err = USBDISP_E_IO;
     } else if (!err && run == USBDISP_MODE_PARTIAL) {
         drv = chg;
@@ -362,7 +383,7 @@ void usbdisp_show_end(usbdisp_t *d, const link_frame_t *f)
     if (run == USBDISP_MODE_NONE) {
         d->c.free(d->c.ctx, next);
     } else {
-        d->since_full = run == USBDISP_MODE_FULL ? 0 : (uint8_t)(d->since_full < UINT8_MAX ? d->since_full + 1 : UINT8_MAX);
+        d->since_full = run == USBDISP_MODE_FULL && !rect_full ? 0 : (uint8_t)(d->since_full < UINT8_MAX ? d->since_full + 1 : UINT8_MAX);
         if (keep) {
             if (d->prev)
                 d->c.free(d->c.ctx, d->prev);
@@ -393,7 +414,7 @@ void usbdisp_clear(usbdisp_t *d, const link_frame_t *f)
     memset(band, 0xFF, bytes);
     uint32_t ms = 0;
     const char *why = "";
-    int rc = usbdisp_panel_full(d, depth, false, NULL, band, stride, &ms, &why);
+    int rc = usbdisp_panel_full(d, depth, false, NULL, band, stride, NULL, &ms, &why);
     d->c.free(d->c.ctx, band);
     if (rc) {
         usbdisp_refuse(d, f, USBDISP_E_IO, why, NULL, 0);

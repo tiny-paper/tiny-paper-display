@@ -2,15 +2,20 @@
  * SPDX-License-Identifier: GPL-3.0-or-later */
 #include "usbdisp_priv.h"
 
-/* The rows of `frame` (the whole picture), or with frame NULL `band` again for every band (clear). */
+/* The rows of `frame` (the whole picture), or with frame NULL `band` again for every band (clear). area: the refresh
+ * clears and drives this rectangle alone (cfg panel_area), the picture is written whole all the same. */
 int usbdisp_panel_full(usbdisp_t *d, uint8_t depth, bool image, const uint8_t *frame, const uint8_t *band, size_t stride,
-                       uint32_t *ms, const char **why)
+                       const tiny_rect_t *area, uint32_t *ms, const char **why)
 {
     uint16_t h = d->c.h, rows = d->c.band_rows && d->c.band_rows < h ? d->c.band_rows : h;
     uint64_t t0 = d->c.now_us(d->c.ctx);
     d->in_panel = true;
     int rc = d->c.panel_begin(d->c.ctx, depth, d->c.bwry, image, USBDISP_DRIVE_FULL);
     *why = "the panel did not start";
+    if (!rc && area) {
+        rc = d->c.panel_area ? d->c.panel_area(d->c.ctx, area) : -1;
+        *why = "the panel did not take the rectangle for a full refresh";
+    }
     /* bands top first; on a rows_bottom_up board the bottom band first, each next one ending where the last began */
     for (uint32_t done = 0; !rc && done < h;) {
         uint16_t n = (uint16_t)(h - done < rows ? h - done : rows);

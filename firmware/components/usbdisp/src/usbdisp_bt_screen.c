@@ -101,7 +101,7 @@ int usbdisp_bt_screen(usbdisp_t *d, const char *title, const char *big, const ch
     uint32_t ms = 0;
     const char *why = "";
     usbdisp_prev_drop(d, "first"); /* the picture is gone: the next show is a full refresh */
-    int rc = usbdisp_panel_full(d, depth, true, px, NULL, stride, &ms, &why);
+    int rc = usbdisp_panel_full(d, depth, true, px, NULL, stride, NULL, &ms, &why);
     d->c.free(d->c.ctx, px);
     d->since_full = 0;
     if (rc)

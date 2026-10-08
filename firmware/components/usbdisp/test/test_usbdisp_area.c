@@ -309,6 +309,162 @@ static void test_gray_partial_taken_away(void)
     TEST_ASSERT_EQUAL_STRING("changed", ans_str("why"));
 }
 
+/* A panel that refreshes one rectangle fully, alone (cfg full_area_now, panel_area; the X under `driver` plain), with
+ * partial updates at 1 bit only: hello says so; a changed gray picture is one full refresh of the changed rectangle
+ * (`why: area`, the answer's area the rectangle, the rest of the glass untouched, the frame kept is the glass); a
+ * rectangle sent at 4 bit, without a mode or with full, is the same; a change one row high takes a second row; 1 bit
+ * stays a partial update, and with `full` named on a 1 bit rectangle it is the rectangle's full refresh; the first
+ * picture and the periodic full refresh are whole; a panel that refuses the rectangle fails the request; with the
+ * offer gone the old answers are back. */
+static uint8_t s_fa_mask = 7;
+static uint8_t fa_mask(void *ctx, uint8_t depths) { (void)ctx; return depths & s_fa_mask; }
+
+static void area_device(uint8_t every)
+{
+    device_partial(W, H, 7, 7, true, every);
+    s_now_mask = 1, s_fa_mask = 7;
+    C.partial_now = now_mask;
+    C.full_area_now = fa_mask;
+    C.panel_area = f_area;
+    usbdisp_init(&D, &C);
+}
+
+static void test_full_refresh_of_a_rectangle(void)
+{
+    area_device(0);
+    const uint8_t *v;
+    size_t vn;
+    cbor_r_t rd;
+    cbor_item_t it;
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_HELLO, NULL, 0));
+    TEST_ASSERT_TRUE(cbor_map_get(s_ans, s_ans_len, "full_area", 9, &v, &vn));
+    cbor_r_init(&rd, v, vn);
+    TEST_ASSERT_TRUE(cbor_read(&rd, &it) && it.type == CBOR_ARRAY && it.u == 3);
+    /* the first picture: whole */
+    random_px(s_want, W * H, 4);
+    size_t n = make_png(s_png, W, H, 4, 0, s_want);
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    TEST_ASSERT_EQUAL_STRING("first", ans_str("why"));
+    TEST_ASSERT_EQUAL_INT(0, F.area_fulls);
+    /* a change: the changed rectangle alone, fully */
+    s_want[5 * W + 13] ^= 5;
+    s_want[7 * W + 30] ^= 9;
+    n = make_png(s_png, W, H, 4, 0, s_want);
+    int partials = F.partials;
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    TEST_ASSERT_EQUAL_STRING("full", ans_str("mode"));
+    TEST_ASSERT_EQUAL_STRING("area", ans_str("why"));
+    TEST_ASSERT_EQUAL_INT(8, map_int(s_ans, s_ans_len, "x", -1));
+    TEST_ASSERT_EQUAL_INT(24, map_int(s_ans, s_ans_len, "w", -1));
+    TEST_ASSERT_EQUAL_INT(5, map_int(s_ans, s_ans_len, "y", -1));
+    TEST_ASSERT_EQUAL_INT(3, map_int(s_ans, s_ans_len, "h", -1));
+    TEST_ASSERT_EQUAL_INT(1, F.area_fulls);
+    TEST_ASSERT_EQUAL_INT(partials, F.partials);
+    TEST_ASSERT_EQUAL_INT(8, F.area.x);
+    TEST_ASSERT_EQUAL_INT(3, F.area.h);
+    expect_shown(4, "changed rectangle, full");
+    /* one row changed: two rows driven */
+    s_want[(H - 1) * W + 3] ^= 5;
+    n = make_png(s_png, W, H, 4, 0, s_want);
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    TEST_ASSERT_EQUAL_STRING("area", ans_str("why"));
+    TEST_ASSERT_EQUAL_INT(H - 2, map_int(s_ans, s_ans_len, "y", -1));
+    TEST_ASSERT_EQUAL_INT(2, map_int(s_ans, s_ans_len, "h", -1));
+    expect_shown(4, "one changed row at the bottom");
+    /* a rectangle sent at 4 bit: without a mode its changed part, with full all of it */
+    random_px(s_box, 16 * 6, 4);
+    for (int j = 0; j < 6; j++)
+        memcpy(s_want + (size_t)(4 + j) * W + 16, s_box + j * 16, 16);
+    n = make_png(s_png, 16, 6, 4, 0, s_box);
+    TEST_ASSERT_EQUAL_INT(0, show_at(s_png, n, 512, 16, 4, NULL, 0));
+    TEST_ASSERT_EQUAL_STRING("full", ans_str("mode"));
+    TEST_ASSERT_EQUAL_STRING("area", ans_str("why"));
+    expect_shown(4, "rectangle, no mode");
+    random_px(s_box, 16 * 6, 4);
+    for (int j = 0; j < 6; j++)
+        memcpy(s_want + (size_t)(4 + j) * W + 16, s_box + j * 16, 16);
+    n = make_png(s_png, 16, 6, 4, 0, s_box);
+    TEST_ASSERT_EQUAL_INT(0, show_at(s_png, n, 512, 16, 4, "full", 0));
+    TEST_ASSERT_EQUAL_STRING("area", ans_str("why"));
+    TEST_ASSERT_EQUAL_INT(16, map_int(s_ans, s_ans_len, "x", -1));
+    TEST_ASSERT_EQUAL_INT(4, map_int(s_ans, s_ans_len, "y", -1));
+    TEST_ASSERT_EQUAL_INT(16, map_int(s_ans, s_ans_len, "w", -1));
+    TEST_ASSERT_EQUAL_INT(6, map_int(s_ans, s_ans_len, "h", -1));
+    expect_shown(4, "rectangle, full named");
+    /* `partial` named at 4 bit is still refused in words */
+    s_want[2 * W + 2] ^= 3;
+    n = make_png(s_png, W, H, 4, 0, s_want);
+    TEST_ASSERT_EQUAL_INT(USBDISP_E_MODE, show_at(s_png, n, 512, -1, 0, "partial", 0));
+    TEST_ASSERT_NOT_NULL(strstr(ans_str("msg"), "4 bit"));
+
+    /* 1 bit: changed pixels are a partial update; a rectangle with full named is the rectangle's full refresh */
+    area_device(0);
+    random_px(s_want, W * H, 1);
+    TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+    s_want[5 * W + 13] ^= 1;
+    int areas = F.area_fulls;
+    TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+    TEST_ASSERT_EQUAL_STRING("partial", ans_str("mode"));
+    TEST_ASSERT_EQUAL_INT(areas, F.area_fulls);
+    TEST_ASSERT_EQUAL_INT(0, show_box(8, 2, 16, 4, "full", 0, true));
+    TEST_ASSERT_EQUAL_STRING("full", ans_str("mode"));
+    TEST_ASSERT_EQUAL_STRING("area", ans_str("why"));
+    TEST_ASSERT_EQUAL_INT(areas + 1, F.area_fulls);
+    expect_shown(1, "1 bit rectangle, full named");
+    /* a whole picture with full named is the whole panel, as asked */
+    TEST_ASSERT_EQUAL_INT(0, show_want("full", 0));
+    TEST_ASSERT_EQUAL_STRING("asked", ans_str("why"));
+    TEST_ASSERT_EQUAL_INT(areas + 1, F.area_fulls);
+
+    /* the periodic full refresh is whole, and a rectangle's full refresh does not put it off */
+    area_device(2);
+    random_px(s_want, W * H, 4);
+    n = make_png(s_png, W, H, 4, 0, s_want);
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    for (int k = 0; k < 2; k++) {
+        s_want[5 * W + 13 + k] ^= 5;
+        n = make_png(s_png, W, H, 4, 0, s_want);
+        TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+        TEST_ASSERT_EQUAL_STRING("area", ans_str("why"));
+    }
+    s_want[5 * W + 20] ^= 5;
+    n = make_png(s_png, W, H, 4, 0, s_want);
+    areas = F.area_fulls;
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    TEST_ASSERT_EQUAL_STRING("cleanup", ans_str("why"));
+    TEST_ASSERT_EQUAL_INT(areas, F.area_fulls);
+
+    /* the panel refuses the rectangle: the request fails, the frame is forgotten, the next picture is whole */
+    area_device(0);
+    random_px(s_want, W * H, 4);
+    n = make_png(s_png, W, H, 4, 0, s_want);
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    s_want[5 * W + 13] ^= 5;
+    n = make_png(s_png, W, H, 4, 0, s_want);
+    F.fail_begin = 0;
+    s_fa_mask = 7;
+    F.fail_refresh = 1;
+    TEST_ASSERT_EQUAL_INT(USBDISP_E_IO, show(s_png, n, 512));
+    TEST_ASSERT_NULL(usbdisp_prev(&D, NULL));
+    F.fail_refresh = 0;
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    TEST_ASSERT_EQUAL_STRING("full", ans_str("mode"));
+    TEST_ASSERT_EQUAL_STRING("failed", ans_str("why"));
+
+    /* the offer gone (the key back to ours, gray partial back): a partial update again */
+    area_device(0);
+    s_now_mask = 7, s_fa_mask = 0;
+    random_px(s_want, W * H, 4);
+    n = make_png(s_png, W, H, 4, 0, s_want);
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    s_want[5 * W + 13] ^= 5;
+    n = make_png(s_png, W, H, 4, 0, s_want);
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    TEST_ASSERT_EQUAL_STRING("partial", ans_str("mode"));
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_HELLO, NULL, 0));
+    TEST_ASSERT_FALSE(cbor_map_get(s_ans, s_ans_len, "full_area", 9, &v, &vn));
+}
+
 /* A gray partial keeps copies of its rectangle in RAM: the most pixels it takes is a limit of the board (usbdisp.h). Auto
  * chooses a full refresh for a larger change, and says why; `partial` named is refused before the panel is touched; a
  * single large rectangle is judged the same; a change under the limit is still a partial update. */
@@ -639,6 +795,7 @@ int main(void)
     RUN_TEST(test_board_without_partial_all);
     RUN_TEST(test_gray_partial);
     RUN_TEST(test_gray_partial_taken_away);
+    RUN_TEST(test_full_refresh_of_a_rectangle);
     RUN_TEST(test_gray_partial_too_large);
     RUN_TEST(test_gray_panel_failure_forgets_the_frame);
     RUN_TEST(test_cut_transfer_then_full);

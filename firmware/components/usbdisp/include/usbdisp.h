@@ -115,6 +115,13 @@ typedef struct {
      * away while it lasts (TRMNL X, tuning key `driver`). hello, the modes and the choice of refresh follow it: a depth
      * taken away is a full refresh (`why: "depth"`), or with `partial` named a refusal. NULL: partial_depths always. */
     uint8_t (*partial_now)(void *ctx, uint8_t depths);
+    /* optional, both or none: a full refresh of one rectangle alone (TRMNL X, tuning key `driver` plain). full_area_now:
+     * of `depths`, those it is on offer at right now. panel_area: between panel_begin (full) and the rows, the rectangle
+     * the refresh clears and drives; the whole picture is still written. hello lists the depths as `full_area`; a changed
+     * rectangle at such a depth without a partial refresh, and a rectangle sent with `full`, is then that one call
+     * (`mode: "full"`, `why: "area"`, the answer's area the rectangle). */
+    uint8_t (*full_area_now)(void *ctx, uint8_t depths);
+    int (*panel_area)(void *ctx, const tiny_rect_t *r);
     bool partial_all;           /* the panel can drive every pixel of a window: partial_all, passes */
     /* a gray partial (depth 2, 4) keeps old and new copies of its rectangle in RAM: its changed rectangle may have at most
      * this many pixels (0: no limit). A larger change is a full refresh (`why: "large"`), or with `partial` named a refusal. */

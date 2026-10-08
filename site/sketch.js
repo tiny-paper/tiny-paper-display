@@ -47,7 +47,7 @@ var DisplayError = class extends Error {
 function displayHello(value) {
   const h = value;
   if (!h || h.project !== "display") throw new Error("The connected device does not run the display firmware");
-  if (typeof h.board !== "string" || typeof h.fw !== "string" || h.proto !== 1 || !Number.isInteger(h.w) || !Number.isInteger(h.h) || h.w < 1 || h.h < 1 || h.w * h.h > 4194304 || !Number.isInteger(h.max_png) || h.max_png < 57 || h.max_png > 1319644 || h.max_payload !== 6144 || h.chunk !== 4096 || !Array.isArray(h.depths) || !h.depths.length || h.depths.some((d) => ![1, 2, 4].includes(d)) || !Array.isArray(h.modes) || h.modes.some((m) => !DISPLAY_MODES.includes(m)) || !h.modes.includes("full") || !Array.isArray(h.partial_depths) || h.partial_depths.some((d) => !h.depths.includes(d)) || !Number.isInteger(h.full_every) || h.full_every < 0 || h.full_every > 250 || h.colors !== void 0 && (!Array.isArray(h.colors) || h.colors.join(",") !== "black,white,red,yellow")) throw new Error("The display firmware sent invalid panel limits");
+  if (typeof h.board !== "string" || typeof h.fw !== "string" || h.proto !== 1 || !Number.isInteger(h.w) || !Number.isInteger(h.h) || h.w < 1 || h.h < 1 || h.w * h.h > 4194304 || !Number.isInteger(h.max_png) || h.max_png < 57 || h.max_png > 1319644 || h.max_payload !== 6144 || h.chunk !== 4096 || !Array.isArray(h.depths) || !h.depths.length || h.depths.some((d) => ![1, 2, 4].includes(d)) || !Array.isArray(h.modes) || h.modes.some((m) => !DISPLAY_MODES.includes(m)) || !h.modes.includes("full") || !Array.isArray(h.partial_depths) || h.partial_depths.some((d) => !h.depths.includes(d)) || h.full_area !== void 0 && (!Array.isArray(h.full_area) || h.full_area.some((d) => !h.depths.includes(d))) || !Number.isInteger(h.full_every) || h.full_every < 0 || h.full_every > 250 || h.colors !== void 0 && (!Array.isArray(h.colors) || h.colors.join(",") !== "black,white,red,yellow")) throw new Error("The display firmware sent invalid panel limits");
   return h;
 }
 var DisplayClient = class {
@@ -86,7 +86,7 @@ var DisplayClient = class {
     });
   }
   finish(r) {
-    if (!["full", "partial", "partial_all", "inverse", "passes", "none"].includes(String(r.mode)) || !["asked", "changed", "unchanged", "first", "refused", "cut", "failed", "memory", "depth", "board", "cleanup", "large"].includes(String(r.why)) || ![1, 2, 4].includes(Number(r.depth)) || ["ms", "x", "y", "w", "h"].some((k) => typeof r[k] !== "number" || !Number.isSafeInteger(r[k]) || Number(r[k]) < 0)) throw new Error("Invalid display answer; check the panel before sending again");
+    if (!["full", "partial", "partial_all", "inverse", "passes", "none"].includes(String(r.mode)) || !["asked", "changed", "unchanged", "first", "refused", "cut", "failed", "memory", "depth", "board", "cleanup", "large", "area"].includes(String(r.why)) || ![1, 2, 4].includes(Number(r.depth)) || ["ms", "x", "y", "w", "h"].some((k) => typeof r[k] !== "number" || !Number.isSafeInteger(r[k]) || Number(r[k]) < 0)) throw new Error("Invalid display answer; check the panel before sending again");
     return r;
   }
   clear() {
@@ -105,8 +105,12 @@ var reasons = {
   depth: "the bit depth changed",
   board: "this panel needs a full refresh",
   cleanup: "the periodic full refresh",
-  large: "too much changed for a partial update: refreshed the whole panel"
+  large: "too much changed for a partial update: refreshed the whole panel",
+  area: "refreshed this area fully"
 };
+function areaDepths(hello) {
+  return [.../* @__PURE__ */ new Set([...hello.partial_depths, ...hello.full_area ?? []])].sort((a, b) => a - b);
+}
 function displayAnswer(r) {
   const modes = { full: "Full refresh", partial: "Changed area refreshed", partial_all: "Whole area refreshed", inverse: "Inverse then picture refreshed", passes: "Repeated area refresh", none: "No refresh needed" };
   return `${modes[String(r.mode)] ?? String(r.mode)}: ${reasons[String(r.why)] ?? String(r.why)} (${r.ms} ms).${r.warn ? ` Check the panel: ${r.warn}.` : ""}${r.ckv && typeof r.ckv === "object" && "ok" in r.ckv && r.ckv.ok === false ? " The panel clock check failed; inspect the panel." : ""}`;
@@ -176,7 +180,7 @@ var CELL = 64;
 function sketchInk(hello, forceDepth) {
   const partial = hello.modes.includes("partial") && hello.partial_depths.length > 0;
   const color = !partial && !!hello.colors;
-  const depth = partial ? forceDepth !== void 0 && hello.partial_depths.includes(forceDepth) ? forceDepth : Math.max(...hello.partial_depths) : color ? 2 : Math.max(...hello.depths);
+  const depth = partial ? forceDepth !== void 0 && areaDepths(hello).includes(forceDepth) ? forceDepth : Math.max(...areaDepths(hello)) : color ? 2 : Math.max(...hello.depths);
   const max = (1 << depth) - 1;
   const swatches = [];
   if (color) {
@@ -1390,14 +1394,14 @@ function checkSketch(sketch, hello, current) {
     if (d === null || d === "auto") {
       next.depth = null;
       ok("depth", "the deepest depth the device updates partially at");
-    } else if (!hello.partial_depths.length) refuse("depth", "this device has no partial updates");
-    else if (typeof d !== "number" || !hello.partial_depths.includes(d)) refuse("depth", `the device does partial updates at ${hello.partial_depths.join(", ")} bit only`);
+    } else if (!areaDepths(hello).length) refuse("depth", "this device has no partial updates");
+    else if (typeof d !== "number" || !areaDepths(hello).includes(d)) refuse("depth", `the device updates an area at ${areaDepths(hello).join(", ")} bit only`);
     else {
       next.depth = d;
       ok("depth", `${d} bit`);
     }
   }
-  const depthNow = next.depth ?? (hello.partial_depths.length ? Math.max(...hello.partial_depths) : 0);
+  const depthNow = next.depth ?? (areaDepths(hello).length ? Math.max(...areaDepths(hello)) : 0);
   if (has("mode")) {
     const m = sketch.mode;
     const modes = hello.modes.filter((x) => x !== "none");
@@ -1527,6 +1531,7 @@ export {
   X_KNOBS,
   alignRect,
   applyTuning,
+  areaDepths,
   checkSketch,
   cleanMode,
   displayAnswer,

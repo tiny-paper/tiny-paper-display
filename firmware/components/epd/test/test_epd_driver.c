@@ -53,6 +53,22 @@ static void test_plain_installs_nothing_of_ours(void)
     }
 }
 
+/* A rectangle's full refresh: under plain at every depth, never under ours; its x mirrored for a panel that sends
+ * its rows last pixel first, so the rectangle the library masks is the one asked for. */
+static void test_rectangle_full_refresh(void)
+{
+    TEST_ASSERT_EQUAL_HEX8(7, epd_driver_full_area_depths(EPD_DRIVER_PLAIN, 7));
+    TEST_ASSERT_EQUAL_HEX8(0, epd_driver_full_area_depths(EPD_DRIVER_OURS, 7));
+    TEST_ASSERT_EQUAL_HEX8(0, epd_driver_full_area_depths(9, 7));
+    TEST_ASSERT_EQUAL_INT(64, epd_driver_lib_rect_x(1872, false, 64, 32));
+    TEST_ASSERT_EQUAL_INT(1872 - 64 - 32, epd_driver_lib_rect_x(1872, true, 64, 32));
+    TEST_ASSERT_EQUAL_INT(0, epd_driver_lib_rect_x(1872, true, 0, 1872));
+    TEST_ASSERT_EQUAL_INT(1864, epd_driver_lib_rect_x(1872, true, 0, 8));
+    /* mirrored twice is where it started */
+    for (int x = 0; x + 40 <= 1872; x += 8)
+        TEST_ASSERT_EQUAL_INT(x, epd_driver_lib_rect_x(1872, true, epd_driver_lib_rect_x(1872, true, x, 40), 40));
+}
+
 static void test_ours_is_as_before(void)
 {
     epd_driver_parts_t p = epd_driver_parts(EPD_DRIVER_OURS);
@@ -113,7 +129,11 @@ static void test_the_glue_asks_before_it_installs(void)
     /* each update leaves for the plain path before any of our driving */
     TEST_ASSERT_EQUAL_INT_MESSAGE(1, count(s, "if (!s_parts.wave) return plain_partial(y0, y1);"), "1 bit partial");
     TEST_ASSERT_EQUAL_INT_MESSAGE(1, count(s, "if (!s_parts.gray_partial) return EPDP_E_STATE;"), "gray partial");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, count(s, "if (!s_parts.row_hook) return plain_full(modes[clear_mode], clear_mode);"), "full");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, count(s, "if (!s_parts.row_hook) return plain_full(CLEAR_MODES[clear_mode], clear_mode, nullptr);"), "full");
+    /* ours: every update starts its time split (a full refresh lost its start once, when the plain path was put
+     * in front of it: the split of a full refresh then added up over updates) */
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, count(s, "    split_begin();\n    rows_begin(false);"), "ours full: split");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(5, count(s, "split_begin();"), "an update without the start of its time split");
     /* and the plain paths are one public call each */
     const char *a = strstr(s, "/* plain: begin */"), *b = strstr(s, "/* plain: end */");
     TEST_ASSERT_NOT_NULL(a);
@@ -124,6 +144,10 @@ static void test_the_glue_asks_before_it_installs(void)
     memcpy(plain, a, (size_t)(b - a));
     plain[b - a] = 0;
     TEST_ASSERT_EQUAL_INT(1, count(plain, "s_epd.fullUpdate("));
+    TEST_ASSERT_EQUAL_INT(1, count(plain, "s_epd.fullUpdate(lib_clear, false, rect)"));
+    /* a rectangle's full refresh is plain only, and its x goes through the mirror */
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, count(s, "if (s_parts.row_hook) return EPDP_E_STATE; /* plain only */"), "rectangle");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, count(s, "BB_RECT r = {epd_driver_lib_rect_x(s_epd.width(), s_epd.mirror_x(), x, w), y, w, h};"), "rectangle x");
     TEST_ASSERT_EQUAL_INT(1, count(plain, "s_epd.partialUpdate("));
     TEST_ASSERT_EQUAL_INT(1, count(plain, "s_epd.partialUpdate(keep, y0, y1)")); /* the changed rows, the library's keep-on */
     static const char *const ours[] = {"scan_partial", "scan_step", "scan_run", "scan_begin", "rows_begin",
@@ -139,6 +163,7 @@ int main(void)
     RUN_TEST(test_words_and_default);
     RUN_TEST(test_plain_installs_nothing_of_ours);
     RUN_TEST(test_ours_is_as_before);
+    RUN_TEST(test_rectangle_full_refresh);
     RUN_TEST(test_scans_of_a_library_call);
     RUN_TEST(test_the_glue_asks_before_it_installs);
     return UNITY_END();

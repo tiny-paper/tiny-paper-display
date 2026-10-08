@@ -1,6 +1,7 @@
 // The Debug section of the Sketch page, as pure functions: a pasted configuration, the per-key results, the test
 // patterns and the report a person copies into a chat. The page (sketch-page.js) wires them to its elements.
 import type { DisplayHello, DisplayMode } from './client.ts';
+import { areaDepths } from './client.ts';
 import { sketchBrushes, type Rect } from './sketchModel.ts';
 import { FULL_AFTER } from './sketchSender.ts';
 
@@ -54,11 +55,11 @@ export function checkSketch(sketch: Record<string, unknown>, hello: DisplayHello
   if (has('depth')) {
     const d = sketch.depth;
     if (d === null || d === 'auto') { next.depth = null; ok('depth', 'the deepest depth the device updates partially at'); }
-    else if (!hello.partial_depths.length) refuse('depth', 'this device has no partial updates');
-    else if (typeof d !== 'number' || !hello.partial_depths.includes(d)) refuse('depth', `the device does partial updates at ${hello.partial_depths.join(', ')} bit only`);
+    else if (!areaDepths(hello).length) refuse('depth', 'this device has no partial updates');
+    else if (typeof d !== 'number' || !areaDepths(hello).includes(d)) refuse('depth', `the device updates an area at ${areaDepths(hello).join(', ')} bit only`);
     else { next.depth = d; ok('depth', `${d} bit`); }
   }
-  const depthNow = next.depth ?? (hello.partial_depths.length ? Math.max(...hello.partial_depths) : 0);
+  const depthNow = next.depth ?? (areaDepths(hello).length ? Math.max(...areaDepths(hello)) : 0);
   if (has('mode')) {
     const m = sketch.mode;
     const modes = hello.modes.filter((x) => x !== 'none');

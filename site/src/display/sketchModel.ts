@@ -2,6 +2,7 @@
 // pixel, strokes as round stamps, the rectangle changed since the last send (x and width in steps of 8), undo.
 import { DISPLAY_PALETTE } from './png.ts';
 import type { DisplayHello } from './client.ts';
+import { areaDepths } from './client.ts';
 
 export interface Rect { x: number; y: number; w: number; h: number }
 export interface Swatch { value: number; name: string; rgb: readonly [number, number, number] }
@@ -15,7 +16,7 @@ export const CELL = 64;
 export function sketchInk(hello: DisplayHello, forceDepth?: number): SketchInk {
   const partial = hello.modes.includes('partial') && hello.partial_depths.length > 0;
   const color = !partial && !!hello.colors;
-  const depth = partial ? (forceDepth !== undefined && hello.partial_depths.includes(forceDepth) ? forceDepth : Math.max(...hello.partial_depths)) : color ? 2 : Math.max(...hello.depths);
+  const depth = partial ? (forceDepth !== undefined && areaDepths(hello).includes(forceDepth) ? forceDepth : Math.max(...areaDepths(hello))) : color ? 2 : Math.max(...hello.depths);
   const max = (1 << depth) - 1;
   const swatches: Swatch[] = [];
   if (color) {

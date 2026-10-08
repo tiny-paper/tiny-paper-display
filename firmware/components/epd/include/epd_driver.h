@@ -7,7 +7,8 @@
  *   plain   the panel library's public calls only, as the stock firmware uses them: one fullUpdate for a full
  *           refresh (the gray table through setCustomMatrix), one partialUpdate for a 1 bit partial, with the
  *           library's own row control, bus, timing and power up and down (with a rails hold time: its own
- *           keep-on, brought down by the policy of epd_rails.h). No gray partial.
+ *           keep-on, brought down by the policy of epd_rails.h). No gray partial; a rectangle at any depth is
+ *           one fullUpdate with that rectangle.
  * Rule (PLAN.md "Driving the glass: library calls only"): `plain` is the way; `ours` stays until a person has
  * compared both on a panel.
  * C11. SPDX-License-Identifier: GPL-3.0-or-later
@@ -51,6 +52,15 @@ epd_driver_rows_fn *epd_driver_rows(int driver, epd_driver_rows_fn *ours, epd_dr
 uint32_t epd_driver_bus_hz(int driver, uint32_t ours_hz, uint32_t lib_hz);
 /* The depths (bit0 = 1, bit1 = 2, bit2 = 4 bit) of `depths` a partial update takes with this driver. */
 uint8_t epd_driver_partial_depths(int driver, uint8_t depths);
+
+/* The depths of `depths` at which a full refresh of a rectangle alone is on offer: the library's fullUpdate takes a
+ * rectangle (its clearing and its passes stay inside it), so under plain every depth; ours has none. */
+uint8_t epd_driver_full_area_depths(int driver, uint8_t depths);
+/* The x to hand the library for a rectangle x, w of a panel panel_w wide. Read in FastEPD 8dc8c74 (bbepFixRect,
+ * bbepClear, bbepFullUpdate): the rectangle masks the row data by its position in the data, and a panel with
+ * BB_PANEL_FLAG_MIRROR_X (the TRMNL X) sends its rows last pixel first, so the mask lands mirrored unless the x
+ * is. Not seen on a panel. */
+int epd_driver_lib_rect_x(int panel_w, bool mirror_x, int x, int w);
 
 /* The scans one library call makes, counted in FastEPD 8dc8c74 (bbepPartialUpdate, bbepFullUpdate, 1 and 4 bit):
  * a partial is its passes and one neutral scan; a full refresh its clearing scans (clear: EPDP_CLEAR_* of
