@@ -1,5 +1,5 @@
 /* Inert HAL for the host tests of the display repository (no simulator here): the symbols the core calls outside the
- * device binding, so the shared core links. Panel calls do nothing and succeed; storage is empty; the link is silent.
+ * device binding, so the shared core links. Panel calls do nothing and succeed; storage is a small in-memory store; the link is silent.
  * SPDX-License-Identifier: GPL-3.0-or-later */
 #include <stddef.h>
 #include <stdint.h>
@@ -18,9 +18,34 @@ int hal_fs_close(hal_file_t *f) { (void)f; return -1; }
 int hal_fs_rename(const char *from, const char *to) { (void)from; (void)to; return -1; }
 int hal_fs_remove(const char *path) { (void)path; return -1; }
 
-/* empty store: nothing is found, nothing is kept */
-int hal_kv_get(const char *key, void *buf, size_t cap) { (void)key; (void)buf; (void)cap; return -1; }
-int hal_kv_set(const char *key, const void *buf, size_t len) { (void)key; (void)buf; (void)len; return -1; }
+/* a small in-memory key-value store (a zero length removes a key): the settings tests need one */
+#include <string.h>
+#define KV_N 8
+#define KV_MAX 32
+static struct { char key[24]; uint8_t val[KV_MAX]; size_t len; } kv[KV_N];
+
+int hal_kv_get(const char *key, void *buf, size_t cap) {
+    for (int i = 0; i < KV_N; i++)
+        if (kv[i].len && !strcmp(kv[i].key, key)) {
+            size_t n = kv[i].len < cap ? kv[i].len : cap;
+            memcpy(buf, kv[i].val, n);
+            return (int)kv[i].len;
+        }
+    return -1;
+}
+int hal_kv_set(const char *key, const void *buf, size_t len) {
+    if (strlen(key) >= sizeof kv[0].key || len > KV_MAX) return -1;
+    int free_i = -1;
+    for (int i = 0; i < KV_N; i++) {
+        if (kv[i].len && !strcmp(kv[i].key, key)) { free_i = i; break; }
+        if (!kv[i].len && free_i < 0) free_i = i;
+    }
+    if (free_i < 0) return -1;
+    strcpy(kv[free_i].key, key);
+    if (len) memcpy(kv[free_i].val, buf, len);
+    kv[free_i].len = len;
+    return (int)len;
+}
 
 long hal_link_read(hal_link_t t, uint8_t *buf, size_t cap, uint32_t timeout_ms) {
     (void)t; (void)buf; (void)cap; (void)timeout_ms;

@@ -12,8 +12,8 @@
  *                    bitmap, two planes of counts, is kept across deep sleep in LittleFS /xfresh.bin, run-length
  *                    coded, written after a partial that changed it, removed at every full refresh).
  * Every update powers the panel rails off when done (epd_par.h).
- * Text commands (NVS keys "xpass", "xwave", "xrow", "xgpart", "xclear", "xgray2", "xevery"; all apply at the next
- * refresh, no reboot):
+ * Text commands (they apply at the next refresh, no reboot, and last until the next reset; only `gpart` is
+ * stored, NVS "dgpart", see load_cfg):
  *   !tp panel                         show the settings
  *   !tp passes <partial> <full>       FastEPD passes, 1..14 (stock 3 3). More partial passes: darker digits, less
  *                                     ghosting of the old ones; fewer: faster, more ghosting
@@ -37,7 +37,7 @@
  *   !tp bus <0|stock|mhz>             LCD bus from the next boot (NVS "xbus"): 0 = FastEPD 8f76e90's TRMNL X setting
  *                                     (26.67 MHz, hardware chip select; default), 10..40 = that clock with hardware
  *                                     chip select, stock = 8dc8c74 as stock pins it (20 MHz, SPH by software)
- *   !tp gpart <on|off> [dark] [light] gray partial (experimental, NVS "xgpart", default on): when a partial
+ *   !tp gpart <on|off> [dark] [light] gray partial (experimental, NVS "dgpart", default on): when a partial
  *                                     changes grays (depth 2/4, gray mode hybrid), the gray table runs on the
  *                                     changed pixels only (epd_parwave.h EPD_GP_*), no clearing flash, instead
  *                                     of a full refresh. dark/light 0..14 (default 0 3): frames pushing the
@@ -78,6 +78,7 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "fresh_save.h"
+#include "panel_cfg.h"
 #include "hal_esp_priv.h"
 
 #if BOARD_PANEL_FASTEPD /* whole file */
@@ -105,9 +106,6 @@ static epd_row_delay_t s_rows = {BOARD_EPD_ROW_SETTLE, BOARD_EPD_ROW_HOLD};
 static uint8_t s_drive = EPD_ROW_DRIVE_DEFAULT; /* NVS "xdrive": fixed partial row drive, us, 0 = free */
 static uint8_t s_bus_mhz;                       /* NVS "xbus": 0 = 26.67 MHz hardware CS, 1 = stock, 10..40 MHz */
 
-typedef struct {
-    uint8_t on, dark, light; /* epdp_gray_partial */
-} gpart_cfg_t;
 static gpart_cfg_t s_gp = {1, 0, 3}; /* on by default (display firmware): hello lists the gray partial depths; "!tp gpart off" */
 /* windows of a gray partial (depth 2/4): 4 bpp copies of old and new pixels, freed after the refresh */
 #define GP_MAX 16
@@ -152,41 +150,20 @@ static const uint8_t GRAY_STOCK_TAB[] = {
 };
 _Static_assert(sizeof GRAY_FASTEPD_TAB == 16 * 8 && sizeof GRAY_STOCK_TAB == 16 * 9, "gray tables");
 
+/* The display firmware reads one stored setting, the gray partial switch (src/panel_cfg.h); every other key of the
+ * firmware this driver came from is left alone, so a board behaves the same on every device. Why, key by key:
+ *   xpass xwave xrow xdrive xbus   waveform and bus tuning of experiments: the board's own defaults are the product
+ *   xclear xgray2 xevery xsec xwinall   clear and gray table, refresh cadence, live seconds, window drive: same
+ * The console commands still change them, for the running session only. */
 static void load_cfg(void)
 {
-    pass_cfg_t p;
-    if (hal_kv_get("xpass", &p, sizeof p) == (int)sizeof p && p.partial >= 1 && p.partial <= 14 && p.full >= 1 &&
-        p.full <= 14)
-        s_pass = p;
-    wave_cfg_t w;
-    if (hal_kv_get("xwave", &w, sizeof w) == (int)sizeof w && w.kick <= 14 && w.extra <= 14 &&
-        w.redrive <= EPD_WAVE_REDRIVE_MAX)
-        s_wave = w;
+    s_gp = panel_gpart_load(s_gp);
     epdp_set_wave(s_wave.kick, s_wave.extra, s_wave.redrive);
-    gpart_cfg_t gp;
-    if (hal_kv_get("xgpart", &gp, sizeof gp) == (int)sizeof gp && gp.on <= 1 && gp.dark <= 14 && gp.light <= 14)
-        s_gp = gp;
-    epd_row_delay_t rd;
-    if (hal_kv_get("xrow", &rd, sizeof rd) == (int)sizeof rd && epd_row_delay_valid(&rd))
-        s_rows = rd;
     epdp_set_rows(s_rows.settle, s_rows.hold);
-    uint8_t v;
-    if (hal_kv_get("xdrive", &v, 1) == 1 && epd_row_drive_valid(v))
-        s_drive = v;
     epdp_set_drive(s_drive);
-    if (hal_kv_get("xbus", &v, 1) == 1 && (v <= 1 || (v >= 10 && v <= 40)))
-        s_bus_mhz = v;
     epdp_set_bus_hz(s_bus_mhz == 0 || s_bus_mhz == 26 || s_bus_mhz == 27 ? EPDP_BUS_HW_CS
                     : s_bus_mhz == 1                                    ? 0
                                                                         : s_bus_mhz * 1000000u);
-    if (hal_kv_get("xclear", &v, 1) == 1 && v <= CLEAR_SLOW_)
-        s_clear = v;
-    if (hal_kv_get("xgray2", &v, 1) == 1 && v <= GRAY_STOCK) /* "xgray" (the FastEPD default era) is ignored */
-        s_gray = v;
-    if (hal_kv_get("xsec", &v, 1) == 1)
-        s_live = v != 0;
-    if (hal_kv_get("xevery", &v, 1) == 1)
-        s_every = v;
 }
 
 bool hal_live_seconds(void) { return s_live && hal_esp_stay_awake(); }
@@ -653,7 +630,6 @@ bool hal_textcmd(const uint8_t *buf, size_t len)
             return true;
         }
         s_pass = (pass_cfg_t){(uint8_t)p, (uint8_t)f};
-        hal_kv_set("xpass", &s_pass, sizeof s_pass);
         epdp_set_passes(s_pass.partial, s_pass.full); /* live if the panel is open, else at its open */
         show_cfg();
         return true;
@@ -675,7 +651,6 @@ bool hal_textcmd(const uint8_t *buf, size_t len)
             return true;
         }
         s_wave = (wave_cfg_t){(uint8_t)k, (uint8_t)x, (uint8_t)r};
-        hal_kv_set("xwave", &s_wave, sizeof s_wave);
         epdp_set_wave(s_wave.kick, s_wave.extra, s_wave.redrive); /* from the next partial */
         show_cfg();
         return true;
@@ -687,7 +662,6 @@ bool hal_textcmd(const uint8_t *buf, size_t len)
             return true;
         }
         s_every = (uint8_t)e;
-        hal_kv_set("xevery", &s_every, 1);
         show_cfg();
         return true;
     }
@@ -700,10 +674,8 @@ bool hal_textcmd(const uint8_t *buf, size_t len)
             return true;
         }
         s_rows = (epd_row_delay_t){(uint8_t)a, (uint8_t)b};
-        hal_kv_set("xrow", &s_rows, sizeof s_rows);
         epdp_set_rows(s_rows.settle, s_rows.hold); /* from the next partial */
         s_drive = (uint8_t)d;
-        hal_kv_set("xdrive", &s_drive, 1);
         epdp_set_drive(s_drive);
         show_cfg();
         return true;
@@ -715,7 +687,6 @@ bool hal_textcmd(const uint8_t *buf, size_t len)
             return true;
         }
         s_bus_mhz = (uint8_t)m;
-        hal_kv_set("xbus", &s_bus_mhz, 1);
         show_cfg();
         hal_logf("I bus clock from the next boot ('!tp reboot')");
         return true;
@@ -730,7 +701,7 @@ bool hal_textcmd(const uint8_t *buf, size_t len)
             return true;
         }
         s_gp = (gpart_cfg_t){(uint8_t)on, (uint8_t)d, (uint8_t)l};
-        hal_kv_set("xgpart", &s_gp, sizeof s_gp);
+        panel_gpart_save(&s_gp);
         show_cfg();
         if (on)
             hal_logf("I gpart needs gray mode hybrid and a 2 or 4 bit face; from the next tick");
@@ -746,7 +717,6 @@ bool hal_textcmd(const uint8_t *buf, size_t len)
             return true;
         }
         s_clear = v;
-        hal_kv_set("xclear", &v, 1);
         show_cfg();
         return true;
     }
@@ -760,7 +730,6 @@ bool hal_textcmd(const uint8_t *buf, size_t len)
             return true;
         }
         s_gray = !strcmp(argv[1], "stock") ? GRAY_STOCK : GRAY_FASTEPD;
-        hal_kv_set("xgray2", &s_gray, 1);
         if (epdp_is_open())
             apply_gray();
         show_cfg();
@@ -769,7 +738,6 @@ bool hal_textcmd(const uint8_t *buf, size_t len)
     if (!strcmp(argv[0], "seconds")) {
         if (argc == 2 && (!strcmp(argv[1], "on") || !strcmp(argv[1], "off"))) {
             s_live = argv[1][1] == 'n';
-            hal_kv_set("xsec", &s_live, 1);
         } else if (argc != 1) {
             hal_logf("E usage: seconds [on|off]");
             return true;

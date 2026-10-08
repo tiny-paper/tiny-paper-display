@@ -136,12 +136,6 @@ bool hal_esp_par_win_all(void)
 {
     if (s_win_over >= 0)
         return s_win_over;
-    if (!s_win_read) {
-        uint8_t v;
-        if (hal_kv_get("xwinall", &v, 1) == 1)
-            s_win_all = v == 1;
-        s_win_read = true;
-    }
     return s_win_all;
 }
 
@@ -159,7 +153,6 @@ bool hal_esp_par_box_cmd(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[0], "win") && (!strcmp(argv[1], "all") || !strcmp(argv[1], "diff"))) {
         s_win_all = argv[1][0] == 'a';
         s_win_read = true;
-        hal_kv_set("xwinall", &s_win_all, 1);
         hal_logf("I win %s: the app's partials drive %s", s_win_all ? "all" : "diff",
                  s_win_all ? "every pixel of their windows" : "the changed pixels");
         return true;
