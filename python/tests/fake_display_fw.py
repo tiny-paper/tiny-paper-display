@@ -215,7 +215,7 @@ class FakeDevice:
         keep = bits in self.partial_depths
         have = keep and self.kept and self.glass_depth == bits
         if area and self.kept and not have:
-            raise Refuse(34, f"the picture shown has {self.glass_depth} bit: an area must have the same depth")
+            raise Refuse(34, f"the picture shown has {self.glass_depth} bit and the rectangle {bits} bit: an area must have the same depth")
         stride = (self.w * bits + 7) // 8
         rect = (t["xy"][0], t["xy"][1], w, h) if area else whole
         if area:

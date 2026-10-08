@@ -259,7 +259,8 @@ void usbdisp_show_end(usbdisp_t *d, const link_frame_t *f)
     if (area)
         r = (tiny_rect_t){(int16_t)d->x, (int16_t)d->y, pi.w, pi.h};
     if (!err && area && d->prev && !have) { /* the rest of the panel cannot be told at another depth */
-        snprintf(msg, sizeof msg, "the picture shown has %u bit: an area must have the same depth", (unsigned)d->prev_depth);
+        snprintf(msg, sizeof msg, "the picture shown has %u bit and the rectangle %u bit: an area must have the same depth",
+                 (unsigned)d->prev_depth, (unsigned)depth);
         err = USBDISP_E_DEPTH, why = msg;
     }
     size_t stride = err ? 0 : usbdisp_stride(d, depth), bytes = 0;

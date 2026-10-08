@@ -251,7 +251,9 @@ static void test_gray_partial(void)
     /* a 1 bit area on a 2 bit picture: the rest of the panel cannot be told */
     TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
     TEST_ASSERT_EQUAL_INT(USBDISP_E_DEPTH, show_box(0, 0, 8, 8, NULL, 0, false));
-    TEST_ASSERT_EQUAL_STRING("the picture shown has 2 bit: an area must have the same depth", ans_str("msg"));
+    TEST_ASSERT_EQUAL_STRING("the picture shown has 2 bit and the rectangle 1 bit: an area must have the same depth", ans_str("msg"));
+    /* refused before the panel was touched, and the frame is forgotten: the next update is a full one */
+    TEST_ASSERT_NULL(usbdisp_prev(&D, NULL));
     TEST_ASSERT_EQUAL_HEX8_ARRAY(s_want, F.shown, W * H);
 }
 
