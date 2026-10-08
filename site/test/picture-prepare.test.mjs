@@ -4,6 +4,7 @@
 // Run: node --test site/test/*.test.mjs
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { inflateSync } from 'node:zlib';
 
 import {
   BUILTINS, DEFAULT_SETTINGS, builtinPicture, comparePlan, compose, depthChoices, partialLine, pickRotation, preparePicture, preparedPng,
@@ -137,3 +138,32 @@ test('the report holds the tuning from hello and the device log lines of each se
   assert.match(t, /\| \(2 more device log lines cut; at most 8 are kept\)/);
   assert.match(reportText({ hello: HELLO, picture: 'p', saw: '', sends: [] }), /\ntuning: none \(this device has no panel tuning\)\n/);
 });
+
+test('the 16 step wedge of the built-in gradient: source values are exactly i * 17, and every dithering gives 16 flat steps in rising order at 4 bit', async () => {
+  for (const [W, H] of [[1872, 1404], [800, 480], [1404, 1872]]) {
+    const src = builtinPicture('gradient', W, H, 16), panel = { w: W, h: H };
+    const ramp = Math.floor(H * 0.4), wedge = Math.floor(H * 0.3);
+    const inBand = (i, f) => { const x0 = Math.floor(i * W / 16), x1 = Math.floor((i + 1) * W / 16); return { x0: x0 + Math.ceil((x1 - x0) * f), x1: x1 - Math.ceil((x1 - x0) * f) }; };
+    for (let i = 0; i < 16; i++) { const { x0, x1 } = inBand(i, 0.2); for (let x = x0; x < x1; x++) assert.equal(src.rgba[((ramp + 2) * W + x) * 4], i * 17, `source level ${i}`); }
+    for (const dither of ['none', 'floyd', 'ordered']) {
+      const p = preparePicture(src, panel, { ...DEFAULT_SETTINGS, rotate: 'auto', depth: 4, dither });
+      const steps = [];
+      for (let i = 0; i < 16; i++) {
+        const { x0, x1 } = inBand(i, 0.2), seen = new Set();
+        for (let y = ramp + 2; y < ramp + Math.floor(wedge * 0.5); y++) for (let x = x0; x < x1; x++) seen.add(p.levels[y * W + x]);
+        assert.deepEqual([...seen], [i], `${W}x${H} ${dither}: step ${i} is flat and equal to its level`);
+        steps.push([...seen][0]);
+      }
+      assert.deepEqual(steps, [...Array(16).keys()], `${dither}: rising`);
+      // the PNG the page sends carries the same nibbles
+      const png = await preparedPng(p), raw = inflateSync(Buffer.concat(pngIdat(png)));
+      const y = ramp + 2, row = raw.subarray(y * (Math.ceil(W / 2) + 1) + 1);
+      for (let i = 0; i < 16; i++) { const x = inBand(i, 0.5).x0; assert.equal((row[x >> 1] >> (x & 1 ? 0 : 4)) & 15, i, `${dither}: PNG step ${i}`); }
+    }
+  }
+});
+function pngIdat(png) {
+  const v = new DataView(png.buffer, png.byteOffset), out = [];
+  for (let off = 8; off < png.length;) { const n = v.getUint32(off); if (String.fromCharCode(...png.subarray(off + 4, off + 8)) === 'IDAT') out.push(png.subarray(off + 8, off + 8 + n)); off += n + 12; }
+  return out;
+}

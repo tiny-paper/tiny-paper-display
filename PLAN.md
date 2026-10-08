@@ -55,6 +55,8 @@ its shade (the gray partial drive goes through black). The grays are even, consi
 order (mid looks mid, light looks light). Grays on the TRMNL X are even and in the right order and come out lighter than
 the same shade on a computer screen; accepted as the panel's character, not being worked on.
 
+Device result, TRMNL X: 16 grey levels in order on the X by partial and by one full refresh (stock table, build 5c0ec75).
+
 ### Known limits (TRMNL X, seen on a device, 2026-10-08)
 
 Compared on the device with the Debug section: the 1 bit partial update looked best (crisp, and the fastest). It is the
