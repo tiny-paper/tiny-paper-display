@@ -114,6 +114,52 @@ each fit `partial_max`. The limit itself is a guess kept until the free heap is 
 The drive options of the X (gray table, pre-push frames, passes, waveform, row timing, clear) are reachable from the Sketch
 page's Debug section for comparison, without reflashing; 1 bit looked best, which of the gray settings looks best is still to be recorded.
 
+## Driving the glass: library calls only
+
+Owner decision (2026-10-08): this project stops carrying its own panel driving. The glass is driven only through the
+panel library's public calls (FastEPD: `fullUpdate`, `partialUpdate`, `setCustomMatrix`, `setPasses`, `einkPower`), as
+the stock firmware does, so keeping up means raising the library version.
+
+Rule: before building any panel mechanism, read the library's public header (`src/FastEPD.h`) and write down here why
+its own call does not do. No such note, no mechanism.
+
+First step, in the firmware: the tuning key `driver` (spec "Tuning"), `ours` (default, as before) or `plain`.
+
+| Update under `plain` | What runs |
+|---|---|
+| full refresh, 1 bit or gray | one `fullUpdate`, gray through `setCustomMatrix` (`gray_table`, `gray_row`), `clear` as its argument |
+| 1 bit partial | one `partialUpdate` over the changed rows, `passes_partial` passes; `rails_hold_ms` above 0 is its keep-on |
+| gray partial | not offered: hello lists 1 bit only, a changed gray picture is a full refresh (`why: depth`) |
+
+| `plain` leaves out | |
+|---|---|
+| our row control (row timing, fixed gate pulse, counters) | the library's own is installed |
+| the bus set up again at 26.67 MHz with hardware chip select | the library's 20 MHz, chip select by software |
+| kick, main and extra steps, redrive and its bitmap | one call |
+| the scan sequencer (`row_skip`, `step_neutral`, `scan_min_ms`), `frame_work` | the library scans every row |
+| rails up before the call | the library powers up and down; with a hold time its keep-on, down by our timer policy |
+
+Kept, not panel driving: the pin guard, the expander's alive check, the gauge's reset pin handed back, the zeroed
+locals build flag, rails forced down after a failed call, the call in its task on core 1, the gate clock count as a log
+line. Switching the key sets the bus up again once, through the library's own IO init.
+
+Not seen on a panel: anything under `plain`. Expected for a small 1 bit partial: about 0.5 to 0.7 s (5 scans of all
+rows and the power up and down) against 1.45 s. Read in the library's source (the pinned 8dc8c74 and its head), not
+seen: with a row range `partialUpdate` clears only one of its two row buffers, so every second row below the changed
+rows would be sent the last changed row again (thin lines under a stroke). The glass decides; if it shows, the choices
+are every row named in the call (as the stock firmware) or a fix in the library.
+
+Not built, with the reason: `fastUpdate` (drives every pixel of the panel, one flash: not a partial), the library's
+2 bit partial (our gray frames are 4 bit; needs its 2 bit frames end to end), `startVideo` (a thread that scans without
+pause from a count per pixel, rails on throughout, 2.6 MB of heap on the X: fits a sketch in idea, to try only after
+`plain` was seen).
+
+The pin: 8dc8c74 is 12 commits after the newest tag (2.2.0) and 46 after 1.4.6; the stock firmware's X build is at
+9a84c35, 6 commits further. No tagged release is as new as the pin, so it stays.
+
+The removal of `ours` and of its keys waits for a look at the glass: `plain` and `ours` side by side from the Debug
+section, 1 bit strokes, erasing, a gray picture.
+
 ## Clean-up
 
 The firmware folder still carries code from the project it grew out of that the display firmware does not use

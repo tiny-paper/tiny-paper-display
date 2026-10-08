@@ -1,6 +1,7 @@
 /* usbdisp: the panel tuning of `set { tuning }` (docs/spec/usb-display.md "Tuning") against fake knobs: a good key applies,
  * a bad one is refused with why and its range while the rest still apply, an unknown key, a board without knobs,
  * "defaults", and hello and every answer reflect the knobs. SPDX-License-Identifier: GPL-3.0-or-later */
+#include "epd_driver.h"
 #include "epd_graytab.h"
 #include "epd_rails.h"
 #include "epd_scan.h"
@@ -12,10 +13,14 @@ static hal_tune_t K[] = {
     {"gray_dark", 0, 14, 0, NULL},
     {"gray_light", 0, 14, 3, NULL},
     {"passes_partial", 1, 14, 4, NULL},
+    /* the X's driver key as the driver defines it (epd_driver.h), wired as hal_esp panel_par.c does */
+    {EPD_DRIVER_KEY, 0, EPD_DRIVER_COUNT - 1, EPD_DRIVER_DEFAULT, EPD_DRIVER_WORDS},
 };
+#define K_DRIVER 4
 #define NK (sizeof K / sizeof K[0])
 static int val[NK];
 static int sets;
+static uint8_t partial_now(void *ctx, uint8_t depths) { (void)ctx; return epd_driver_partial_depths(val[K_DRIVER], depths); }
 
 /* after the fake knobs, the X's scan keys as the driver defines them (epd_scan.h), wired as hal_esp panel_par.c does */
 static epd_scan_cfg_t scan = EPD_SCAN_CFG_DEFAULT;
@@ -99,9 +104,11 @@ static void knobs(bool on)
     if (on) {
         C.tune_count = t_count, C.tune_info = t_info, C.tune_get = t_get, C.tune_set = t_set, C.tune_defaults = t_defaults;
         C.gray_rows_set = g_rows_set, C.gray_rows_get = g_rows_get;
+        C.partial_now = partial_now;
     } else {
         C.tune_count = NULL, C.tune_info = NULL, C.tune_get = NULL, C.tune_set = NULL, C.tune_defaults = NULL;
         C.gray_rows_set = NULL, C.gray_rows_get = NULL;
+        C.partial_now = NULL;
     }
     usbdisp_init(&D, &C);
 }
@@ -296,6 +303,68 @@ static void test_rails_hold_key(void)
     TEST_ASSERT_EQUAL_UINT16(0, rails.hold_ms);
 }
 
+/* How many depths hello's partial_depths lists. */
+static int partial_depths_n(void)
+{
+    const uint8_t *v;
+    size_t vn;
+    cbor_r_t r;
+    cbor_item_t it;
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_HELLO, NULL, 0));
+    TEST_ASSERT_TRUE(cbor_map_get(s_ans, s_ans_len, "partial_depths", 14, &v, &vn));
+    cbor_r_init(&r, v, vn);
+    TEST_ASSERT_TRUE(cbor_read(&r, &it) && it.type == CBOR_ARRAY);
+    return (int)it.u;
+}
+
+/* driver (the X): hello shows `ours`, the default; `plain` is taken and shown; any other word and a number past the
+ * last are refused in words with the two allowed and nothing changes; "defaults" puts `ours` back; another board
+ * refuses the key in words. Under plain hello lists partial updates at 1 bit only, at once, and they come back. */
+static void test_driver_key(void)
+{
+    knobs(true);
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_HELLO, NULL, 0));
+    TEST_ASSERT_EQUAL_STRING("ours", sub_str("tuning", "driver"));
+    TEST_ASSERT_EQUAL_INT(3, partial_depths_n());
+    const kv_t plain[] = {{"driver", 's', 0, "plain"}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(plain, 1));
+    TEST_ASSERT_FALSE(has("refused"));
+    TEST_ASSERT_EQUAL_STRING("plain", sub_str("tuning", "driver"));
+    TEST_ASSERT_EQUAL_INT(EPD_DRIVER_PLAIN, val[K_DRIVER]);
+    TEST_ASSERT_EQUAL_INT(1, partial_depths_n());
+    TEST_ASSERT_EQUAL_STRING("plain", sub_str("tuning", "driver"));
+    const kv_t word[] = {{"driver", 's', 0, "library"}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(word, 1));
+    TEST_ASSERT_EQUAL_STRING("not one of the words; allowed ours, plain", sub_str("refused", "driver"));
+    TEST_ASSERT_EQUAL_INT(EPD_DRIVER_PLAIN, val[K_DRIVER]);
+    const kv_t num[] = {{"driver", 'u', EPD_DRIVER_COUNT, NULL}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(num, 1));
+    TEST_ASSERT_NOT_NULL(strstr(sub_str("refused", "driver"), "allowed ours, plain"));
+    TEST_ASSERT_EQUAL_INT(EPD_DRIVER_PLAIN, val[K_DRIVER]);
+    const kv_t kind[] = {{"driver", 'a', 0, NULL}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(kind, 1));
+    TEST_ASSERT_TRUE(sub_str("refused", "driver")[0] != 0);
+    TEST_ASSERT_EQUAL_INT(EPD_DRIVER_PLAIN, val[K_DRIVER]);
+    uint8_t p[32];
+    cbor_w_t w;
+    cbor_w_init(&w, p, sizeof p);
+    cbor_put_map(&w, 1);
+    cbor_put_str(&w, "tuning");
+    cbor_put_str(&w, "defaults");
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_SET, p, w.len));
+    TEST_ASSERT_EQUAL_STRING("ours", sub_str("tuning", "driver"));
+    TEST_ASSERT_EQUAL_INT(3, partial_depths_n());
+    const kv_t ours[] = {{"driver", 's', 0, "ours"}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(ours, 1));
+    TEST_ASSERT_FALSE(has("refused"));
+    knobs(false);
+    int before = sets;
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(plain, 1));
+    TEST_ASSERT_EQUAL_STRING("this board has no panel tuning", sub_str("refused", "driver"));
+    TEST_ASSERT_EQUAL_INT(before, sets);
+    TEST_ASSERT_EQUAL_INT(3, partial_depths_n()); /* a board without the key keeps its depths */
+}
+
 /* An answer longer than the link takes in one write arrives whole (the device's USB write takes 512 bytes a call; a
  * hello or set answer with the tuning map is longer, was cut there, and the host then read the log lines that
  * followed as the rest of the frame: garbled log text and a lost answer). A link that takes nothing ends the send. */
@@ -479,6 +548,7 @@ int main(void)
     RUN_TEST(test_defaults_restore_every_knob);
     RUN_TEST(test_a_board_without_knobs_refuses_every_key);
     RUN_TEST(test_rails_hold_key);
+    RUN_TEST(test_driver_key);
     RUN_TEST(test_a_long_answer_arrives_whole);
     RUN_TEST(test_scan_keys);
     RUN_TEST(test_gray_row);

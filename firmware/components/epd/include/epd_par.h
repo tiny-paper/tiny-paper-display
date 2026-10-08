@@ -17,6 +17,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "epd_driver.h"
 #include "epd_parwave.h"
 #include "epd_rails.h"
 #include "epd_rowtime.h"
@@ -125,6 +126,12 @@ bool epdp_drive_ok(void); /* partial rows use the fixed CKV pulse (drive_us > 0)
 int epdp_set_scan(const epd_scan_cfg_t *c);
 /* The scans of the last update as counted while they ran, the settings it ran with and whether it skipped rows. */
 const epd_scan_stats_t *epdp_last_scan(epd_scan_cfg_t *used, bool *skipped);
+/* Who drives the glass (epd_driver.h: EPD_DRIVER_OURS, the default, or EPD_DRIVER_PLAIN, the library's public calls
+ * only), from the next update: its begin sets the row control and the bus up for it when it changed. Under plain
+ * epdp_partial is one library partial update over the rows given (kick, extra, redrive, rows, drive, scan and work
+ * do nothing; a rails hold time is the library's keep-on), epdp_full one library full update, epdp_gray_partial answers EPDP_E_STATE. */
+int epdp_set_driver(int driver);
+int epdp_driver(void); /* of the last update (before the open: as set) */
 /* LCD bus before epdp_open_trmnl_x: hz with hardware chip select (default EPDP_BUS_HW_CS, FastEPD 8f76e90's TRMNL X
  * setting), 10..40 MHz, or 0 = FastEPD 8dc8c74 as stock pins it (20 MHz, SPH by software from the DMA interrupt). */
 #define EPDP_BUS_HW_CS 26666666u

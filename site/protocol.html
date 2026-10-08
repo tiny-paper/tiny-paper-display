@@ -122,7 +122,7 @@ cache: after a lost answer send <code>hello</code> and start the picture again.<
 <code>UNKNOWN_CMD</code>. <code>board</code>: <code>trmnl_og</code>, <code>picpak</code>, <code>trmnl_x</code>. <code>depths</code>: the gray bit depths taken. <code>colors</code>
 (<code>[&quot;black&quot;,&quot;white&quot;,&quot;red&quot;,&quot;yellow&quot;]</code>, PicPak): the panel&#39;s own colors. <code>warn</code>: the driver reported a refresh in less
 time than the panel needs (SPI panels: under 300 ms): look at the panel. <code>partial_depths</code>: the depths the board
-refreshes partially (empty: none). <code>modes</code>: the modes it does at some depth. <code>full_every</code>: the setting. <code>bt</code>: <code>&quot;off&quot;</code> or
+refreshes partially now (empty: none; the tuning key <code>driver</code> takes the gray depths away while it is <code>plain</code>). <code>modes</code>: the modes it does at some depth. <code>full_every</code>: the setting. <code>bt</code>: <code>&quot;off&quot;</code> or
 <code>&quot;on&quot;</code>, the Bluetooth setting; absent on a build without Bluetooth, which answers <code>bt</code> with <code>UNKNOWN_CMD</code>.</p>
 <p>Example (vector session <code>gray</code>, a 16 x 8 test panel, partial at 1 bit):</p>
 <table>
@@ -446,6 +446,12 @@ the driver&#39;s <code>!tp</code> console commands, with the bounds those comman
 <td>0</td>
 <td>milliseconds the panel&#39;s supply rails stay up after a partial update, so the next one inside that time skips the power up (<code>up=</code> in the <code>panel time</code> line shows what that is worth). 0: down at the end of every update. They come down when the time passes, at once when an update fails or the key is set to 0, before a full refresh, a restart and any sleep. Watch for: the picture fading or graying while the rails are held (nothing is driven then, but the supply is on), and battery use</td>
 </tr>
+<tr>
+<td><code>driver</code></td>
+<td><code>ours</code>, <code>plain</code></td>
+<td><code>ours</code></td>
+<td>who drives the glass. <code>ours</code>: this firmware&#39;s own row control, bus setup, waveform steps and scans around the panel library; every other key applies. <code>plain</code>: the panel library&#39;s public calls only, as the stock firmware uses them: a full refresh is one <code>fullUpdate</code> (grays through the table of <code>gray_table</code> and <code>gray_row</code>), a 1 bit partial update is one <code>partialUpdate</code> over the changed rows, with the library&#39;s own row control, bus clock, timing and power up and down. No gray partial update: <code>partial_depths</code> in hello is <code>[1]</code> while it lasts, a changed gray picture is a full refresh (<code>why: &quot;depth&quot;</code>), <code>partial</code> named at 2 or 4 bit is refused. Of the other keys only <code>gray_table</code>, <code>gray_row</code>, <code>passes_partial</code>, <code>passes_full</code>, <code>clear</code> and <code>rails_hold_ms</code> (the library&#39;s own keep-on) do anything then; the stock firmware runs 3 and 3 passes. Watch for: thin lines on every second row below a stroke (read in the library&#39;s source, not seen), blacks lighter than under <code>ours</code> (no frames before the passes, no redrive), traces of erased strokes, the time (<code>ms</code>)</td>
+</tr>
 </tbody></table>
 <p><code>step_neutral</code> to <code>scan_min_ms</code> are the scans of a partial update. With their defaults the scans are the library&#39;s own: every step is its
 drive frames and then one neutral scan, every scan writes all 1404 rows with the timed row step. The gate driver gets one
@@ -453,7 +459,11 @@ clock per row in every scan whatever the keys say; the device counts the clock e
 drives them, and logs both after each partial update: <code>panel scan neutral=&lt;each|end&gt; skip=&lt;off|on/&lt;us&gt;us&gt; frames=&lt;scans&gt; careful=&lt;rows written&gt; skipped=&lt;rows clocked through&gt; left=&lt;neutral scans left out&gt; gap=&lt;longest pause between steps&gt; &lt;ok|BAD&gt; per=&lt;clock edges a scan, 1408&gt;</code>; <code>careful + skipped</code> is <code>frames</code> times 1404, else <code>BAD</code> and a <code>W</code> line.
 With <code>row_skip</code> an update starts with one more scan that writes three neutral rows and skips the rest, so the source
 drivers hold neutral before any row is skipped.</p>
-<p>The time of every update on the TRMNL X, split, is the last of its log lines: <code>panel time total=&lt;ms&gt; begin=&lt;ms&gt; write=&lt;ms&gt; up=&lt;ms&gt; prep=&lt;ms&gt; masks=&lt;ms&gt; lib=&lt;ms&gt; scans=&lt;ms&gt; down=&lt;ms&gt; after=&lt;ms&gt; save=&lt;ms&gt; log=&lt;ms&gt; other=&lt;ms&gt; calls=&lt;n&gt;</code>. The update&#39;s own line (<code>show ...</code>) has <code>ms</code>, the time on the panel, and <code>pre</code>, the time before it.</p>
+<p>The time of every update on the TRMNL X, split, is the last of its log lines: <code>panel time total=&lt;ms&gt; begin=&lt;ms&gt; write=&lt;ms&gt; up=&lt;ms&gt; prep=&lt;ms&gt; masks=&lt;ms&gt; lib=&lt;ms&gt; scans=&lt;ms&gt; down=&lt;ms&gt; after=&lt;ms&gt; save=&lt;ms&gt; log=&lt;ms&gt; other=&lt;ms&gt; calls=&lt;n&gt;</code>. The update&#39;s own line (<code>show ...</code>) has <code>ms</code>, the time on the panel, and <code>pre</code>, the time before it.
+The lines <code>panel full</code>, <code>panel partial</code> and <code>panel gpart</code> of an update say <code>driver=ours</code> or <code>driver=plain</code>. Under
+<code>plain</code> the one library call is not split: <code>lib</code> holds its power up, scans and power down, <code>calls</code> is 1, and a line
+<code>panel rows driver=plain ckv=&lt;gate clock edges&gt; scans=&lt;scans the call makes&gt; rows=1404</code> replaces the row timing (a <code>W</code>
+line follows when the edges are not one per row and scan; the answer carries no <code>ckv</code> then).</p>
 <table>
 <thead>
 <tr>

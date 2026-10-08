@@ -257,6 +257,58 @@ static void test_gray_partial(void)
     TEST_ASSERT_EQUAL_HEX8_ARRAY(s_want, F.shown, W * H);
 }
 
+/* A panel setting takes the gray partial away while it lasts (cfg partial_now; the X's tuning key `driver`: plain): a
+ * changed gray picture is then a full refresh and the answer says why, `partial` named is refused in words before the
+ * panel is touched, 1 bit partials go on, and with the setting gone the gray partial is back. */
+static uint8_t s_now_mask = 7;
+static uint8_t now_mask(void *ctx, uint8_t depths) { (void)ctx; return depths & s_now_mask; }
+
+static void test_gray_partial_taken_away(void)
+{
+    device_partial(W, H, 7, 7, true, 0);
+    C.partial_now = now_mask;
+    usbdisp_init(&D, &C);
+    s_now_mask = 1;
+    random_px(s_want, W * H, 4);
+    size_t n = make_png(s_png, W, H, 4, 0, s_want);
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    TEST_ASSERT_EQUAL_STRING("full", ans_str("mode"));
+    s_want[5 * W + 13] ^= 5;
+    n = make_png(s_png, W, H, 4, 0, s_want);
+    int partials = F.partials, fulls = F.fulls;
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    TEST_ASSERT_EQUAL_STRING("full", ans_str("mode"));
+    TEST_ASSERT_EQUAL_STRING("depth", ans_str("why"));
+    TEST_ASSERT_EQUAL_INT(partials, F.partials);
+    TEST_ASSERT_EQUAL_INT(fulls + 1, F.fulls);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(s_want, F.shown, W * H);
+    TEST_ASSERT_NULL(usbdisp_prev(&D, NULL)); /* no frame kept at a depth without partial updates */
+    s_want[6 * W + 13] ^= 5;
+    n = make_png(s_png, W, H, 4, 0, s_want);
+    int begins = F.begins;
+    TEST_ASSERT_EQUAL_INT(USBDISP_E_MODE, show_at(s_png, n, 512, -1, 0, "partial", 0));
+    TEST_ASSERT_NOT_NULL(strstr(ans_str("msg"), "4 bit"));
+    TEST_ASSERT_EQUAL_INT(begins, F.begins);
+    /* 1 bit: a partial update as ever */
+    random_px(s_want, W * H, 1);
+    n = make_png(s_png, W, H, 1, 0, s_want);
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    s_want[5 * W + 13] ^= 1;
+    n = make_png(s_png, W, H, 1, 0, s_want);
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    TEST_ASSERT_EQUAL_STRING("partial", ans_str("mode"));
+    /* the setting gone: gray partials again */
+    s_now_mask = 7;
+    random_px(s_want, W * H, 4);
+    n = make_png(s_png, W, H, 4, 0, s_want);
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    s_want[5 * W + 13] ^= 5;
+    n = make_png(s_png, W, H, 4, 0, s_want);
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    TEST_ASSERT_EQUAL_STRING("partial", ans_str("mode"));
+    TEST_ASSERT_EQUAL_STRING("changed", ans_str("why"));
+}
+
 /* A gray partial keeps copies of its rectangle in RAM: the most pixels it takes is a limit of the board (usbdisp.h). Auto
  * chooses a full refresh for a larger change, and says why; `partial` named is refused before the panel is touched; a
  * single large rectangle is judged the same; a change under the limit is still a partial update. */
@@ -586,6 +638,7 @@ int main(void)
     RUN_TEST(test_modes_drive_as_named);
     RUN_TEST(test_board_without_partial_all);
     RUN_TEST(test_gray_partial);
+    RUN_TEST(test_gray_partial_taken_away);
     RUN_TEST(test_gray_partial_too_large);
     RUN_TEST(test_gray_panel_failure_forgets_the_frame);
     RUN_TEST(test_cut_transfer_then_full);

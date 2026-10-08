@@ -6,6 +6,7 @@
 #include "epd_parwin.h"
 #include "epd_parwave.h"
 #include "epd_parjob.h"
+#include "epd_driver.h"
 #include "epd_gpartlut.h"
 #include "epd_rails.h"
 #include "epd_scan.h"
@@ -74,6 +75,24 @@ public:
         _state.iFlags &= ~BB_PANEL_FLAG_SLOW_SPH;
         return bbepIOInit(&_state);
     }
+    /* What initPanel set up, noted once before anything of ours replaces it: the library's own row control, bus
+     * clock and chip select flag (epd_driver.h: `plain` runs with exactly these). */
+    void lib_note()
+    {
+        s_lib_rows = _state.pfnRowControl;
+        _lib_hz = _state.panelDef.bus_speed;
+        _lib_slow = _state.panelDef.flags & BB_PANEL_FLAG_SLOW_SPH;
+    }
+    /* The LCD bus again as initPanel made it (the library's clock, its chip select by software when its table says
+     * so): the same IO init initPanel ran, undoing rebus. */
+    int relib()
+    {
+        bbepIODeInit();
+        _state.panelDef.bus_speed = _lib_hz;
+        _state.panelDef.flags |= _lib_slow;
+        _state.iFlags |= _lib_slow;
+        return bbepIOInit(&_state);
+    }
     uint32_t bus_hz() const { return _state.panelDef.bus_speed; }
     int powered() const { return _state.pwr_on; }
     /* Rails down whatever the library believes: its power down returns at once when it thinks they are down, which
@@ -113,8 +132,13 @@ public:
         _state.pfnRowControl = f;
     }
     static gpio_num_t s_ckv, s_spv, s_le;
+    static BB_ROW_CONTROL *s_lib_rows;
+
+private:
+    uint32_t _lib_hz = 0, _lib_slow = 0;
 };
 gpio_num_t FastEpdX::s_ckv, FastEpdX::s_spv, FastEpdX::s_le;
+BB_ROW_CONTROL *FastEpdX::s_lib_rows;
 
 /* Row timing (epd_rowtime.h): delays and the fixed drive applied while s_rows_on (partials only), periods and
  * drive times recorded always. */
@@ -292,12 +316,18 @@ static void IRAM_ATTR row_ctl(void *p, int type)
     }
 }
 
-/* Rows of the next update: partials use the fixed drive when set. */
-static void rows_begin(bool partial)
+/* The counters of the next update, the hardware's count of gate clocks with them. */
+static void stats_begin(void)
 {
     epd_row_stats_reset(&s_row_stats);
     epd_row_drive_reset(&s_drive);
     ckv_pcnt_clear();
+}
+
+/* Rows of the next update: partials use the fixed drive when set. */
+static void rows_begin(bool partial)
+{
+    stats_begin();
     s_drive_us = partial ? s_drive_set : 0;
     s_rows_on = partial;
     s_seq_on = false;
@@ -623,6 +653,56 @@ static int iox_setup(void)
     return -1;
 }
 
+/* The driver (epd_driver.h): s_driver_set is what was asked for (epdp_set_driver), s_driver what the bus and the
+ * row control are set up for and s_parts its parts; an update brings the two together before it touches the panel.
+ * s_bus_ours: the clock the bus was set up again at, 0 while it is as the library's initPanel made it. */
+static uint8_t s_driver_set = EPD_DRIVER_DEFAULT, s_driver = EPD_DRIVER_DEFAULT;
+static epd_driver_parts_t s_parts;
+static uint32_t s_bus_ours;
+static uint8_t s_matrix_passes; /* of the gray table handed over last (epdp_set_matrix) */
+
+/* The bus as driver d needs it (on the panel core: the LCD interrupt is allocated where the bus is made). */
+static int bus_sync(int d)
+{
+    const uint32_t want = epd_driver_bus_hz(d, s_bus_hz, 0); /* 0: the library's own */
+    if (want == s_bus_ours) return BBEP_SUCCESS;
+    int rc = want ? s_epd.rebus(want) : s_epd.relib();
+    if (rc == BBEP_SUCCESS) s_bus_ours = want;
+    return rc;
+}
+static void rows_sync(int d) { s_epd.hook_rows(epd_driver_rows(d, row_ctl, FastEpdX::s_lib_rows)); }
+
+/* Before an update: the bus and the row control as the driver asked for needs them. Only a change does anything
+ * (the default all session: nothing here runs). After the bus was set up again the gauge's reset pin is handed
+ * back and the expander's directions are checked, as after the open; a bus that did not come up fails the update. */
+static int driver_sync(void)
+{
+    const int d = s_driver_set;
+    if (d == s_driver) return EPDP_OK;
+    rails_off();
+    int rc = on_panel_core([d] { return bus_sync(d); });
+    s_epd.ioPinMode(IOX_GAUGE_RST, 1 /* INPUT */);
+    if (rc != BBEP_SUCCESS || iox_setup()) {
+        ESP_LOGE(TAG, "driver %s: the bus did not come up again (%d)", epd_driver_name(d), rc);
+        s_epd.ioPinMode(IOX_GAUGE_RST, 1);
+        return EPDP_E_IO;
+    }
+    rows_sync(d);
+    s_driver = (uint8_t)d;
+    s_parts = epd_driver_parts(d);
+    epd_parjob_touched(&s_job); /* the frames were worked on by the other driver */
+    return EPDP_OK;
+}
+
+extern "C" int epdp_set_driver(int driver)
+{
+    if (!epd_driver_valid(driver)) return EPDP_E_ARG;
+    s_driver_set = (uint8_t)driver;
+    return EPDP_OK;
+}
+
+extern "C" int epdp_driver(void) { return s_open ? s_driver : s_driver_set; }
+
 extern "C" int epdp_open_trmnl_x(int partial_passes, int full_passes)
 {
     if (s_open) return EPDP_OK;
@@ -632,9 +712,12 @@ extern "C" int epdp_open_trmnl_x(int partial_passes, int full_passes)
         return EPDP_E_INIT;
     }
     if (!iox_alive()) return EPDP_E_IO;
-    int rc = on_panel_core([] {
+    const int drv = s_driver_set;
+    int rc = on_panel_core([drv] {
         int r = s_epd.initPanel(BB_PANEL_TRMNL_X);
-        return r == BBEP_SUCCESS && s_bus_hz ? s_epd.rebus(s_bus_hz) : r;
+        if (r != BBEP_SUCCESS) return r;
+        s_epd.lib_note();
+        return bus_sync(drv);
     });
     if (rc != BBEP_SUCCESS) {
         ESP_LOGE(TAG, "initPanel failed: %d", rc);
@@ -650,7 +733,9 @@ extern "C" int epdp_open_trmnl_x(int partial_passes, int full_passes)
         ESP_LOGE(TAG, "FastEPD uses GPIO%d, a flash/PSRAM pin: panel refused", pins[bad]);
         return EPDP_E_INIT;
     }
-    s_epd.hook_rows(row_ctl);
+    rows_sync(drv);
+    s_driver = (uint8_t)drv;
+    s_parts = epd_driver_parts(drv);
     if (!s_pcnt)
         ckv_pcnt_init(FastEpdX::s_ckv);
     s_epd.ioPinMode(IOX_GAUGE_RST, 1 /* INPUT */);
@@ -675,6 +760,7 @@ extern "C" int epdp_set_depth(int bpp)
 {
     if (!s_open) return EPDP_E_STATE;
     if (bpp != 1 && bpp != 4) return EPDP_E_ARG;
+    if (driver_sync()) return EPDP_E_IO;
     epd_parjob_touched(&s_job); /* the caller writes a whole picture next */
     return s_epd.setMode(bpp == 1 ? BB_MODE_1BPP : BB_MODE_4BPP) == BBEP_SUCCESS ? EPDP_OK : EPDP_E_ARG;
 }
@@ -685,19 +771,72 @@ extern "C" int epdp_height(void) { return s_epd.height(); }
 extern "C" int epdp_stride(void) { return s_epd.getMode() == BB_MODE_1BPP ? (s_epd.width() + 7) / 8 : (s_epd.width() + 1) / 2; }
 extern "C" uint32_t epdp_last_ms(void) { return s_last_ms; }
 
+/* plain: begin */
+/* The driver `plain` (epd_driver.h): one public library call per update, on the panel core, with the library's own
+ * row control, bus, timing and power up and down. Around it, none of it panel driving: the expander's alive check
+ * (the callers), the rails forced down when the call failed (a power up that stopped half way leaves the library
+ * believing them down), the gauge's reset pin handed back, and the hardware's count of the gate clocks next to the
+ * scans the call makes, for the log only. The time of the call is all `lib` in the split: no hook of ours marks its
+ * first scan. */
+static int plain_end(int rc, uint32_t scans, int64_t t0)
+{
+    s_drive.edges = ckv_pcnt_read();
+    s_drive.frames = rc == BBEP_SUCCESS && s_pcnt ? scans : 0; /* 0: no check */
+    if (rc != BBEP_SUCCESS) s_epd.force_down();
+    s_epd.ioPinMode(IOX_GAUGE_RST, 1 /* INPUT */);
+    lap(EPD_SPLIT_DOWN);
+    s_last_ms = (uint32_t)((esp_timer_get_time() - t0) / 1000);
+    return rc == BBEP_SUCCESS ? EPDP_OK : EPDP_E_IO;
+}
+
+static int plain_full(int lib_clear, int clear_mode)
+{
+    int64_t t0 = esp_timer_get_time();
+    split_begin();
+    stats_begin();
+    const int passes = s_epd.getMode() == BB_MODE_1BPP ? s_full_passes : s_matrix_passes;
+    int rc = lib_call(EPD_SPLIT_PREP, [&] { return s_epd.fullUpdate(lib_clear, false); });
+    return plain_end(rc, epd_driver_lib_scans(false, clear_mode, passes), t0);
+}
+
+/* The library is given the changed rows [y0, y1] and scans all rows, those outside as neutral rows. Read in FastEPD
+ * 8dc8c74 and in its head of 2026-10 (bbepPartialUpdate, iSkipped): of its two row buffers only the one of the first
+ * row after the range is cleared, so every second row below the range would be sent the range's last row again.
+ * Not seen on a panel with this call: the glass decides (PLAN.md).
+ * A hold time (epdp_set_rails_hold) is the library's own keep-on: rails up through its public power call, the update
+ * told to leave them on, and the policy of epd_rails.h brings them down (timer, failure, sleep). 0: the library
+ * powers up and down itself. */
+static int plain_partial(int y0, int y1)
+{
+    int64_t t0 = esp_timer_get_time();
+    split_begin();
+    stats_begin();
+    memset(&s_wave_ms, 0, sizeof s_wave_ms);
+    memset(&s_redrive, 0, sizeof s_redrive);
+    memset(&s_given, 0, sizeof s_given);
+    const bool keep = s_rails.hold_ms != 0;
+    int rc = keep ? rails_up(EPD_SPLIT_PREP) : BBEP_SUCCESS;
+    if (rc == BBEP_SUCCESS) rc = lib_call(EPD_SPLIT_PREP, [&] { return s_epd.partialUpdate(keep, y0, y1); });
+    if (keep) rails_end(EPD_SPLIT_AFTER, rc == BBEP_SUCCESS);
+    epd_parjob_touched(&s_job); /* the library copied current to previous: not what our bookkeeping left */
+    return plain_end(rc, epd_driver_lib_scans(true, 0, s_wave.main), t0);
+}
+/* plain: end */
+
 extern "C" int epdp_full(int clear_mode)
 {
     if (!s_open) return EPDP_E_STATE;
     static const int modes[] = { CLEAR_NONE, CLEAR_FAST, CLEAR_SLOW, CLEAR_WHITE };
     if (clear_mode < 0 || clear_mode > 3) return EPDP_E_ARG;
     if (!iox_alive()) return EPDP_E_IO;
+    if (driver_sync()) return EPDP_E_IO;
     int64_t t0 = esp_timer_get_time();
     rails_off(); /* kept up by a partial: the library's full refresh powers up and down itself */
-    split_begin();
     if (s_fresh) memset(s_fresh, 0, EPD_FRESH_PLANES * (size_t)(s_epd.width() / 8) * s_epd.height()); /* all driven by the full waveform */
     epd_parjob_fresh_none(&s_job);
     epd_parjob_touched(&s_job);
     s_fresh_dirty = false;
+    if (!s_parts.row_hook) return plain_full(modes[clear_mode], clear_mode);
     rows_begin(false);
     int rc = lib_call(EPD_SPLIT_PREP, [&] { return s_epd.fullUpdate(modes[clear_mode], false); });
     rows_end();
@@ -785,6 +924,8 @@ extern "C" int epdp_partial(int y0, int y1)
     if (!s_open) return EPDP_E_STATE;
     if (s_epd.getMode() != BB_MODE_1BPP) return EPDP_E_ARG;
     if (!iox_alive()) return EPDP_E_IO;
+    if (driver_sync()) return EPDP_E_IO;
+    if (!s_parts.wave) return plain_partial(y0, y1);
     const size_t n = (size_t)(s_epd.width() / 8) * s_epd.height();
     if (!scratch(n)) return EPDP_E_INIT;
     /* all rows, not [y0, y1]: FastEPD drives rows outside the range with stale DMA data (epd_parwin.h) */
@@ -873,6 +1014,8 @@ extern "C" int epdp_gray_partial(const epdp_gwin_t *win, int nw, const uint8_t *
             return EPDP_E_ARG;
     }
     if (!iox_alive()) return EPDP_E_IO;
+    if (driver_sync()) return EPDP_E_IO;
+    if (!s_parts.gray_partial) return EPDP_E_STATE;
     if (!scratch(n)) return EPDP_E_INIT;
     struct { uint8_t kind, j, frames; } st[2 + 16];
     int ns = 0;
@@ -1079,21 +1222,26 @@ extern "C" int epdp_set_matrix(const uint8_t *matrix, int n)
 {
     if (!s_open) return EPDP_E_STATE;
     if (!matrix || n <= 0 || (n & 15)) return EPDP_E_ARG;
-    return s_epd.setCustomMatrix(matrix, (size_t)n) == BBEP_SUCCESS ? EPDP_OK : EPDP_E_ARG;
+    if (s_epd.setCustomMatrix(matrix, (size_t)n) != BBEP_SUCCESS) return EPDP_E_ARG;
+    s_matrix_passes = (uint8_t)(n / 16 > 255 ? 255 : n / 16);
+    return EPDP_OK;
 }
 
 extern "C" int epdp_partial_begin(void)
 {
     if (!s_open) return EPDP_E_STATE;
+    if (driver_sync()) return EPDP_E_IO;
     s_epd.setMode(BB_MODE_1BPP);
     const size_t n = (size_t)(s_epd.width() / 8) * s_epd.height();
-    if (scratch(n)) { /* with epdp_set_work only the rows the last partial left not white (epd_parjob.h) */
+    /* plain: both frames white, no scratch memory and no bookkeeping of ours */
+    if (s_parts.wave && scratch(n)) { /* with epdp_set_work only the rows the last partial left not white (epd_parjob.h) */
         s_job.prev = s_epd.previousBuffer();
         s_job.cur = s_epd.currentBuffer();
         epd_parjob_white(&s_job, s_work_rows);
     } else {
         memset(s_epd.currentBuffer(), 0xff, n);
         memset(s_epd.previousBuffer(), 0xff, n);
+        epd_parjob_touched(&s_job);
     }
     s_epd.setPreviousMode(BB_MODE_1BPP); /* no conversion of an older frame in partialUpdate */
     return EPDP_OK;

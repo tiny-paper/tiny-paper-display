@@ -12,6 +12,8 @@
  *                    bitmap, two planes of counts, is kept across deep sleep in LittleFS /xfresh.bin, run-length
  *                    coded, written after a partial that changed it, removed at every full refresh).
  * Every update powers the panel rails off when done (epd_par.h).
+ * Tuning key `driver` (epd_driver.h): `plain` drives the glass through the library's public calls only, one per
+ * update, no gray partial; its log lines are `panel partial|full driver=plain ...`.
  * Text commands (they apply at the next refresh, no reboot, and last until the next reset; only `gpart` is
  * stored, NVS "dgpart", see load_cfg):
  *   !tp panel                         show the settings
@@ -84,6 +86,7 @@
 #if BOARD_PANEL_FASTEPD /* whole file */
 
 #include "epd_clear.h"
+#include "epd_driver.h"
 #include "epd_par.h"
 #include "epd_parwave.h"
 #include "epd_parwin.h"
@@ -171,6 +174,7 @@ bool hal_live_seconds(void) { return s_live && hal_esp_stay_awake(); }
 
 bool hal_panel_gray_partial(void) { return s_gp.on; }
 
+
 /* Tuning for experiments (usbdisp `set { tuning }`, docs/spec/usb-display.md "Tuning"): the knobs of the console commands
  * above under one name each, with the bounds those commands check (EPD_* limits, 1..14 passes, 0..14 frames). Applied from
  * the next refresh, never stored. The 1 bit black step before a gray one does not exist in a gray partial (the 4 bit
@@ -179,6 +183,9 @@ static const char *const W_GRAY[] = {"fastepd", "stock"};
 static const char *const W_ONOFF[] = {"off", "on"};
 static const char *const W_CLEAR[] = {"auto", "none", "fast", "slow"};
 static const char *const W_WORK[] = {"whole", "rows"};
+static uint8_t s_driver = EPD_DRIVER_DEFAULT; /* driver: who drives the glass (epd_driver.h) */
+/* plain has no gray partial (epd_driver.h); hello and the choice of refresh follow the key at once */
+uint8_t hal_panel_partial_now(uint8_t depths) { return epd_driver_partial_depths(s_driver, depths); }
 static uint8_t s_work; /* frame_work: the passes over the frames of a 1 bit partial cover whole frames, or its rows */
 static const struct {
     hal_tune_t t;
@@ -198,11 +205,13 @@ static const struct {
     {{"row_drive", 0, EPD_ROW_DRIVE_MAX, EPD_ROW_DRIVE_DEFAULT, NULL}, &s_drive},
     {{"clear", CLEAR_AUTO, CLEAR_SLOW_, CLEAR_AUTO, W_CLEAR}, &s_clear},
     {{"frame_work", 0, 1, 0, W_WORK}, &s_work},
+    {{EPD_DRIVER_KEY, 0, EPD_DRIVER_COUNT - 1, EPD_DRIVER_DEFAULT, EPD_DRIVER_WORDS}, &s_driver},
 };
 #define NKNOBS (sizeof KNOBS / sizeof KNOBS[0])
 
 static void tune_apply(void)
 {
+    epdp_set_driver(s_driver);
     epdp_set_passes(s_pass.partial, s_pass.full);
     epdp_set_wave(s_wave.kick, s_wave.extra, s_wave.redrive);
     epdp_set_rows(s_rows.settle, s_rows.hold);
@@ -359,8 +368,9 @@ static int open_panel(void)
     apply_gray();
     bool soft = false;
     uint32_t hz = epdp_bus_hz(&soft);
-    hal_logf("I panel open ms=%u %dx%d bus_khz=%u cs=%s drive=%s", (unsigned)((esp_timer_get_time() - t) / 1000),
-             epdp_width(), epdp_height(), (unsigned)(hz / 1000), soft ? "soft" : "hw", epdp_drive_ok() ? "fixed" : "free");
+    hal_logf("I panel open ms=%u %dx%d bus_khz=%u cs=%s drive=%s driver=%s", (unsigned)((esp_timer_get_time() - t) / 1000),
+             epdp_width(), epdp_height(), (unsigned)(hz / 1000), soft ? "soft" : "hw", epdp_drive_ok() ? "fixed" : "free",
+             epd_driver_name(epdp_driver()));
     return HAL_OK;
 }
 
@@ -436,7 +446,8 @@ static void stats_rect(const tiny_rect_t *r)
 
 int hal_panel_begin(uint8_t depth, hal_refresh_t mode)
 {
-    if ((depth != 1 && depth != 2 && depth != 4) || (mode == HAL_REFRESH_PARTIAL && depth != 1 && !s_gp.on))
+    if ((depth != 1 && depth != 2 && depth != 4) ||
+        (mode == HAL_REFRESH_PARTIAL && depth != 1 && !(s_gp.on && epd_driver_partial_depths(s_driver, 6))))
         return HAL_E_FAIL;
     s_t_begin = esp_timer_get_time();
     epd_split_reset(&s_split);
@@ -452,7 +463,7 @@ int hal_panel_begin(uint8_t depth, hal_refresh_t mode)
         return HAL_E_IO;
     if (s_tab_new || s_tab.table != s_gray)
         apply_gray(); /* the table or a row of it changed: the full refresh's lookup is built again */
-    if (mode == HAL_REFRESH_PARTIAL)
+    if (mode == HAL_REFRESH_PARTIAL && epd_driver_parts(s_driver).redrive)
         fresh_load();
     int rc = mode == HAL_REFRESH_PARTIAL ? epdp_partial_begin() : epdp_set_depth(depth == 1 ? 1 : 4);
     if (rc) {
@@ -619,8 +630,8 @@ int hal_panel_refresh(void)
         epd_split_add(&s_split, EPD_SPLIT_SAVE, (uint32_t)(tl - tf));
         const epdp_gpart_info_t *g = epdp_last_gpart();
         char rb[200], gb[64];
-        hal_logf("panel gpart depth=%u rows=%d..%d ms=%u dark=%u light=%u gray=%s steps=%u frames=%u chg=%lu drv=%lu %s "
-                 "rc=%d", s_depth, s_y0, s_y1, (unsigned)hal_stats.refresh_ms, s_gp.dark, s_gp.light,
+        hal_logf("panel gpart driver=%s depth=%u rows=%d..%d ms=%u dark=%u light=%u gray=%s steps=%u frames=%u chg=%lu drv=%lu %s "
+                 "rc=%d", epd_driver_name(epdp_driver()), s_depth, s_y0, s_y1, (unsigned)hal_stats.refresh_ms, s_gp.dark, s_gp.light,
                  gray_str(gb, sizeof gb), g->steps, g->frames, (unsigned long)g->changed_px,
                  (unsigned long)g->driven_px, hal_esp_par_rows_str(rb, sizeof rb), rc);
         hal_esp_par_log_drive(s_mode == HAL_REFRESH_FULL);
@@ -631,21 +642,28 @@ int hal_panel_refresh(void)
         if (rc == EPDP_OK && s_since_full < UINT16_MAX)
             s_since_full++;
         hal_stats.refresh_ms = (uint32_t)((esp_timer_get_time() - t) / 1000);
+        const int drv = epdp_driver();
         int64_t tf = esp_timer_get_time();
-        fresh_save();
+        if (epd_driver_parts(drv).redrive) /* plain keeps no redrive bitmap */
+            fresh_save();
         int64_t tl = esp_timer_get_time();
         unsigned fms = (unsigned)((tl - tf) / 1000);
         epd_split_add(&s_split, EPD_SPLIT_SAVE, (uint32_t)(tl - tf));
         static int64_t last_log;
-        if (rc || !s_live || esp_timer_get_time() - last_log > 60000000) { /* live seconds: once a minute */
+        if (!epd_driver_parts(drv).wave) { /* one library call: no steps, no redrive, no frames of ours to report */
+            hal_logf("panel partial driver=%s rows=%d..%d ms=%u passes=%u since_full=%u rc=%d", epd_driver_name(drv), s_y0,
+                     s_y1, (unsigned)hal_stats.refresh_ms, s_pass.partial, (unsigned)s_since_full, rc);
+            hal_esp_par_log_drive(false);
+            hal_esp_par_log_time(&s_split, s_t_begin, tl);
+        } else if (rc || !s_live || esp_timer_get_time() - last_log > 60000000) { /* live seconds: once a minute */
             last_log = esp_timer_get_time();
             const epdp_wave_ms_t *w = epdp_last_wave();
             const epd_fresh_info_t *rd = epdp_last_redrive();
             const epdp_given_t *g = epdp_last_given();
             char rb[200];
-            hal_logf("panel partial rows=%d..%d ms=%u passes=%u kick=%u/%ums main=%u/%ums extra=%u/%ums redrive=%lu@%d..%d "
+            hal_logf("panel partial driver=%s rows=%d..%d ms=%u passes=%u kick=%u/%ums main=%u/%ums extra=%u/%ums redrive=%lu@%d..%d "
                      "rowdly=%u,%u %s fresh=%ld/%ums since_full=%u rc=%d",
-                     s_y0, s_y1, (unsigned)hal_stats.refresh_ms, s_pass.partial, w->frames[EPD_WAVE_KICK],
+                     epd_driver_name(drv), s_y0, s_y1, (unsigned)hal_stats.refresh_ms, s_pass.partial, w->frames[EPD_WAVE_KICK],
                      w->ms[EPD_WAVE_KICK], w->frames[EPD_WAVE_MAIN], w->ms[EPD_WAVE_MAIN], w->frames[EPD_WAVE_EXTRA],
                      w->ms[EPD_WAVE_EXTRA], (unsigned long)rd->px, rd->y0, rd->y1, s_rows.settle, s_rows.hold,
                      hal_esp_par_rows_str(rb, sizeof rb), s_fresh_saved, fms, (unsigned)s_since_full, rc);
@@ -668,8 +686,10 @@ int hal_panel_refresh(void)
         int64_t tl = esp_timer_get_time();
         hal_stats.refresh_ms = (uint32_t)((tl - t) / 1000);
         char rb[200], gb[64];
-        hal_logf("panel full depth=%u ms=%u clear=%s gray=%s %s rc=%d", s_depth, (unsigned)hal_stats.refresh_ms,
-                 s_clear_used, gray_str(gb, sizeof gb), hal_esp_par_rows_str(rb, sizeof rb), rc);
+        const int drv = epdp_driver();
+        hal_logf("panel full driver=%s depth=%u ms=%u clear=%s gray=%s %s rc=%d", epd_driver_name(drv), s_depth,
+                 (unsigned)hal_stats.refresh_ms, s_clear_used, gray_str(gb, sizeof gb),
+                 epd_driver_parts(drv).row_hook ? hal_esp_par_rows_str(rb, sizeof rb) : "", rc);
         hal_esp_par_log_drive(s_mode == HAL_REFRESH_FULL);
         hal_esp_par_log_time(&s_split, s_t_begin, tl);
     }

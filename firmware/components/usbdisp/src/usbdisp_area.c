@@ -18,8 +18,9 @@ int usbdisp_mode_check(const usbdisp_t *d, usbdisp_mode_t m, bool area, uint8_t 
     bool every = m == USBDISP_MODE_PARTIAL_ALL || m == USBDISP_MODE_PASSES, one_bit = every || m == USBDISP_MODE_INVERSE;
     if (!area && (m == USBDISP_MODE_AUTO || m == USBDISP_MODE_FULL))
         return 0; /* a whole picture: every board shows it */
+    const uint8_t pd = usbdisp_pdepths(d);
     *why = msg;
-    if (!c->partial_depths) {
+    if (!pd) {
         *why = "this board has no partial refresh: send the whole picture, without a mode or with full";
         return USBDISP_E_MODE;
     }
@@ -27,14 +28,14 @@ int usbdisp_mode_check(const usbdisp_t *d, usbdisp_mode_t m, bool area, uint8_t 
         snprintf(msg, sizeof msg, "this board cannot drive every pixel of an area: no %s", MODES[m]);
         return USBDISP_E_MODE;
     }
-    if (one_bit && (!(c->partial_depths & 1) || depth > 1)) {
-        snprintf(msg, sizeof msg, "%s needs a 1 bit picture%s", MODES[m], c->partial_depths & 1 ? "" : ": not on this board");
+    if (one_bit && (!(pd & 1) || depth > 1)) {
+        snprintf(msg, sizeof msg, "%s needs a 1 bit picture%s", MODES[m], pd & 1 ? "" : ": not on this board");
         return USBDISP_E_MODE;
     }
-    if (depth && !(c->partial_depths & depth)) {
+    if (depth && !(pd & depth)) {
         static const char *const BITS[8] = {"", "1", "2", "1, 2", "4", "1, 4", "2, 4", "1, 2, 4"};
         snprintf(msg, sizeof msg, "%s at %u bit: this board refreshes partially at %s bit only",
-                 m == USBDISP_MODE_PARTIAL ? "partial" : "an area", (unsigned)depth, BITS[c->partial_depths & 7]);
+                 m == USBDISP_MODE_PARTIAL ? "partial" : "an area", (unsigned)depth, BITS[pd & 7]);
         return USBDISP_E_MODE;
     }
     return 0;
@@ -257,7 +258,7 @@ void usbdisp_show_end(usbdisp_t *d, const link_frame_t *f)
     int err = usbdisp_head_check(d, d->png, d->size, &pi, &why);
     const uint8_t depth = pi.depth;
     /* the frame is kept, and compared with, only at a depth the panel refreshes partially */
-    const bool keep = !err && !d->c.bwry && (d->c.partial_depths & depth);
+    const bool keep = !err && !d->c.bwry && (usbdisp_pdepths(d) & depth);
     bool have = keep && d->prev && d->prev_depth == depth;
     tiny_rect_t whole = {0, 0, d->c.w, d->c.h}, r = whole;
     if (area)
@@ -301,7 +302,7 @@ void usbdisp_show_end(usbdisp_t *d, const link_frame_t *f)
     } else if (err || mode == USBDISP_MODE_FULL) {
         /* as asked */
     } else if (!keep) {
-        run = USBDISP_MODE_FULL, because = d->c.partial_depths ? "depth" : "board";
+        run = USBDISP_MODE_FULL, because = usbdisp_pdepths(d) ? "depth" : "board";
     } else if (!have) {
         run = USBDISP_MODE_FULL, because = d->prev ? "depth" : d->no_prev;
     } else if (mode == USBDISP_MODE_AUTO) {
@@ -400,7 +401,7 @@ void usbdisp_clear(usbdisp_t *d, const link_frame_t *f)
     }
     d->since_full = 0;
     /* a white frame is what the panel shows now: the next 1 bit picture needs no full refresh */
-    if (!d->c.bwry && (d->c.partial_depths & 1)) {
+    if (!d->c.bwry && (usbdisp_pdepths(d) & 1)) {
         if (tiny_size_mul(stride, d->c.h, &bytes) && (d->prev = d->c.alloc(d->c.ctx, bytes))) {
             memset(d->prev, 0xFF, bytes);
             d->prev_depth = 1;

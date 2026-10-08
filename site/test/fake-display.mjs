@@ -29,6 +29,7 @@ const KNOBS = [
   ['row_settle', 0, 20, 2], ['row_hold', 0, 20, 2], ['row_drive', 0, 200, 32], ['clear', 0, 3, 0, ['auto', 'none', 'fast', 'slow']],
   ['gray_row', 0, 0, 0, null, true], ['step_neutral', 0, 1, 0, ['each', 'end']], ['row_skip', 0, 1, 0, ['off', 'on']], ['row_skip_us', 2, 50, 10], ['scan_min_ms', 0, 150, 0],
   ['frame_work', 0, 1, 0, ['whole', 'rows']], ['rails_hold_ms', 0, 10000, 0],
+  ['driver', 0, 1, 0, ['ours', 'plain']],
 ];
 const tuningOf = (vals) => Object.fromEntries(KNOBS.map(([n, , , , w], i) => [n, w ? w[vals[i]] : vals[i]]));
 const start = (k) => (k[5] ? '' : k[3]);

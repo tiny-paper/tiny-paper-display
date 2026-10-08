@@ -9,6 +9,7 @@
 
 #if BOARD_PANEL_FASTEPD /* whole file */
 
+#include "epd_driver.h"
 #include "epd_par.h"
 #include "epd_parwave.h"
 #include "epd_rowtime.h"
@@ -28,8 +29,13 @@ void hal_esp_par_log_drive(bool full)
     uint32_t d;
     const epd_row_drive_stats_t *st = epdp_last_drive(&d);
     char b[112];
-    hal_logf("panel rows %s", epd_row_drive_str(st, full ? 0 : d, b, sizeof b));
     unsigned per;
+    /* without our row control nothing is timed: the hardware's clock count against the scans the call makes */
+    if (!epd_driver_parts(epdp_driver()).row_hook)
+        hal_logf("panel rows driver=%s ckv=%lu scans=%lu rows=%d", epd_driver_name(epdp_driver()),
+                 (unsigned long)st->edges, (unsigned long)st->frames, epdp_height());
+    else
+        hal_logf("panel rows %s", epd_row_drive_str(st, full ? 0 : d, b, sizeof b));
     if (st->frames && !epd_row_edges_ok(st->edges, st->frames, epdp_height(), &per))
         hal_logf("W panel rows: %u CKV edges per frame for %d rows (gate clocks %s; issue #203)", per, epdp_height(),
                  per > (unsigned)epdp_height() + EPD_ROW_START_EDGES ? "doubled" : "missing");
@@ -94,7 +100,7 @@ bool hal_panel_gate_clocks(hal_gate_clocks_t *g)
     uint32_t d;
     const epd_row_drive_stats_t *st = epdp_last_drive(&d);
     unsigned per = 0;
-    if (!st->frames)
+    if (!st->frames || !epd_driver_parts(epdp_driver()).row_hook) /* plain: the count is a log line only */
         return false;
     g->edges = st->edges;
     g->frames = st->frames;

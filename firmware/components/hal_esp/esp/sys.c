@@ -745,6 +745,7 @@ __attribute__((weak)) void hal_log_hook(const char *line, size_t len) { (void)li
 #if !BOARD_PANEL_FASTEPD
 void hal_esp_panel_rails_off(void) {} /* TRMNL X only: panel_par.c */
 bool hal_live_seconds(void) { return false; } /* TRMNL X only: panel_par.c */
+uint8_t hal_panel_partial_now(uint8_t depths) { return depths; } /* TRMNL X only: panel_par.c */
 size_t hal_panel_tune_count(void) { return 0; } /* TRMNL X only: panel_par.c */
 const hal_tune_t *hal_panel_tune_info(size_t i) { (void)i; return NULL; }
 int hal_panel_tune_get(size_t i) { (void)i; return 0; }

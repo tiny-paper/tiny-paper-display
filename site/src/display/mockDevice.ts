@@ -16,6 +16,7 @@ export const X_KNOBS: readonly { name: string; min: number; max: number; def: nu
   { name: 'step_neutral', min: 0, max: 1, def: 0, words: ['each', 'end'] }, { name: 'row_skip', min: 0, max: 1, def: 0, words: ['off', 'on'] },
   { name: 'row_skip_us', min: 2, max: 50, def: 10 }, { name: 'scan_min_ms', min: 0, max: 150, def: 0 },
   { name: 'frame_work', min: 0, max: 1, def: 0, words: ['whole', 'rows'] }, { name: 'rails_hold_ms', min: 0, max: 10000, def: 0 },
+  { name: 'driver', min: 0, max: 1, def: 0, words: ['ours', 'plain'] },
 ];
 /** A knob's value at start: its default, or the empty text. */
 export const knobStart = (k: typeof X_KNOBS[number]): number | string => (k.text ? '' : k.def);

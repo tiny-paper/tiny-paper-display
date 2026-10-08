@@ -69,6 +69,7 @@ static bool h_gates(void *ctx, usbdisp_gates_t *g)
     return true;
 }
 
+static uint8_t h_partial_now(void *ctx, uint8_t depths) { (void)ctx; return hal_panel_partial_now(depths); }
 static size_t h_tune_count(void *ctx) { (void)ctx; return hal_panel_tune_count(); }
 static const hal_tune_t *h_tune_info(void *ctx, size_t i) { (void)ctx; return hal_panel_tune_info(i); }
 static int h_tune_get(void *ctx, size_t i) { (void)ctx; return hal_panel_tune_get(i); }
@@ -148,6 +149,7 @@ void usbdisp_hal_cfg(usbdisp_cfg_t *cfg, const char *fw)
     cfg->panel_refresh = h_refresh;
     cfg->panel_sleep = h_sleep;
     cfg->panel_gates = h_gates;
+    cfg->partial_now = h_partial_now;
     cfg->tune_count = h_tune_count;
     cfg->tune_info = h_tune_info;
     cfg->tune_get = h_tune_get;

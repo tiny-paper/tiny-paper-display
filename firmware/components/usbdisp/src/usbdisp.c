@@ -154,10 +154,16 @@ void usbdisp_refuse(usbdisp_t *d, const link_frame_t *f, int err, const char *ms
     usbdisp_send(d, f, &w);
 }
 
+/* The depths a partial refresh takes now: the board's, less what the panel does not take at the moment (partial_now). */
+uint8_t usbdisp_pdepths(const usbdisp_t *d)
+{
+    return d->c.partial_now ? (uint8_t)(d->c.partial_depths & d->c.partial_now(d->c.ctx, d->c.partial_depths)) : d->c.partial_depths;
+}
+
 /* partial_max: { "2": px, "4": px } the most pixels a partial update takes in its rectangle at each gray depth that has a limit */
 static size_t pmax_n(const usbdisp_t *d)
 {
-    return d->c.gray_partial_max_px ? (size_t)((d->c.partial_depths >> 1 & 1) + (d->c.partial_depths >> 2 & 1)) : 0;
+    return d->c.gray_partial_max_px ? (size_t)((usbdisp_pdepths(d) >> 1 & 1) + (usbdisp_pdepths(d) >> 2 & 1)) : 0;
 }
 
 static void put_pmax(const usbdisp_t *d, cbor_w_t *w)
@@ -166,7 +172,7 @@ static void put_pmax(const usbdisp_t *d, cbor_w_t *w)
     cbor_put_map(w, pmax_n(d));
     static const char *const key[3] = {"1", "2", "4"};
     for (unsigned b = 1; b < 3; b++)
-        if (d->c.partial_depths >> b & 1) {
+        if (usbdisp_pdepths(d) >> b & 1) {
             cbor_put_str(w, key[b]);
             cbor_put_uint(w, d->c.gray_partial_max_px);
         }
@@ -240,7 +246,7 @@ static void hello(usbdisp_t *d, const link_frame_t *f)
     cbor_put_uint(&w, d->c.png_max);
     cbor_put_str(&w, "chunk");
     cbor_put_uint(&w, USBDISP_CHUNK);
-    uint8_t pd = d->c.partial_depths;
+    uint8_t pd = usbdisp_pdepths(d);
     cbor_put_str(&w, "partial_depths");
     cbor_put_array(&w, (size_t)((pd & 1) + (pd >> 1 & 1) + (pd >> 2 & 1)));
     for (unsigned b = 0; b < 3; b++)

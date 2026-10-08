@@ -208,6 +208,9 @@ uint32_t hal_panel_rev(void);
  * with gray windows, only changed pixels driven, no flash. Boards without it return false; the core then
  * sends gray changes as a full refresh. */
 bool hal_panel_gray_partial(void);
+/* Of `depths` (bit0 = 1, bit1 = 2, bit2 = 4 bit), those a partial refresh takes right now: a setting that lasts until
+ * the next restart may take some away (TRMNL X, tuning key `driver`: plain has no gray partial). Other boards: depths. */
+uint8_t hal_panel_partial_now(uint8_t depths);
 
 /* Panel tuning for experiments from a host (TRMNL X; usbdisp `set { tuning }`): the driver's knobs of the `!tp` console
  * commands as named integers, each with its range and default. A value applies from the next refresh and is NOT stored

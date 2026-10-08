@@ -111,6 +111,10 @@ typedef struct {
     uint16_t w, h;
     uint8_t depths;             /* gray PNG bit depths taken: bit0 = 1, bit1 = 2, bit2 = 4 */
     uint8_t partial_depths;     /* of those, the depths a partial refresh takes (0: none, always a full refresh) */
+    /* optional: of `depths` (partial_depths), those a partial refresh takes right now; a panel setting may take some
+     * away while it lasts (TRMNL X, tuning key `driver`). hello, the modes and the choice of refresh follow it: a depth
+     * taken away is a full refresh (`why: "depth"`), or with `partial` named a refusal. NULL: partial_depths always. */
+    uint8_t (*partial_now)(void *ctx, uint8_t depths);
     bool partial_all;           /* the panel can drive every pixel of a window: partial_all, passes */
     /* a gray partial (depth 2, 4) keeps old and new copies of its rectangle in RAM: its changed rectangle may have at most
      * this many pixels (0: no limit). A larger change is a full refresh (`why: "large"`), or with `partial` named a refusal. */
