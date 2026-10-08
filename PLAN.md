@@ -154,11 +154,30 @@ Not built, with the reason: `fastUpdate` (drives every pixel of the panel, one f
 pause from a count per pixel, rails on throughout, 2.6 MB of heap on the X: fits a sketch in idea, to try only after
 `plain` was seen).
 
-The pin: 8dc8c74 is 12 commits after the newest tag (2.2.0) and 46 after 1.4.6; the stock firmware's X build is at
-9a84c35, 6 commits further. No tagged release is as new as the pin, so it stays.
+The pin: see "Upstream".
 
 The removal of `ours` and of its keys waits for a look at the glass: `plain` and `ours` side by side from the Debug
 section, 1 bit strokes, erasing, a gray picture.
+
+## Upstream
+
+Rule: upstream issues and pull requests are read before any panel work and at least weekly.
+
+| Library | Our pin | Upstream head | The stock firmware's X build pins | Checked |
+|---|---|---|---|---|
+| bitbank2/FastEPD | 8dc8c74 (2026-08-15; 12 commits after tag 2.2.0, 46 after 1.4.6) | 3d2a63a (2026-10-03) | 9a84c35 (2026-09-22), 6 commits after ours | 2026-10-08 |
+
+The pin was tried at 9a84c35 on 2026-10-08 and stays: the library does not compile under ESP-IDF from 7422433 on
+(`pinMode` and `digitalWrite`, Arduino only, in its M5Paper start; still so at the head). Moving needs that fixed
+upstream or a patch of ours. What the move would change for the X is one line of its panel table (8f76e90): 26.67 MHz
+and chip select by the LCD peripheral instead of 20 MHz and chip select by software. That is the bus `ours` already
+sets up again itself, so `ours` would gain nothing and `plain` would get the same bus as `ours`.
+
+| Open upstream, touches the X | State | Us |
+|---|---|---|
+| issue 42: a strip of about 8 columns at the right edge never written (one extra clock per transfer of the LCD peripheral while the hardware chip select is active shifts the row by one bus word) | open, no fix, seen by its reporter on two devices with 9a84c35 | both drivers write all 1872 columns into the frames and send rows through the same `esp_lcd` call. `ours` uses the hardware chip select, so by the issue's reasoning it is exposed. `plain` at our pin uses the chip select by software, which is not the case the issue describes: unknown. Neither seen on glass: show a black bar at the right edge under both |
+| row range in `bbepPartialUpdate` (see "Driving the glass") | found by reading, in our pin and the head; not reported upstream by anyone | `plain` passes the range. Not to be reported before a photo from a device and the owner's word |
+| issue 35, pull request 34 (ESP-IDF build and SPI path) | open | not our panel type; 34 touches the ESP-IDF build, to read when the pin moves |
 
 ## Clean-up
 
