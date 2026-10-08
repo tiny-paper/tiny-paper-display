@@ -15,6 +15,7 @@ export const X_KNOBS: readonly { name: string; min: number; max: number; def: nu
   { name: 'gray_row', min: 0, max: 0, def: 0, text: true }, // `level:passes` entries; the value is the rows that differ, as text
   { name: 'step_neutral', min: 0, max: 1, def: 0, words: ['each', 'end'] }, { name: 'row_skip', min: 0, max: 1, def: 0, words: ['off', 'on'] },
   { name: 'row_skip_us', min: 2, max: 50, def: 10 }, { name: 'scan_min_ms', min: 0, max: 150, def: 0 },
+  { name: 'frame_work', min: 0, max: 1, def: 0, words: ['whole', 'rows'] },
 ];
 /** A knob's value at start: its default, or the empty text. */
 export const knobStart = (k: typeof X_KNOBS[number]): number | string => (k.text ? '' : k.def);

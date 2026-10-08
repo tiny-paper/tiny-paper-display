@@ -535,7 +535,8 @@ var X_KNOBS = [
   { name: "step_neutral", min: 0, max: 1, def: 0, words: ["each", "end"] },
   { name: "row_skip", min: 0, max: 1, def: 0, words: ["off", "on"] },
   { name: "row_skip_us", min: 2, max: 50, def: 10 },
-  { name: "scan_min_ms", min: 0, max: 150, def: 0 }
+  { name: "scan_min_ms", min: 0, max: 150, def: 0 },
+  { name: "frame_work", min: 0, max: 1, def: 0, words: ["whole", "rows"] }
 ];
 var knobStart = (k) => k.text ? "" : k.def;
 function tuningMap(values, knobs = X_KNOBS) {

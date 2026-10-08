@@ -429,8 +429,14 @@ the driver&#39;s <code>!tp</code> console commands, with the bounds those comman
 <td>0</td>
 <td>with <code>row_skip</code>: a scan lasts at least this long (it waits after its last row); about 120 gives every frame the time it has without skipping. Tells a weak drive (cured by it) from a misplaced row (not cured)</td>
 </tr>
+<tr>
+<td><code>frame_work</code></td>
+<td><code>whole</code>, <code>rows</code></td>
+<td><code>whole</code></td>
+<td>the passes over the two 328 KB frames around the scans of a 1 bit partial update (copies, the search for new blacks, the codes of each step, the redrive counts, setting the frames white) cover whole frames, or only the changed rows (with <code>wave_redrive</code> above 0 joined with the rows of the blacks still to be driven again). The library is handed the same frames either way (host-tested byte for byte), so the panel shows the same; <code>rows</code> takes the pause between steps (<code>gap=</code>) from about 110 ms to a few. With <code>rows</code> the fingerprints of the <code>panel given</code> line cover the worked rows only. Watch for: anything that differs from <code>whole</code></td>
+</tr>
 </tbody></table>
-<p>The last four are the scans of a partial update. With their defaults the scans are the library&#39;s own: every step is its
+<p><code>step_neutral</code> to <code>scan_min_ms</code> are the scans of a partial update. With their defaults the scans are the library&#39;s own: every step is its
 drive frames and then one neutral scan, every scan writes all 1404 rows with the timed row step. The gate driver gets one
 clock per row in every scan whatever the keys say; the device counts the clock edges in hardware and the rows as it
 drives them, and logs both after each partial update: <code>panel scan neutral=&lt;each|end&gt; skip=&lt;off|on/&lt;us&gt;us&gt; frames=&lt;scans&gt; careful=&lt;rows written&gt; skipped=&lt;rows clocked through&gt; left=&lt;neutral scans left out&gt; gap=&lt;longest pause between steps&gt; &lt;ok|BAD&gt; per=&lt;clock edges a scan, 1408&gt;</code>; <code>careful + skipped</code> is <code>frames</code> times 1404, else <code>BAD</code> and a <code>W</code> line.

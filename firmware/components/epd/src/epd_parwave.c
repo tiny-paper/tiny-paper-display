@@ -32,8 +32,14 @@ int epd_wave_frames(const epd_wave_step_t *steps, int n)
 
 void epd_wave_scan(const uint8_t *P, const uint8_t *C, const uint8_t *fresh, size_t n, bool *any_wb, bool *any_fresh)
 {
+    epd_wave_scan_at(P, C, fresh, n, 0, n, any_wb, any_fresh);
+}
+
+void epd_wave_scan_at(const uint8_t *P, const uint8_t *C, const uint8_t *fresh, size_t n, size_t off, size_t len,
+                      bool *any_wb, bool *any_fresh)
+{
     uint8_t wb = 0, fr = 0;
-    for (size_t i = 0; i < n; i++) {
+    for (size_t i = off; i < off + len; i++) {
         wb |= (uint8_t)(P[i] & ~C[i]);
         if (fresh)
             fr |= (uint8_t)(fresh[i] | fresh[n + i]);
@@ -45,7 +51,13 @@ void epd_wave_scan(const uint8_t *P, const uint8_t *C, const uint8_t *fresh, siz
 void epd_wave_masks(int phase, const uint8_t *P, const uint8_t *C, const uint8_t *fresh, bool redrive, uint8_t *prev_out,
                     uint8_t *cur_out, size_t n)
 {
-    for (size_t i = 0; i < n; i++) {
+    epd_wave_masks_at(phase, P, C, fresh, redrive, prev_out, cur_out, n, 0, n);
+}
+
+void epd_wave_masks_at(int phase, const uint8_t *P, const uint8_t *C, const uint8_t *fresh, bool redrive,
+                       uint8_t *prev_out, uint8_t *cur_out, size_t n, size_t off, size_t len)
+{
+    for (size_t i = off; i < off + len; i++) {
         uint8_t p = P[i], c = C[i];
         uint8_t wb = (uint8_t)(p & ~c), bw = (uint8_t)(~p & c);
         switch (phase) {
@@ -84,11 +96,17 @@ void epd_wave_drive(const uint8_t *P, const uint8_t *C, const uint8_t *prev_out,
 
 bool epd_wave_track(uint8_t *fresh, const uint8_t *P, const uint8_t *C, size_t n, bool redriven, uint8_t budget)
 {
+    return epd_wave_track_at(fresh, P, C, n, 0, n, redriven, budget);
+}
+
+bool epd_wave_track_at(uint8_t *fresh, const uint8_t *P, const uint8_t *C, size_t n, size_t off, size_t len,
+                       bool redriven, uint8_t budget)
+{
     if (budget > EPD_WAVE_REDRIVE_MAX)
         budget = EPD_WAVE_REDRIVE_MAX;
     const uint8_t bl = budget & 1 ? 0xff : 0, bh = budget & 2 ? 0xff : 0;
     uint8_t ch = 0;
-    for (size_t i = 0; i < n; i++) {
+    for (size_t i = off; i < off + len; i++) {
         uint8_t l = fresh[i], h = fresh[n + i];
         if (redriven) { /* count - 1 where > 0: 01 -> 00, 10 -> 01, 11 -> 10 */
             uint8_t nl = (uint8_t)(~l & h), nh = (uint8_t)(h & l);
@@ -107,11 +125,17 @@ bool epd_wave_track(uint8_t *fresh, const uint8_t *P, const uint8_t *C, size_t n
 
 void epd_wave_fresh_info(const uint8_t *fresh, size_t n, size_t row_bytes, epd_fresh_info_t *out)
 {
+    epd_wave_fresh_info_at(fresh, n, row_bytes, 0, n, out);
+}
+
+void epd_wave_fresh_info_at(const uint8_t *fresh, size_t n, size_t row_bytes, size_t off, size_t len,
+                            epd_fresh_info_t *out)
+{
     out->px = 0;
     out->y0 = out->y1 = -1;
     if (!fresh || !row_bytes)
         return;
-    for (size_t i = 0; i < n; i++) {
+    for (size_t i = off; i < off + len; i++) {
         uint8_t f = (uint8_t)(fresh[i] | fresh[n + i]);
         if (!f)
             continue;

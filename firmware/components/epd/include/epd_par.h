@@ -97,6 +97,12 @@ const epdp_gpart_info_t *epdp_last_gpart(void);
  * EPD_FRESH_PLANES bit planes of w*h/8 bytes, *n bytes in all), allocated on first use; NULL if the panel is
  * not open or no PSRAM. The caller may load it (hal_esp keeps it across deep sleep). epdp_full clears it. */
 uint8_t *epdp_fresh(size_t *n);
+/* The caller wrote the fresh bitmap (loaded it): call this after. */
+void epdp_fresh_loaded(void);
+/* The work on the frames of a 1 bpp partial around its scans (epd_parjob.h): false (default) whole frames, true
+ * only the rows that can hold anything. Same frames to the library either way; with true the fingerprints of
+ * epdp_last_given cover the worked rows only. From the next partial (its epdp_partial_begin). */
+int epdp_set_work(bool rows);
 /* True once after a partial changed the fresh bitmap. */
 bool epdp_fresh_take_dirty(void);
 /* Row step delays of partial updates (epd_rowtime.h): settle, hold 0..EPD_ROW_DELAY_MAX us, from the next

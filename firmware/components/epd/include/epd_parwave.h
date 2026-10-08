@@ -99,6 +99,20 @@ typedef struct {
 } epd_fresh_info_t;
 void epd_wave_fresh_info(const uint8_t *fresh, size_t n, size_t row_bytes, epd_fresh_info_t *out);
 
+/* The same over a part of the frames only: bytes [off, off + len) of every n-byte frame and of both fresh planes;
+ * nothing outside is read or written. With off 0 and len n they are the calls above. For an update whose frames are
+ * equal (P == C) outside those bytes and whose fresh planes are 0 there, the results are the whole-frame ones
+ * (epd_parjob.h runs a partial that way; test_epd_parjob compares the two). */
+void epd_wave_scan_at(const uint8_t *P, const uint8_t *C, const uint8_t *fresh, size_t n, size_t off, size_t len,
+                      bool *any_wb, bool *any_fresh);
+void epd_wave_masks_at(int phase, const uint8_t *P, const uint8_t *C, const uint8_t *fresh, bool redrive,
+                       uint8_t *prev_out, uint8_t *cur_out, size_t n, size_t off, size_t len);
+bool epd_wave_track_at(uint8_t *fresh, const uint8_t *P, const uint8_t *C, size_t n, size_t off, size_t len,
+                       bool redriven, uint8_t budget);
+/* y0, y1 are rows of the whole frame. */
+void epd_wave_fresh_info_at(const uint8_t *fresh, size_t n, size_t row_bytes, size_t off, size_t len,
+                            epd_fresh_info_t *out);
+
 /* Byte run-length code for keeping fresh across deep sleep (hal_esp panel_par.c): tokens of a LEB128 varint
  * (len << 1 | literal) followed by one byte (a run of len equal bytes) or len literal bytes. */
 size_t epd_rle_bound(size_t n);

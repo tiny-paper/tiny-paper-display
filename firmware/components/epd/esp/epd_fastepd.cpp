@@ -5,6 +5,7 @@
 #include "epd_par.h"
 #include "epd_parwin.h"
 #include "epd_parwave.h"
+#include "epd_parjob.h"
 #include "epd_scan.h"
 #include "epd_split.h"
 #include "esp_heap_caps.h"
@@ -398,6 +399,10 @@ static epdp_wave_ms_t s_wave_ms;
 static bool s_fresh_dirty; /* fresh changed since epdp_fresh_take_dirty */
 
 static epd_fresh_info_t s_redrive; /* pixels the last partial re-drove (epd_parwave.h) */
+/* The frames of a partial update (epd_parjob.h): s_work_rows (epdp_set_work) lets its passes cover only the rows that
+ * can hold anything instead of whole frames. s_job is set up with the scratch buffers. */
+static epd_parjob_t s_job;
+static bool s_work_rows;
 static epdp_given_t s_given;       /* what the last partial handed to FastEPD (epd_par.h) */
 
 /* FNV-1a over a frame: a fingerprint for the log (this component has no CRC of its own). */
@@ -409,7 +414,7 @@ static uint32_t fnv1a(const uint8_t *p, size_t n)
 }
 
 /* The frames as given: fingerprints, differing pixels by direction, their row span, the library's state. */
-static void given_scan(const uint8_t *P, const uint8_t *C, size_t n, size_t row_bytes)
+static void given_scan(const uint8_t *P, const uint8_t *C, size_t n, size_t row_bytes, int row0)
 {
     memset(&s_given, 0, sizeof s_given);
     s_given.crc_prev = fnv1a(P, n);
@@ -421,7 +426,7 @@ static void given_scan(const uint8_t *P, const uint8_t *C, size_t n, size_t row_
         s_given.diff_px += (uint32_t)__builtin_popcount(x);
         s_given.wb_px += (uint32_t)__builtin_popcount((uint8_t)(P[i] & ~C[i]));
         s_given.bw_px += (uint32_t)__builtin_popcount((uint8_t)(~P[i] & C[i]));
-        int y = (int)(i / row_bytes);
+        int y = row0 + (int)(i / row_bytes);
         if (s_given.y0 < 0) s_given.y0 = y;
         s_given.y1 = y;
     }
@@ -439,9 +444,11 @@ static void mark_slow_driven(size_t n, bool redriven)
     s_row_stats.slow_driven = 0;
     for (int i = 0; i < s_row_stats.nslow_rows; i++) {
         size_t o = (size_t)s_row_stats.slow_rows[i] * rb;
+        /* the saved frames hold the worked rows only (epd_parjob.h); outside them nothing changed */
+        const bool in = s_row_stats.slow_rows[i] >= s_job.a && s_row_stats.slow_rows[i] <= s_job.b;
         uint8_t d = 0;
         for (size_t x = 0; o + rb <= n && x < rb; x++)
-            d |= (uint8_t)((s_p[o + x] ^ s_c[o + x]) | (redriven ? s_fresh[o + x] | s_fresh[n + o + x] : 0));
+            d |= (uint8_t)((in ? s_p[o + x] ^ s_c[o + x] : 0) | (redriven ? s_fresh[o + x] | s_fresh[n + o + x] : 0));
         if (d) s_row_stats.slow_driven |= (uint8_t)(1u << i);
     }
 }
@@ -453,7 +460,16 @@ static bool scratch(size_t n)
     s_p = (uint8_t *)heap_caps_malloc(n, MALLOC_CAP_SPIRAM);
     s_c = (uint8_t *)heap_caps_malloc(n, MALLOC_CAP_SPIRAM);
     s_fresh = (uint8_t *)heap_caps_calloc(EPD_FRESH_PLANES, n, MALLOC_CAP_SPIRAM);
-    if (s_p && s_c && s_fresh) return true;
+    if (s_p && s_c && s_fresh) {
+        s_job.P = s_p;
+        s_job.C = s_c;
+        s_job.fresh = s_fresh;
+        s_job.n = n;
+        s_job.rb = (size_t)(s_epd.width() / 8);
+        s_job.h = s_epd.height();
+        epd_parjob_init(&s_job);
+        return true;
+    }
     ESP_LOGE(TAG, "no PSRAM for the partial waveform");
     heap_caps_free(s_p);
     heap_caps_free(s_c);
@@ -568,6 +584,7 @@ extern "C" int epdp_set_depth(int bpp)
 {
     if (!s_open) return EPDP_E_STATE;
     if (bpp != 1 && bpp != 4) return EPDP_E_ARG;
+    epd_parjob_touched(&s_job); /* the caller writes a whole picture next */
     return s_epd.setMode(bpp == 1 ? BB_MODE_1BPP : BB_MODE_4BPP) == BBEP_SUCCESS ? EPDP_OK : EPDP_E_ARG;
 }
 
@@ -586,6 +603,8 @@ extern "C" int epdp_full(int clear_mode)
     int64_t t0 = esp_timer_get_time();
     split_begin();
     if (s_fresh) memset(s_fresh, 0, EPD_FRESH_PLANES * (size_t)(s_epd.width() / 8) * s_epd.height()); /* all driven by the full waveform */
+    epd_parjob_fresh_none(&s_job);
+    epd_parjob_touched(&s_job);
     s_fresh_dirty = false;
     rows_begin(false);
     int rc = lib_call(EPD_SPLIT_PREP, [&] { return s_epd.fullUpdate(modes[clear_mode], false); });
@@ -616,6 +635,7 @@ extern "C" int epdp_gray_to_1bit(void)
         }
     }
     s_epd.setMode(BB_MODE_1BPP);
+    epd_parjob_touched(&s_job);
     memcpy(s_epd.currentBuffer(), tmp, (size_t)s1 * h);
     memcpy(s_epd.previousBuffer(), tmp, (size_t)s1 * h);
     s_epd.setPreviousMode(BB_MODE_1BPP);
@@ -655,11 +675,14 @@ static bool scan_begin(int *rc)
 /* A step's scans through the sequencer: the rows FastEPD's frames differ in now, joined with those of the
  * update's earlier steps (a row driven before is still written with the timed step and reaches the neutral
  * scan). */
-static int scan_run(const uint8_t *prev, const uint8_t *cur, size_t n, int *y0, int *y1, int frames, int step, int steps)
+static int scan_run(const uint8_t *prev, const uint8_t *cur, size_t n, int row0, int *y0, int *y1, int frames, int step,
+                    int steps)
 {
     int a0, a1;
     epd_scan_rows_t r;
+    /* n bytes from row0 on: the rows the frames can differ in (all of them, or the worked rows of epd_parjob.h) */
     epd_scan_span(prev, cur, n, (size_t)(s_epd.width() / 8), &a0, &a1);
+    if (a0 >= 0) a0 += row0, a1 += row0;
     epd_scan_union(y0, y1, a0, a1);
     epd_scan_rows(s_epd.height(), *y0, *y1, s_scan_skip, &r);
     return scan_step(r, frames, epd_scan_step_neutral(s_scan_used.neutral, step, steps));
@@ -678,16 +701,17 @@ extern "C" int epdp_partial(int y0, int y1)
     int64_t t0 = esp_timer_get_time();
     split_begin();
     uint8_t *cur = s_epd.currentBuffer(), *prev = s_epd.previousBuffer();
-    memcpy(s_p, prev, n);
-    memcpy(s_c, cur, n);
-    bool any_wb, any_fresh;
-    epd_wave_scan(s_p, s_c, s_fresh, n, &any_wb, &any_fresh);
-    given_scan(s_p, s_c, n, (size_t)(s_epd.width() / 8));
-    epd_wave_step_t st[3];
-    int ns = epd_wave_plan(&s_wave, any_wb, any_fresh, st);
-    const bool redriven = s_wave.redrive && any_fresh && ns && st[0].phase == EPD_WAVE_KICK;
+    s_job.prev = prev;
+    s_job.cur = cur;
+    /* the frames saved, the search for new blacks and the plan of steps (epd_parjob.h): over whole frames, or with
+     * epdp_set_work over the rows that can hold anything */
+    epd_parjob_begin(&s_job, &s_wave, y0, y1, s_work_rows);
+    given_scan(s_p + s_job.off, s_c + s_job.off, s_job.len, s_job.rb, s_job.a);
+    const epd_wave_step_t *st = s_job.st;
+    const int ns = s_job.ns;
+    const bool redriven = s_job.redriven;
     memset(&s_wave_ms, 0, sizeof s_wave_ms);
-    epd_wave_fresh_info(redriven ? s_fresh : nullptr, n, (size_t)(s_epd.width() / 8), &s_redrive);
+    s_redrive = s_job.redrive;
     int rc = rails_up(EPD_SPLIT_PREP);
     rows_begin(true);
     int sy0 = -1, sy1 = -1;
@@ -696,11 +720,10 @@ extern "C" int epdp_partial(int y0, int y1)
      * previous as it goes, so every step rebuilds both from the saved frames. */
     for (int i = 0; i < ns && rc == BBEP_SUCCESS; i++) {
         int64_t t = esp_timer_get_time();
-        epd_wave_masks(st[i].phase, s_p, s_c, s_fresh, s_wave.redrive, prev, cur, n);
-        epd_wave_drive(s_p, s_c, prev, cur, n, &s_given.drv[st[i].phase]);
+        epd_parjob_step(&s_job, i, &s_given.drv[st[i].phase]);
         s_epd.setPasses(st[i].frames, s_full_passes);
         if (seq)
-            rc = scan_run(prev, cur, n, &sy0, &sy1, st[i].frames, i, ns);
+            rc = scan_run(prev + s_job.off, cur + s_job.off, s_job.len, s_job.a, &sy0, &sy1, st[i].frames, i, ns);
         else
             rc = lib_call(EPD_SPLIT_MASKS, [&] { return s_epd.partialUpdate(i + 1 < ns, first, last); });
         s_wave_ms.ms[st[i].phase] = (uint16_t)((esp_timer_get_time() - t) / 1000);
@@ -711,9 +734,7 @@ extern "C" int epdp_partial(int y0, int y1)
     s_epd.setPasses(s_wave.main, s_full_passes);
     rails_down(EPD_SPLIT_MASKS);
     mark_slow_driven(n, redriven);
-    if (rc == BBEP_SUCCESS && epd_wave_track(s_fresh, s_p, s_c, n, redriven, s_wave.redrive)) s_fresh_dirty = true;
-    memcpy(cur, s_c, n);
-    memcpy(prev, s_c, n);
+    if (epd_parjob_end(&s_job, rc == BBEP_SUCCESS)) s_fresh_dirty = true;
     lap(EPD_SPLIT_AFTER);
     s_last_ms = (uint32_t)((esp_timer_get_time() - t0) / 1000);
     return rc == BBEP_SUCCESS ? EPDP_OK : EPDP_E_IO;
@@ -799,7 +820,7 @@ extern "C" int epdp_gray_partial(const epdp_gwin_t *win, int nw, const uint8_t *
         if (drv > s_gpart.driven_px) s_gpart.driven_px = drv;
         s_epd.setPasses(st[i].frames, s_full_passes);
         if (seq)
-            rc = scan_run(prev, cur, n, &sy0, &sy1, st[i].frames, i, ns);
+            rc = scan_run(prev, cur, n, 0, &sy0, &sy1, st[i].frames, i, ns);
         else
             rc = lib_call(EPD_SPLIT_MASKS, [&] { return s_epd.partialUpdate(i + 1 < ns, 0, H - 1); });
         s_gpart.steps++;
@@ -826,6 +847,7 @@ extern "C" int epdp_gray_partial(const epdp_gwin_t *win, int nw, const uint8_t *
     }
     memset(prev, 0xff, n);
     memset(cur, 0xff, n);
+    epd_parjob_is_white(&s_job);
     lap(EPD_SPLIT_AFTER);
     s_last_ms = (uint32_t)((esp_timer_get_time() - t0) / 1000);
     return rc == BBEP_SUCCESS ? EPDP_OK : EPDP_E_IO;
@@ -839,6 +861,17 @@ extern "C" uint8_t *epdp_fresh(size_t *n)
     size_t plane = (size_t)(s_epd.width() / 8) * s_epd.height();
     *n = EPD_FRESH_PLANES * plane;
     return scratch(plane) ? s_fresh : nullptr;
+}
+
+extern "C" void epdp_fresh_loaded(void)
+{
+    if (s_fresh) epd_parjob_fresh_unknown(&s_job);
+}
+
+extern "C" int epdp_set_work(bool rows)
+{
+    s_work_rows = rows;
+    return EPDP_OK;
 }
 
 extern "C" bool epdp_fresh_take_dirty(void)
@@ -914,8 +947,14 @@ extern "C" int epdp_partial_begin(void)
     if (!s_open) return EPDP_E_STATE;
     s_epd.setMode(BB_MODE_1BPP);
     const size_t n = (size_t)(s_epd.width() / 8) * s_epd.height();
-    memset(s_epd.currentBuffer(), 0xff, n);
-    memset(s_epd.previousBuffer(), 0xff, n);
+    if (scratch(n)) { /* with epdp_set_work only the rows the last partial left not white (epd_parjob.h) */
+        s_job.prev = s_epd.previousBuffer();
+        s_job.cur = s_epd.currentBuffer();
+        epd_parjob_white(&s_job, s_work_rows);
+    } else {
+        memset(s_epd.currentBuffer(), 0xff, n);
+        memset(s_epd.previousBuffer(), 0xff, n);
+    }
     s_epd.setPreviousMode(BB_MODE_1BPP); /* no conversion of an older frame in partialUpdate */
     return EPDP_OK;
 }

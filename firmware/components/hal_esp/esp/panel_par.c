@@ -178,6 +178,8 @@ bool hal_panel_gray_partial(void) { return s_gp.on; }
 static const char *const W_GRAY[] = {"fastepd", "stock"};
 static const char *const W_ONOFF[] = {"off", "on"};
 static const char *const W_CLEAR[] = {"auto", "none", "fast", "slow"};
+static const char *const W_WORK[] = {"whole", "rows"};
+static uint8_t s_work; /* frame_work: the passes over the frames of a 1 bit partial cover whole frames, or its rows */
 static const struct {
     hal_tune_t t;
     uint8_t *v;
@@ -195,6 +197,7 @@ static const struct {
     {{"row_hold", 0, EPD_ROW_DELAY_MAX, BOARD_EPD_ROW_HOLD, NULL}, &s_rows.hold},
     {{"row_drive", 0, EPD_ROW_DRIVE_MAX, EPD_ROW_DRIVE_DEFAULT, NULL}, &s_drive},
     {{"clear", CLEAR_AUTO, CLEAR_SLOW_, CLEAR_AUTO, W_CLEAR}, &s_clear},
+    {{"frame_work", 0, 1, 0, W_WORK}, &s_work},
 };
 #define NKNOBS (sizeof KNOBS / sizeof KNOBS[0])
 
@@ -205,6 +208,7 @@ static void tune_apply(void)
     epdp_set_rows(s_rows.settle, s_rows.hold);
     epdp_set_drive(s_drive);
     epdp_set_scan(&s_scan);
+    epdp_set_work(s_work);
     tab_sync();
 }
 
@@ -376,6 +380,7 @@ static void fresh_load(void)
     free(buf);
     if (rc)
         memset(f, 0, n);
+    epdp_fresh_loaded();
     hal_logf("%c panel fresh %s bytes=%ld ms=%u", rc ? 'W' : 'I', rc ? "not loaded" : "loaded", sz,
              (unsigned)((esp_timer_get_time() - t) / 1000));
 }
