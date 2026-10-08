@@ -37,7 +37,7 @@
  *   !tp bus <0|stock|mhz>             LCD bus from the next boot (NVS "xbus"): 0 = FastEPD 8f76e90's TRMNL X setting
  *                                     (26.67 MHz, hardware chip select; default), 10..40 = that clock with hardware
  *                                     chip select, stock = 8dc8c74 as stock pins it (20 MHz, SPH by software)
- *   !tp gpart <on|off> [dark] [light] gray partial (experimental, NVS "xgpart", default off): when a partial
+ *   !tp gpart <on|off> [dark] [light] gray partial (experimental, NVS "xgpart", default on): when a partial
  *                                     changes grays (depth 2/4, gray mode hybrid), the gray table runs on the
  *                                     changed pixels only (epd_parwave.h EPD_GP_*), no clearing flash, instead
  *                                     of a full refresh. dark/light 0..14 (default 0 3): frames pushing the
@@ -108,7 +108,7 @@ static uint8_t s_bus_mhz;                       /* NVS "xbus": 0 = 26.67 MHz har
 typedef struct {
     uint8_t on, dark, light; /* epdp_gray_partial */
 } gpart_cfg_t;
-static gpart_cfg_t s_gp = {0, 0, 3};
+static gpart_cfg_t s_gp = {1, 0, 3}; /* on by default (display firmware): hello lists the gray partial depths; "!tp gpart off" */
 /* windows of a gray partial (depth 2/4): 4 bpp copies of old and new pixels, freed after the refresh */
 #define GP_MAX 16
 static epdp_gwin_t s_gw[GP_MAX];

@@ -283,13 +283,14 @@ named and counts, except an unchanged `partial` which uses no count.
 
 | Board | `partial_depths` | `modes` |
 |---|---|---|
-| `trmnl_x` | 1 (2 and 4 too while the panel's experimental gray partial is switched on) | full, partial, partial_all, inverse, passes |
+| `trmnl_x` | 1, 2 and 4 (the gray partial of the panel is on by default; experimental, never seen on a real panel) | full, partial, partial_all, inverse, passes |
 | `trmnl_og` | 1 | full, partial, inverse |
 | `picpak` | none | full |
 
-The X driver does take partials at 2 and 4 bit (`epdp_gray_partial`), but behind the owner setting `!tp gpart on`, off by
-default because the result is not yet seen on glass. The display firmware reports what the board's `hal_panel_gray_partial`
-says and does not switch it on itself. The X keeps its redrive bitmap in RAM only here (`hal_panel_fresh_ram`, issue #214):
+The X driver takes partials at 2 and 4 bit (`epdp_gray_partial`). In the display firmware it is on by default, because the
+Sketch page draws grays with it; the result is not yet seen on a real panel. The firmware reports what the board's
+`hal_panel_gray_partial` says, so `partial_depths` is 1, 2, 4. The console command `!tp gpart off` switches it off again
+(kept across restarts; `!tp gpart on` back); there is no `set` key for it. The X keeps its redrive bitmap in RAM only here (`hal_panel_fresh_ram`, issue #214):
 no flash file is written per partial update.
 
 ### Bluetooth
