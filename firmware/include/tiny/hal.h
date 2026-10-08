@@ -223,6 +223,12 @@ const hal_tune_t *hal_panel_tune_info(size_t i);
 int hal_panel_tune_get(size_t i);
 bool hal_panel_tune_set(size_t i, int v); /* false: outside min..max, nothing changed */
 void hal_panel_tune_defaults(void);
+/* One more tuning key on a board with a gray table whose rows can be replaced (TRMNL X, key `gray_row`): rows as text,
+ * "<level>:<passes>" entries (epd_graytab.h). set: false when refused, `why` in words, nothing changed; applied from
+ * the next refresh, full and partial, not stored. get: the rows that differ from the table's own as the same text
+ * ("" when none). Boards without it: set false with why "", get "" (the stub, hal_esp sys.c). */
+bool hal_panel_gray_rows_set(const char *s, size_t len, char *why, size_t cap);
+void hal_panel_gray_rows_get(char *out, size_t cap);
 
 /* Box partial (the press mark on a panel without a quick partial: PicPak, firmware.md "Press mark"): while
  * true, hal_panel_begin(depth, PARTIAL) is taken also when partial_refresh is false. The areas written must form one

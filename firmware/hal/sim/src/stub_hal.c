@@ -60,6 +60,19 @@ const hal_tune_t *hal_panel_tune_info(size_t i) { (void)i; return NULL; }
 int hal_panel_tune_get(size_t i) { (void)i; return 0; }
 bool hal_panel_tune_set(size_t i, int v) { (void)i; (void)v; return false; }
 void hal_panel_tune_defaults(void) {}
+bool hal_panel_gray_rows_set(const char *s, size_t len, char *why, size_t cap)
+{
+    (void)s;
+    (void)len;
+    if (cap)
+        why[0] = 0;
+    return false;
+}
+void hal_panel_gray_rows_get(char *out, size_t cap)
+{
+    if (cap)
+        out[0] = 0;
+}
 void hal_panel_new_image(bool image) { (void)image; }
 void hal_panel_palette(uint8_t palette) { (void)palette; }
 int hal_panel_refresh(void) { return 0; }

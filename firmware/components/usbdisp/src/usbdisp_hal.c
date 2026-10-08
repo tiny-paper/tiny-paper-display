@@ -73,6 +73,12 @@ static const hal_tune_t *h_tune_info(void *ctx, size_t i) { (void)ctx; return ha
 static int h_tune_get(void *ctx, size_t i) { (void)ctx; return hal_panel_tune_get(i); }
 static bool h_tune_set(void *ctx, size_t i, int v) { (void)ctx; return hal_panel_tune_set(i, v); }
 static void h_tune_defaults(void *ctx) { (void)ctx; hal_panel_tune_defaults(); }
+static bool h_gray_rows_set(void *ctx, const char *s, size_t len, char *why, size_t cap)
+{
+    (void)ctx;
+    return hal_panel_gray_rows_set(s, len, why, cap);
+}
+static void h_gray_rows_get(void *ctx, char *out, size_t cap) { (void)ctx; hal_panel_gray_rows_get(out, cap); }
 
 static int h_kv_get(void *ctx, const char *key, void *buf, size_t cap)
 {
@@ -140,6 +146,8 @@ void usbdisp_hal_cfg(usbdisp_cfg_t *cfg, const char *fw)
     cfg->tune_get = h_tune_get;
     cfg->tune_set = h_tune_set;
     cfg->tune_defaults = h_tune_defaults;
+    cfg->gray_rows_set = h_gray_rows_set;
+    cfg->gray_rows_get = h_gray_rows_get;
     cfg->kv_get = h_kv_get;
     cfg->kv_set = h_kv_set;
     cfg->log = h_log;

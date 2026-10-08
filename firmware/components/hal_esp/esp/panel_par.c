@@ -87,10 +87,11 @@
 #include "epd_par.h"
 #include "epd_parwave.h"
 #include "epd_parwin.h"
+#include "epd_graytab.h"
 #include "epd_scan.h"
 
 enum { CLEAR_AUTO = 0, CLEAR_NONE_ = 1, CLEAR_FAST_ = 2, CLEAR_SLOW_ = 3 };
-enum { GRAY_FASTEPD = 0, GRAY_STOCK = 1 };
+enum { GRAY_FASTEPD = EPD_GRAYTAB_FASTEPD, GRAY_STOCK = EPD_GRAYTAB_STOCK };
 
 typedef struct {
     uint8_t partial, full; /* FastEPD passes */
@@ -133,24 +134,19 @@ static bool s_begun;
 static int s_y0, s_y1; /* partial: rows written */
 static const char *s_clear_used = "";
 
-/* FastEPD 8dc8c74 u8GrayMatrix (Apache-2.0), 16 grays x 8 passes: FastEPD's default for BB_PANEL_TRMNL_X.
- * Kept here because FastEPD has no call to go back to it after setCustomMatrix. */
-static const uint8_t GRAY_FASTEPD_TAB[] = {
-    2, 2, 1, 1, 1, 1, 1, 1, /**/ 2, 2, 2, 2, 1, 1, 2, 1, /**/ 2, 2, 2, 1, 1, 1, 1, 2, /**/ 2, 2, 2, 1, 1, 1, 1, 2,
-    2, 2, 2, 2, 1, 1, 1, 2, /**/ 2, 2, 2, 2, 1, 2, 2, 1, /**/ 2, 2, 1, 1, 1, 2, 1, 2, /**/ 2, 2, 2, 1, 1, 2, 1, 2,
-    1, 1, 1, 1, 1, 1, 2, 2, /**/ 2, 1, 1, 1, 1, 1, 2, 2, /**/ 2, 2, 1, 1, 1, 1, 2, 2, /**/ 2, 2, 2, 1, 1, 1, 2, 2,
-    2, 1, 1, 2, 1, 1, 2, 2, /**/ 2, 2, 2, 2, 1, 1, 2, 2, /**/ 2, 2, 2, 2, 2, 1, 2, 2, /**/ 2, 2, 2, 2, 2, 2, 2, 2,
-};
-/* Stock trmnl-firmware f5f87b7 src/display.cpp u8_graytable (GPL-3.0), 16 grays x 9 passes. */
-static const uint8_t GRAY_STOCK_TAB[] = {
-    0, 0, 0, 0, 0, 0, 1, 1, 1, /**/ 0, 0, 1, 1, 1, 2, 2, 1, 1, /**/ 0, 0, 0, 0, 1, 2, 2, 1, 1,
-    1, 1, 2, 2, 1, 1, 1, 1, 2, /**/ 0, 0, 0, 1, 2, 1, 1, 1, 2, /**/ 1, 2, 2, 2, 2, 1, 1, 1, 2,
-    0, 0, 1, 1, 2, 2, 1, 1, 2, /**/ 0, 1, 1, 2, 1, 1, 2, 1, 2, /**/ 0, 1, 1, 1, 2, 1, 2, 1, 2,
-    0, 1, 1, 1, 1, 2, 2, 1, 2, /**/ 1, 1, 1, 2, 1, 1, 1, 2, 2, /**/ 0, 0, 1, 2, 1, 1, 1, 2, 2,
-    0, 0, 0, 1, 2, 1, 1, 2, 2, /**/ 0, 0, 0, 0, 1, 2, 1, 2, 2, /**/ 0, 1, 1, 1, 2, 2, 2, 2, 2,
-    0, 0, 0, 0, 0, 0, 0, 0, 2,
-};
-_Static_assert(sizeof GRAY_FASTEPD_TAB == 16 * 8 && sizeof GRAY_STOCK_TAB == 16 * 9, "gray tables");
+/* The gray table in use (epd_graytab.h): FastEPD's or stock's rows, single rows replaced by the tuning key gray_row.
+ * Two readers: the gray partial takes s_tab.m at each refresh; a full refresh uses the lookup FastEPD built from the
+ * matrix at epdp_set_matrix, so every change marks s_tab_new and the next refresh hands the matrix over again. */
+static epd_graytab_t s_tab;
+static bool s_tab_new;
+
+static void tab_sync(void)
+{
+    if (s_tab.passes && s_tab.table == s_gray)
+        return;
+    epd_graytab_select(&s_tab, s_gray); /* a table switch puts every row back to the table's own */
+    s_tab_new = true;
+}
 
 /* The display firmware reads one stored setting, the gray partial switch (src/panel_cfg.h); every other key of the
  * firmware this driver came from is left alone, so a board behaves the same on every device. Why, key by key:
@@ -206,6 +202,7 @@ static void tune_apply(void)
     epdp_set_rows(s_rows.settle, s_rows.hold);
     epdp_set_drive(s_drive);
     epdp_set_scan(&s_scan);
+    tab_sync();
 }
 
 /* After KNOBS come the keys of the scans of a partial, defined and bounded in epd_scan.h (host-tested there and
@@ -245,7 +242,23 @@ void hal_panel_tune_defaults(void)
     for (size_t i = 0; i < NKNOBS; i++)
         *KNOBS[i].v = (uint8_t)KNOBS[i].t.def;
     epd_scan_key_defaults(&s_scan);
+    s_tab.passes = 0; /* the table's own rows again */
     tune_apply();
+}
+
+bool hal_panel_gray_rows_set(const char *s, size_t len, char *why, size_t cap)
+{
+    tab_sync();
+    if (!epd_graytab_set_rows(&s_tab, s, len, why, cap))
+        return false;
+    s_tab_new = true;
+    return true;
+}
+
+void hal_panel_gray_rows_get(char *out, size_t cap)
+{
+    tab_sync();
+    epd_graytab_rows_str(&s_tab, out, cap);
 }
 
 /* "!tp ramp" keeps its test card up for RAMP_HOLD_S (across deep sleep): the app's refreshes are skipped until then,
@@ -296,10 +309,19 @@ bool hal_esp_panel_bottom_up(void) { return false; }
 
 static void apply_gray(void)
 {
-    int rc = s_gray == GRAY_STOCK ? epdp_set_matrix(GRAY_STOCK_TAB, (int)sizeof GRAY_STOCK_TAB)
-                                  : epdp_set_matrix(GRAY_FASTEPD_TAB, (int)sizeof GRAY_FASTEPD_TAB);
+    tab_sync();
+    int rc = epdp_set_matrix(s_tab.m, s_tab.passes * EPD_GRAYTAB_LEVELS);
+    s_tab_new = false;
     if (rc)
         hal_logf("W panel gray table rc=%d", rc);
+}
+
+/* "gray=stock", with " rows*=5,6" when rows of the table are replaced: which table drew the picture */
+static const char *gray_str(char *b, size_t n)
+{
+    char m[48];
+    snprintf(b, n, "%s%s", epd_graytab_name(s_tab.table), epd_graytab_mark(&s_tab, m, sizeof m));
+    return b;
 }
 
 static int open_panel(void)
@@ -405,6 +427,8 @@ int hal_panel_begin(uint8_t depth, hal_refresh_t mode)
     gw_free();
     if (open_panel())
         return HAL_E_IO;
+    if (s_tab_new || s_tab.table != s_gray)
+        apply_gray(); /* the table or a row of it changed: the full refresh's lookup is built again */
     if (mode == HAL_REFRESH_PARTIAL)
         fresh_load();
     int rc = mode == HAL_REFRESH_PARTIAL ? epdp_partial_begin() : epdp_set_depth(depth == 1 ? 1 : 4);
@@ -550,17 +574,17 @@ int hal_panel_refresh(void)
     int64_t t = esp_timer_get_time();
     int rc;
     if (s_mode == HAL_REFRESH_PARTIAL && s_depth > 1) {
-        const uint8_t *tab = s_gray == GRAY_STOCK ? GRAY_STOCK_TAB : GRAY_FASTEPD_TAB;
-        int np = s_gray == GRAY_STOCK ? (int)sizeof GRAY_STOCK_TAB / 16 : (int)sizeof GRAY_FASTEPD_TAB / 16;
+        const uint8_t *tab = s_tab.m;
+        int np = s_tab.passes;
         rc = s_gw_bad ? EPDP_E_ARG : s_ngw ? epdp_gray_partial(s_gw, s_ngw, tab, np, s_gp.dark, s_gp.light) : EPDP_OK;
         gw_free();
         hal_stats.refresh_ms = (uint32_t)((esp_timer_get_time() - t) / 1000);
         fresh_save();
         const epdp_gpart_info_t *g = epdp_last_gpart();
-        char rb[200];
+        char rb[200], gb[64];
         hal_logf("panel gpart depth=%u rows=%d..%d ms=%u dark=%u light=%u gray=%s steps=%u frames=%u chg=%lu drv=%lu %s "
                  "rc=%d", s_depth, s_y0, s_y1, (unsigned)hal_stats.refresh_ms, s_gp.dark, s_gp.light,
-                 s_gray == GRAY_STOCK ? "stock" : "fastepd", g->steps, g->frames, (unsigned long)g->changed_px,
+                 gray_str(gb, sizeof gb), g->steps, g->frames, (unsigned long)g->changed_px,
                  (unsigned long)g->driven_px, hal_esp_par_rows_str(rb, sizeof rb), rc);
         hal_esp_par_log_drive(s_mode == HAL_REFRESH_FULL);
         hal_esp_par_log_scan();
@@ -601,9 +625,9 @@ int hal_panel_refresh(void)
         s_fresh_ready = true;
         hal_fs_remove(FRESH_PATH);
         hal_stats.refresh_ms = (uint32_t)((esp_timer_get_time() - t) / 1000);
-        char rb[200];
+        char rb[200], gb[64];
         hal_logf("panel full depth=%u ms=%u clear=%s gray=%s %s rc=%d", s_depth, (unsigned)hal_stats.refresh_ms,
-                 s_clear_used, s_gray == GRAY_STOCK ? "stock" : "fastepd", hal_esp_par_rows_str(rb, sizeof rb), rc);
+                 s_clear_used, gray_str(gb, sizeof gb), hal_esp_par_rows_str(rb, sizeof rb), rc);
         hal_esp_par_log_drive(s_mode == HAL_REFRESH_FULL);
     }
     return rc == EPDP_OK ? HAL_OK : HAL_E_IO;

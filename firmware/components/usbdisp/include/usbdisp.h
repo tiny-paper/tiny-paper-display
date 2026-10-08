@@ -143,6 +143,10 @@ typedef struct {
     const hal_tune_t *(*tune_info)(void *ctx, size_t i);
     int (*tune_get)(void *ctx, size_t i);
     bool (*tune_set)(void *ctx, size_t i, int v);
+    /* optional, both or none, with the knobs above: the key `gray_row` (hal_panel_gray_rows_set / _get): rows of the gray
+     * table as text. set false: refused, `why` in words. get: the changed rows ("" when none), shown in `tuning`. */
+    bool (*gray_rows_set)(void *ctx, const char *s, size_t len, char *why, size_t cap);
+    void (*gray_rows_get)(void *ctx, char *out, size_t cap);
     void (*tune_defaults)(void *ctx);
     /* optional: the device's settings store, as hal_kv_get / hal_kv_set */
     int (*kv_get)(void *ctx, const char *key, void *buf, size_t cap);

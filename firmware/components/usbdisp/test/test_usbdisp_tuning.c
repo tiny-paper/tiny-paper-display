@@ -1,6 +1,7 @@
 /* usbdisp: the panel tuning of `set { tuning }` (docs/spec/usb-display.md "Tuning") against fake knobs: a good key applies,
  * a bad one is refused with why and its range while the rest still apply, an unknown key, a board without knobs,
  * "defaults", and hello and every answer reflect the knobs. SPDX-License-Identifier: GPL-3.0-or-later */
+#include "epd_graytab.h"
 #include "epd_scan.h"
 #include "usbdisp_fake.h"
 
@@ -17,6 +18,16 @@ static int sets;
 
 /* after the fake knobs, the X's scan keys as the driver defines them (epd_scan.h), wired as hal_esp panel_par.c does */
 static epd_scan_cfg_t scan = EPD_SCAN_CFG_DEFAULT;
+
+/* the gray table and its rows as the driver keeps them (epd_graytab.h), wired as hal_esp panel_par.c does: knob 0
+ * (gray_table) selects the table, and a change of it puts the rows back */
+static epd_graytab_t tab;
+static bool g_rows_set(void *ctx, const char *s, size_t len, char *why, size_t cap)
+{
+    (void)ctx;
+    return epd_graytab_set_rows(&tab, s, len, why, cap);
+}
+static void g_rows_get(void *ctx, char *out, size_t cap) { (void)ctx; epd_graytab_rows_str(&tab, out, cap); }
 
 static size_t t_count(void *ctx) { (void)ctx; return NK + EPD_SCAN_KEYS; }
 static const hal_tune_t *t_info(void *ctx, size_t i)
@@ -42,6 +53,8 @@ static bool t_set(void *ctx, size_t i, int v)
     if (v < K[i].min || v > K[i].max)
         return false;
     val[i] = v, sets++;
+    if (i == 0 && tab.table != v)
+        epd_graytab_select(&tab, v);
     return true;
 }
 static void t_defaults(void *ctx)
@@ -50,6 +63,7 @@ static void t_defaults(void *ctx)
     for (size_t i = 0; i < NK; i++)
         val[i] = K[i].def;
     epd_scan_key_defaults(&scan);
+    epd_graytab_select(&tab, K[0].def);
 }
 
 static void knobs(bool on)
@@ -59,8 +73,10 @@ static void knobs(bool on)
     sets = 0;
     if (on) {
         C.tune_count = t_count, C.tune_info = t_info, C.tune_get = t_get, C.tune_set = t_set, C.tune_defaults = t_defaults;
+        C.gray_rows_set = g_rows_set, C.gray_rows_get = g_rows_get;
     } else {
         C.tune_count = NULL, C.tune_info = NULL, C.tune_get = NULL, C.tune_set = NULL, C.tune_defaults = NULL;
+        C.gray_rows_set = NULL, C.gray_rows_get = NULL;
     }
     usbdisp_init(&D, &C);
 }
@@ -279,6 +295,94 @@ static void test_scan_keys(void)
     TEST_ASSERT_TRUE(epd_scan_cfg_stock(&scan));
 }
 
+/* gray_row: rows of the gray table in use as text. hello shows the changed rows; a row is taken; a wrong length names
+ * the number the table has; a bad character and a bad level are named; defaults and a table switch put the rows back;
+ * nothing is stored. */
+static void test_gray_row(void)
+{
+    knobs(true);
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_HELLO, NULL, 0));
+    TEST_ASSERT_TRUE(has("tuning"));
+    TEST_ASSERT_EQUAL_STRING("", sub_str("tuning", "gray_row"));
+    TEST_ASSERT_EQUAL_STRING("stock", sub_str("tuning", "gray_table"));
+    const kv_t one[] = {{"gray_row", 's', 0, "5:..DDLLDDL"}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(one, 1));
+    TEST_ASSERT_FALSE(has("refused"));
+    TEST_ASSERT_EQUAL_STRING("5:..DDLLDDL", sub_str("tuning", "gray_row"));
+    const kv_t more[] = {{"gray_row", 's', 0, "6:.DDDLLDDL, 14:.DDDLLLLD"}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(more, 1)); /* sent again: the rows add up */
+    TEST_ASSERT_EQUAL_STRING("5:..DDLLDDL 6:.DDDLLDDL 14:.DDDLLLLD", sub_str("tuning", "gray_row"));
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_HELLO, NULL, 0));
+    TEST_ASSERT_EQUAL_STRING("5:..DDLLDDL 6:.DDDLLDDL 14:.DDDLLLLD", sub_str("tuning", "gray_row"));
+    const uint8_t codes[9] = {0, 1, 1, 1, 2, 2, 1, 1, 2};
+    TEST_ASSERT_EQUAL_MEMORY(codes, tab.m + 6 * 9, 9);
+    TEST_ASSERT_EQUAL_INT(0, F.kv_sets); /* not stored */
+    /* refusals in words; the rows stay as they were */
+    const kv_t len[] = {{"gray_row", 's', 0, "5:..DDLLDD"}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(len, 1));
+    TEST_ASSERT_EQUAL_STRING("level 5: 8 passes given, the stock table has 9", sub_str("refused", "gray_row"));
+    const kv_t chr[] = {{"gray_row", 's', 0, "5:..DDLLDDX"}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(chr, 1));
+    TEST_ASSERT_EQUAL_STRING("level 5: character 9 is not one of . (no drive) D (dark) L (light)", sub_str("refused", "gray_row"));
+    const kv_t lvl[] = {{"gray_row", 's', 0, "16:..DDLLDDL"}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(lvl, 1));
+    TEST_ASSERT_EQUAL_STRING("level 16: the levels are 0 (black) to 15 (white)", sub_str("refused", "gray_row"));
+    const kv_t num[] = {{"gray_row", 'u', 5, NULL}, {"gray_dark", 'u', 3, NULL}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(num, 2));
+    TEST_ASSERT_EQUAL_STRING("the value is text, level:passes, for example 5:..DDLLDDL", sub_str("refused", "gray_row"));
+    TEST_ASSERT_EQUAL_STRING("3", sub_str("tuning", "gray_dark")); /* the key after it still applies */
+    TEST_ASSERT_EQUAL_STRING("5:..DDLLDDL 6:.DDDLLDDL 14:.DDDLLLLD", sub_str("tuning", "gray_row"));
+    /* a table switch puts the rows back; rows sent with it are for the new table, wherever the key stands */
+    const kv_t sw[] = {{"gray_row", 's', 0, "5:LLLLDLDL"}, {"gray_table", 's', 0, "fastepd"}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(sw, 2));
+    TEST_ASSERT_FALSE(has("refused"));
+    TEST_ASSERT_EQUAL_STRING("fastepd", sub_str("tuning", "gray_table"));
+    TEST_ASSERT_EQUAL_STRING("5:LLLLDLDL", sub_str("tuning", "gray_row"));
+    const kv_t nine[] = {{"gray_row", 's', 0, "5:..DDLLDDL"}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(nine, 1));
+    TEST_ASSERT_EQUAL_STRING("level 5: 9 passes given, the fastepd table has 8", sub_str("refused", "gray_row"));
+    const kv_t back[] = {{"gray_table", 's', 0, "stock"}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(back, 1));
+    TEST_ASSERT_EQUAL_STRING("", sub_str("tuning", "gray_row"));
+    int np;
+    TEST_ASSERT_EQUAL_MEMORY(epd_graytab_own(EPD_GRAYTAB_STOCK, &np), tab.m, 16 * 9);
+    /* the same table named again keeps the rows */
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(one, 1));
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(back, 1));
+    TEST_ASSERT_EQUAL_STRING("5:..DDLLDDL", sub_str("tuning", "gray_row"));
+    /* an empty text, and "defaults", put them back */
+    const kv_t none[] = {{"gray_row", 's', 0, ""}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(none, 1));
+    TEST_ASSERT_EQUAL_STRING("", sub_str("tuning", "gray_row"));
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(one, 1));
+    uint8_t p[32];
+    cbor_w_t w;
+    cbor_w_init(&w, p, sizeof p);
+    cbor_put_map(&w, 1);
+    cbor_put_str(&w, "tuning");
+    cbor_put_str(&w, "defaults");
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_SET, p, w.len));
+    TEST_ASSERT_EQUAL_STRING("", sub_str("tuning", "gray_row"));
+    TEST_ASSERT_EQUAL_MEMORY(epd_graytab_own(EPD_GRAYTAB_STOCK, &np), tab.m, 16 * 9);
+    /* every row changed still fits hello */
+    char all[EPD_GRAYTAB_TEXT_MAX];
+    size_t o = 0;
+    for (int l = 0; l < 16; l++)
+        o += (size_t)snprintf(all + o, sizeof all - o, "%s%d:LDLDLDLDL", l ? " " : "", l);
+    const kv_t full[] = {{"gray_row", 's', 0, all}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(full, 1));
+    TEST_ASSERT_EQUAL_UINT16(0xffff, tab.changed);
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_HELLO, NULL, 0));
+    const uint8_t *v;
+    size_t vn;
+    TEST_ASSERT_TRUE(cbor_map_get(s_ans, s_ans_len, "tuning", 6, &v, &vn));
+    TEST_ASSERT_TRUE(vn > strlen(all));
+    /* another board: refused in words */
+    knobs(false);
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(one, 1));
+    TEST_ASSERT_EQUAL_STRING("this board has no panel tuning", sub_str("refused", "gray_row"));
+}
+
 static void test_more_refusals_than_room_are_cut_not_overrun(void)
 {
     knobs(true);
@@ -303,6 +407,7 @@ int main(void)
     RUN_TEST(test_defaults_restore_every_knob);
     RUN_TEST(test_a_board_without_knobs_refuses_every_key);
     RUN_TEST(test_scan_keys);
+    RUN_TEST(test_gray_row);
     RUN_TEST(test_more_refusals_than_room_are_cut_not_overrun);
     return UNITY_END();
 }

@@ -325,7 +325,7 @@ the driver&#39;s <code>!tp</code> console commands, with the bounds those comman
 <td><code>gray_table</code></td>
 <td><code>fastepd</code>, <code>stock</code></td>
 <td><code>stock</code></td>
-<td>the 16 gray waveform of a gray partial: FastEPD&#39;s 8 passes, or the stock firmware&#39;s 9</td>
+<td>the 16 gray table of a full refresh and of a gray partial update: FastEPD&#39;s 8 passes, or the stock firmware&#39;s 9 (both printed below)</td>
 </tr>
 <tr>
 <td><code>gray_partial</code></td>
@@ -400,6 +400,12 @@ the driver&#39;s <code>!tp</code> console commands, with the bounds those comman
 <td>the clearing passes before a full refresh (auto: slow every 8th, else fast)</td>
 </tr>
 <tr>
+<td><code>gray_row</code></td>
+<td>text: <code>level:passes</code> entries</td>
+<td>none</td>
+<td>replaces the drive sequence of single gray levels in the table in use, for a full refresh and a gray partial update alike. <code>level</code> 0 (black) to 15 (white); <code>passes</code> one character a pass, <code>.</code> no drive, <code>D</code> dark, <code>L</code> light, exactly as many as the table has (<code>stock</code> 9, <code>fastepd</code> 8). Several entries separated by spaces or commas, or the key sent again: the rows add up. An empty text, <code>&quot;defaults&quot;</code> and a change of <code>gray_table</code> put every row back; a <code>gray_table</code> in the same request is applied first. Any bad entry refuses the whole text, in words (<code>level 5: 8 passes given, the stock table has 9</code>). <code>hello.tuning.gray_row</code> is the rows that differ from the table, as the same text (empty: none)</td>
+</tr>
+<tr>
 <td><code>step_neutral</code></td>
 <td><code>each</code>, <code>end</code></td>
 <td><code>each</code></td>
@@ -430,6 +436,99 @@ clock per row in every scan whatever the keys say; the device counts the clock e
 drives them, and logs both after each partial update: <code>panel scan neutral=&lt;each|end&gt; skip=&lt;off|on/&lt;us&gt;us&gt; frames=&lt;scans&gt; careful=&lt;rows written&gt; skipped=&lt;rows clocked through&gt; left=&lt;neutral scans left out&gt; gap=&lt;longest pause between steps&gt; &lt;ok|BAD&gt; per=&lt;clock edges a scan, 1408&gt;</code>; <code>careful + skipped</code> is <code>frames</code> times 1404, else <code>BAD</code> and a <code>W</code> line.
 With <code>row_skip</code> an update starts with one more scan that writes three neutral rows and skips the rest, so the source
 drivers hold neutral before any row is skipped.</p>
+<p>The two gray tables, one row a level, one character a pass in the order driven (<code>.</code> no drive, <code>D</code> dark, <code>L</code> light). A
+full refresh runs a level&#39;s row on every pixel of that level after the clearing passes have left the panel white; a gray
+partial update runs it on the changed pixels from whatever they show. The rows are tuned by hand. A refresh drawn with
+replaced rows says so in the device log: <code>gray=stock rows*=5,6</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Level</th>
+<th><code>stock</code></th>
+<th><code>fastepd</code></th>
+</tr>
+</thead>
+<tbody><tr>
+<td>0</td>
+<td><code>......DDD</code></td>
+<td><code>LLDDDDDD</code></td>
+</tr>
+<tr>
+<td>1</td>
+<td><code>..DDDLLDD</code></td>
+<td><code>LLLLDDLD</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>....DLLDD</code></td>
+<td><code>LLLDDDDL</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>DDLLDDDDL</code></td>
+<td><code>LLLDDDDL</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>...DLDDDL</code></td>
+<td><code>LLLLDDDL</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>DLLLLDDDL</code></td>
+<td><code>LLLLDLLD</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>..DDLLDDL</code></td>
+<td><code>LLDDDLDL</code></td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>.DDLDDLDL</code></td>
+<td><code>LLLDDLDL</code></td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>.DDDLDLDL</code></td>
+<td><code>DDDDDDLL</code></td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>.DDDDLLDL</code></td>
+<td><code>LDDDDDLL</code></td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>DDDLDDDLL</code></td>
+<td><code>LLDDDDLL</code></td>
+</tr>
+<tr>
+<td>11</td>
+<td><code>..DLDDDLL</code></td>
+<td><code>LLLDDDLL</code></td>
+</tr>
+<tr>
+<td>12</td>
+<td><code>...DLDDLL</code></td>
+<td><code>LDDLDDLL</code></td>
+</tr>
+<tr>
+<td>13</td>
+<td><code>....DLDLL</code></td>
+<td><code>LLLLDDLL</code></td>
+</tr>
+<tr>
+<td>14</td>
+<td><code>.DDDLLLLL</code></td>
+<td><code>LLLLLDLL</code></td>
+</tr>
+<tr>
+<td>15</td>
+<td><code>........L</code></td>
+<td><code>LLLLLLLL</code></td>
+</tr>
+</tbody></table>
 <p>There is no key to skip a 1 bit black step for gray targets: a 4 bit rectangle goes straight to the gray partial, which
 drives only the pixels that changed, so there is no such step.</p>
 <h2 id="refusals">Refusals</h2>

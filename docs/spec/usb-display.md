@@ -158,7 +158,7 @@ the driver's `!tp` console commands, with the bounds those commands check.
 
 | Key | Allowed | Default | What it does |
 |---|---|---|---|
-| `gray_table` | `fastepd`, `stock` | `stock` | the 16 gray waveform of a gray partial: FastEPD's 8 passes, or the stock firmware's 9 |
+| `gray_table` | `fastepd`, `stock` | `stock` | the 16 gray table of a full refresh and of a gray partial update: FastEPD's 8 passes, or the stock firmware's 9 (both printed below) |
 | `gray_partial` | `off`, `on` | `on` | gray partial updates; `off` refuses a partial update at 2 and 4 bit (hello's `partial_depths` is read at start and does not change) |
 | `gray_dark` | 0 to 14 | 0 | frames that push the changed pixels dark before the table runs |
 | `gray_light` | 0 to 14 | 0 | frames that push the changed pixels light before the table runs (after `gray_dark`); on the X they do nothing for pixels that start white and cost about 0.7 s a frame group |
@@ -171,6 +171,7 @@ the driver's `!tp` console commands, with the bounds those commands check.
 | `row_hold` | 0 to 20 | 2 | microseconds each row holds after |
 | `row_drive` | 0 to 200 | 32 | microseconds of each partial row's drive (0: free running) |
 | `clear` | `auto`, `none`, `fast`, `slow` | `auto` | the clearing passes before a full refresh (auto: slow every 8th, else fast) |
+| `gray_row` | text: `level:passes` entries | none | replaces the drive sequence of single gray levels in the table in use, for a full refresh and a gray partial update alike. `level` 0 (black) to 15 (white); `passes` one character a pass, `.` no drive, `D` dark, `L` light, exactly as many as the table has (`stock` 9, `fastepd` 8). Several entries separated by spaces or commas, or the key sent again: the rows add up. An empty text, `"defaults"` and a change of `gray_table` put every row back; a `gray_table` in the same request is applied first. Any bad entry refuses the whole text, in words (`level 5: 8 passes given, the stock table has 9`). `hello.tuning.gray_row` is the rows that differ from the table, as the same text (empty: none) |
 | `step_neutral` | `each`, `end` | `each` | the scan with every source output neutral that ends a step's drive: after each step of a partial update (a 4 bit one has about 10 steps, a 1 bit one 2), or only after the last; `end` saves one scan a step. Watch for: grays darker or uneven on a large area (the pause between steps, `gap=` in the log, lengthens the frame before it), ghosting |
 | `row_skip` | `off`, `on` | `off` | rows outside the changed rows get one short gate clock and no data instead of a timed row, the source outputs latched neutral; one row above and two below the changed rows stay timed. Needs `row_drive` above 0; a change within 2 rows of the last row is not skipped. Watch for: a stroke shifted, doubled or stretched, a faint band above or below it, weaker blacks or lighter grays (a scan is much shorter, so each frame may push less) |
 | `row_skip_us` | 2 to 50 | 10 | microseconds the gate clock is high for a skipped row (1 low before it). Watch for, when lowered: rows shifted up (clocks the gate driver missed) |
@@ -184,6 +185,30 @@ careful=<rows written> skipped=<rows clocked through> left=<neutral scans left o
 <ok|BAD> per=<clock edges a scan, 1408>`; `careful + skipped` is `frames` times 1404, else `BAD` and a `W` line.
 With `row_skip` an update starts with one more scan that writes three neutral rows and skips the rest, so the source
 drivers hold neutral before any row is skipped.
+
+The two gray tables, one row a level, one character a pass in the order driven (`.` no drive, `D` dark, `L` light). A
+full refresh runs a level's row on every pixel of that level after the clearing passes have left the panel white; a gray
+partial update runs it on the changed pixels from whatever they show. The rows are tuned by hand. A refresh drawn with
+replaced rows says so in the device log: `gray=stock rows*=5,6`.
+
+| Level | `stock` | `fastepd` |
+|---|---|---|
+| 0 | `......DDD` | `LLDDDDDD` |
+| 1 | `..DDDLLDD` | `LLLLDDLD` |
+| 2 | `....DLLDD` | `LLLDDDDL` |
+| 3 | `DDLLDDDDL` | `LLLDDDDL` |
+| 4 | `...DLDDDL` | `LLLLDDDL` |
+| 5 | `DLLLLDDDL` | `LLLLDLLD` |
+| 6 | `..DDLLDDL` | `LLDDDLDL` |
+| 7 | `.DDLDDLDL` | `LLLDDLDL` |
+| 8 | `.DDDLDLDL` | `DDDDDDLL` |
+| 9 | `.DDDDLLDL` | `LDDDDDLL` |
+| 10 | `DDDLDDDLL` | `LLDDDDLL` |
+| 11 | `..DLDDDLL` | `LLLDDDLL` |
+| 12 | `...DLDDLL` | `LDDLDDLL` |
+| 13 | `....DLDLL` | `LLLLDDLL` |
+| 14 | `.DDDLLLLL` | `LLLLLDLL` |
+| 15 | `........L` | `LLLLLLLL` |
 
 There is no key to skip a 1 bit black step for gray targets: a 4 bit rectangle goes straight to the gray partial, which
 drives only the pixels that changed, so there is no such step.

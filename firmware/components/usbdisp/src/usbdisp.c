@@ -143,12 +143,16 @@ static size_t tune_n(const usbdisp_t *d)
     return d->c.tune_count && d->c.tune_info && d->c.tune_get && d->c.tune_set && d->c.tune_defaults ? d->c.tune_count(d->c.ctx) : 0;
 }
 
+#define USBDISP_KEY_GRAY_ROW "gray_row"
+#define USBDISP_GRAY_ROWS_TEXT 256 /* 16 rows of "15:" + 9 passes + a space */
+
 /* tuning: { name: number | word, ... } the knobs now (docs/spec/usb-display.md "Tuning") */
 static void put_tuning(const usbdisp_t *d, cbor_w_t *w)
 {
     size_t n = tune_n(d);
+    const bool rows = d->c.gray_rows_set && d->c.gray_rows_get;
     cbor_put_str(w, "tuning");
-    cbor_put_map(w, n);
+    cbor_put_map(w, n + (rows ? 1 : 0));
     for (size_t i = 0; i < n; i++) {
         const hal_tune_t *t = d->c.tune_info(d->c.ctx, i);
         int v = d->c.tune_get(d->c.ctx, i);
@@ -157,6 +161,13 @@ static void put_tuning(const usbdisp_t *d, cbor_w_t *w)
             cbor_put_str(w, t->words[v - t->min]);
         else
             cbor_put_uint(w, (uint64_t)v);
+    }
+    if (rows) { /* the gray rows that differ from the table in use, as the text the key takes */
+        static char txt[USBDISP_GRAY_ROWS_TEXT];
+        txt[0] = 0;
+        d->c.gray_rows_get(d->c.ctx, txt, sizeof txt);
+        cbor_put_str(w, USBDISP_KEY_GRAY_ROW);
+        cbor_put_str(w, txt);
     }
 }
 
@@ -396,16 +407,32 @@ static void set_tuning(usbdisp_t *d, const link_frame_t *f, char refused[][LINK_
         *nref = 1;
         return;
     }
+    /* gray_row is applied after the other keys, wherever it stands in the map: a gray_table in the same request
+     * switches the table first (a switch puts the rows back) */
+    cbor_item_t rows = {0};
+    bool have_rows = false;
     for (uint64_t k = 0; k < it.u; k++) {
         cbor_item_t key, val;
         if (!cbor_read(&r, &key) || key.type != CBOR_TSTR || !cbor_read(&r, &val))
-            return;
+            break;
+        if (count && d->c.gray_rows_set && d->c.gray_rows_get && val.type == CBOR_TSTR && cbor_str_eq(&key, USBDISP_KEY_GRAY_ROW)) {
+            rows = val;
+            have_rows = true;
+            continue;
+        }
+        if (count && d->c.gray_rows_set && val.type != CBOR_MAP && val.type != CBOR_ARRAY && cbor_str_eq(&key, USBDISP_KEY_GRAY_ROW)) {
+            if (*nref < TUNE_REFUSED_MAX) {
+                snprintf(names[*nref], sizeof names[0], USBDISP_KEY_GRAY_ROW);
+                snprintf(refused[(*nref)++], sizeof refused[0], "the value is text, level:passes, for example 5:..DDLLDDL");
+            }
+            continue;
+        }
         if (val.type == CBOR_MAP || val.type == CBOR_ARRAY) { /* the children are not read: the request ends here */
             if (*nref < TUNE_REFUSED_MAX) {
                 snprintf(names[*nref], sizeof names[0], "%.*s", (int)(key.len < 23 ? key.len : 23), (const char *)key.ptr);
                 snprintf(refused[(*nref)++], sizeof refused[0], "the value is a number or a word");
             }
-            return;
+            break;
         }
         char name[24];
         snprintf(name, sizeof name, "%.*s", (int)(key.len < 23 ? key.len : 23), (const char *)key.ptr);
@@ -443,6 +470,14 @@ static void set_tuning(usbdisp_t *d, const link_frame_t *f, char refused[][LINK_
         if (why[0] && *nref < TUNE_REFUSED_MAX) {
             snprintf(names[*nref], sizeof names[0], "%s", name);
             snprintf(refused[(*nref)++], sizeof refused[0], "%s", why);
+        }
+    }
+    if (have_rows) {
+        char why[LINK_MSG_CAP];
+        why[0] = 0;
+        if (!d->c.gray_rows_set(d->c.ctx, (const char *)rows.ptr, rows.len, why, sizeof why) && *nref < TUNE_REFUSED_MAX) {
+            snprintf(names[*nref], sizeof names[0], USBDISP_KEY_GRAY_ROW);
+            snprintf(refused[(*nref)++], sizeof refused[0], "%s", why[0] ? why : "refused");
         }
     }
 }
