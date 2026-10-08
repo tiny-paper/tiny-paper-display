@@ -404,10 +404,10 @@ test('Debug: the report holds the device, the tuning, the page settings, what wa
   assert.match(r, /tuning: gray_table=stock gray_partial=on gray_dark=0 gray_light=3 /);
   assert.match(r, /sketch: depth=auto \(4 bit in use\) mode=auto full_after=30 erase=auto/);
   assert.match(r, /what I saw: grays look even/);
-  const status = r.split('status lines:\n')[1].split('\n');
+  const status = r.split(/status lines[^\n]*:\n/)[1].split('\n');
   assert.equal(status.length, 12, 'the last 12');
   assert.ok(status.every((l) => /^\d\d:\d\d:\d\d Asked for /.test(l)), status[0]);
-  assert.match(r, /last 12 status lines:/);
+  assert.match(r, /last 12 status lines \(this firmware wrote no device log lines\):/, 'a firmware that wrote nothing says so');
   // the copy button hands the report to the clipboard
   await el('reportcopy').onclick();
   assert.equal(copied, r, 'the copy button puts the report on the clipboard');
@@ -513,4 +513,85 @@ test('the toolbar brushes are dots with the word as label and tooltip, the chose
   assert.deepEqual(b.map((x) => x.attrs['aria-pressed']), ['false', 'true', 'false'], 'Medium is chosen at the start');
   b[2].onclick();
   assert.deepEqual(b.map((x) => x.attrs['aria-pressed']), ['false', 'false', 'true']);
+});
+
+// ---- the device's log lines (text outside frames): captured whole, attached to the update they belong to
+const lineTexts = (p) => p.page.state.link.log.map((l) => l.text);
+
+test('Device log: lines before, between and after frames are captured whole, a split line is joined, frames still parse', async () => {
+  const dev = fakeDisplay({ h: 470, ...XDEV });
+  dev.log[10] = { before: ['panel gpart depth=4 rows=100..380 ms=2567 dark=0 light=0 gray=stock steps=4 frames=9 chg=100 drv=90 rc=0', 'panel rows drive=32us n=380'], after: ['usb host seen: SOF'], split: true };
+  dev.log[9] = { before: ['W something between chunks'] };
+  const p = open({ dev });
+  await p.page.connect();
+  await until('connected', () => dev.shows.length === 1 && p.el('status').dataset.state === 'ok');
+  p.stroke([[300, 200], [340, 240]]);
+  await shown(dev, 2);
+  await said(p.el, /partial update/);
+  const lines = lineTexts(p);
+  assert.ok(lines.includes('panel gpart depth=4 rows=100..380 ms=2567 dark=0 light=0 gray=stock steps=4 frames=9 chg=100 drv=90 rc=0'), 'the split line is whole');
+  assert.ok(lines.includes('panel rows drive=32us n=380'));
+  assert.ok(lines.includes('W something between chunks'));
+  // the line after the answer is read with the next request, whole
+  p.el('full').onclick();
+  await shown(dev, 3);
+  await until('the trailing line', () => lineTexts(p).includes('usb host seen: SOF'));
+  assert.ok(p.page.state.link.log.every((l) => l.at > 0 && l.n > 0));
+  assert.deepEqual(dev.shows.map((x) => x.mode).slice(0, 3), ['full', 'partial', 'full'], 'the frames parsed as before');
+});
+
+test('Device log: the report gives each update the lines that came between its request and its answer, indented, panel lines first', async () => {
+  const dev = fakeDisplay({ h: 471, ...XDEV });
+  const p = open({ dev });
+  await p.page.connect();
+  await until('connected', () => dev.shows.length === 1 && p.el('status').dataset.state === 'ok');
+  dev.log[10] = { before: ['panel gpart depth=4 first'] };
+  p.stroke([[300, 200], [340, 240]]);
+  await shown(dev, 2); await said(p.el, /partial update/);
+  dev.log[10] = { before: ['panel gpart depth=4 second', 'panel rows second'] };
+  p.stroke([[500, 300], [540, 340]]);
+  await shown(dev, 3); await until('second', () => p.page.state.history.length >= 3);
+  const r = p.el('report').value;
+  const at = r.split('\n');
+  const first = at.findIndex((l) => /^\d\d:\d\d:\d\d Asked for a partial update/.test(l));
+  assert.match(at[first + 1], /^    \| panel gpart depth=4 first$/);
+  assert.match(at[first + 2], /^\d\d:\d\d:\d\d Asked for a partial update/, 'the next update starts after the first one\'s lines');
+  assert.match(at[first + 3], /^    \| panel gpart depth=4 second$/);
+  assert.match(at[first + 4], /^    \| panel rows second$/);
+  assert.match(r, /with the device log lines of each update, indented:/);
+  // the checkbox leaves them out
+  p.el('reportlog').checked = false;
+  p.el('reportlog').onchange();
+  assert.ok(!p.el('report').value.includes('    | '));
+});
+
+test('Device log: at most 12 updates with 8 lines each, panel lines kept first, and the cut is said', async () => {
+  const dev = fakeDisplay({ h: 472, ...XDEV });
+  const p = open({ dev });
+  await p.page.connect();
+  await until('connected', () => dev.shows.length === 1 && p.el('status').dataset.state === 'ok');
+  dev.log[10] = { before: [...Array.from({ length: 7 }, (_, i) => `noise ${i}`), 'panel gpart depth=4 the one that matters', ...Array.from({ length: 4 }, (_, i) => `more ${i}`)] };
+  p.stroke([[300, 200], [340, 240]]);
+  await shown(dev, 2); await until('done', () => p.page.state.history.length >= 2);
+  const r = p.el('report').value;
+  assert.match(r, /\| panel gpart depth=4 the one that matters/);
+  assert.match(r, /\| \(4 more device log lines cut; at most 8 are kept\)/);
+  assert.equal(r.split('\n').filter((l) => l.startsWith('    | ') && !l.includes('cut;')).length, 8);
+  assert.ok(!r.includes('more 3'), 'the last lines are what is cut');
+  // the box shows the last 40
+  dev.log[10] = { before: Array.from({ length: 60 }, (_, i) => `line ${i}`) };
+  p.stroke([[500, 300], [540, 340]]);
+  await shown(dev, 3); await until('done', () => p.page.state.history.length >= 3);
+  const box = p.el('devicelog').textContent.split('\n');
+  assert.equal(box.length, 40);
+  assert.match(box.at(-1), /line 59$/);
+  assert.ok(p.page.state.link.log.length <= 200);
+});
+
+test('Device log: a firmware that writes nothing says so in the box and in the report', async () => {
+  const { dev, el, stroke, page } = await connected(473, XDEV);
+  stroke([[300, 200], [340, 240]]);
+  await shown(dev, 2); await until('done', () => page.state.history.length >= 2);
+  assert.equal(el('devicelogwhy').textContent, 'This firmware writes no log lines.');
+  assert.match(el('report').value, /\(this firmware wrote no device log lines\)/);
 });

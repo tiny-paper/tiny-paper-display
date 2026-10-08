@@ -112,7 +112,32 @@ export function encodeFrame(seq, cmd, payload) {
 
 /** Collects the device's bytes, in any piece sizes, and hands out the frames in them. */
 export class FrameReader {
-  constructor() { this.buf = new Uint8Array(0); }
+  /**
+   * `onLine(text, at)`: the device's log lines (`# ...\n`, spec "bytes outside frames are log text"), each whole: a line split
+   * over reads is joined, and one between two frames is taken as it comes. `at`: the time (ms) the line was completed. Text
+   * never disturbs the frames: it is read only from the bytes before a frame's sync, as before.
+   */
+  constructor(onLine = null, now = Date.now) {
+    this.buf = new Uint8Array(0);
+    this.onLine = onLine;
+    this.now = now;
+    this.line = '';
+  }
+
+  /** Bytes outside a frame: log text. Printable ASCII only; the line ends at a newline, or at a frame, or when too long. */
+  text(bytes) {
+    for (const c of bytes) {
+      if (c === 10) this.flush();
+      else if (c >= 0x20 && c <= 0x7e) { this.line += String.fromCharCode(c); if (this.line.length >= 400) this.flush(); }
+      else if (c >= 0x80) this.line += '?';
+    }
+  }
+
+  flush() {
+    const t = this.line.replace(/^# ?/, '').trimEnd();
+    this.line = '';
+    if (t && this.onLine) this.onLine(t, this.now());
+  }
 
   push(chunk) {
     const b = new Uint8Array(this.buf.length + chunk.length);
@@ -121,7 +146,12 @@ export class FrameReader {
     this.buf = b;
   }
 
-  clear() { this.buf = new Uint8Array(0); }
+  /** Forget the bytes waiting; the log lines in them are still passed on. */
+  clear() {
+    while (this.next());
+    this.flush();
+    this.buf = new Uint8Array(0);
+  }
 
   /** The next good frame { seq, cmd, payload } or null when more bytes are needed. Log text and bad frames are dropped. */
   next() {
@@ -130,9 +160,13 @@ export class FrameReader {
       while (i + 1 < this.buf.length && !(this.buf[i] === 0xa5 && this.buf[i + 1] === 0x5a)) i++;
       // keep a trailing A5: it may be the start of a sync
       if (i + 1 >= this.buf.length) {
-        this.buf = this.buf.subarray(this.buf.length && this.buf[this.buf.length - 1] === 0xa5 ? this.buf.length - 1 : this.buf.length);
+        const keep = this.buf.length && this.buf[this.buf.length - 1] === 0xa5 ? this.buf.length - 1 : this.buf.length;
+        this.text(this.buf.subarray(0, keep));
+        this.buf = this.buf.subarray(keep);
         return null;
       }
+      this.text(this.buf.subarray(0, i));
+      if (i > 0) this.flush(); // a frame starts: a line before it is whole
       this.buf = this.buf.subarray(i);
       if (this.buf.length < 6) return null;
       const len = this.buf[2] | (this.buf[3] << 8);

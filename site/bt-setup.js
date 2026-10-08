@@ -24,6 +24,9 @@ const MSG = {
   garbled: 'The device sent an answer that could not be read.',
 };
 
+/** Device log lines kept (the text between and around frames). */
+export const LOG_KEEP = 200;
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** One request at a time over an open port. `nextSeq` is the seq of the next request (1..255). */
@@ -34,7 +37,16 @@ export class DisplayLink {
     this.nextSeq = 1;
     this.reader = null;
     this.writer = null;
-    this.frames = new FrameReader();
+    this.log = []; // the device's log lines, the last LOG_KEEP: { n, at, text }
+    this.logCount = 0;
+    this.onLog = null;
+    this.onRequest = null; // called with the log count when a request starts: the lines after it belong to that request
+    this.frames = new FrameReader((text, at) => {
+      const entry = { n: ++this.logCount, at, text };
+      this.log.push(entry);
+      if (this.log.length > LOG_KEEP) this.log.shift();
+      if (this.onLog) this.onLog(entry);
+    });
     this.pending = null;
   }
 
@@ -96,7 +108,8 @@ export class DisplayLink {
   /** As `request`, but a refusal is returned as it came (`{err, msg, detail}`): the Sketch page reads its code. */
   async requestRaw(cmd, obj, { seq, timeoutMs = this.timeoutMs } = {}) {
     if (seq === undefined) { seq = this.nextSeq; this.nextSeq = this.nextSeq % 255 + 1; }
-    this.frames.clear();
+    this.frames.clear(); // lines that came while nobody asked are passed on here, before this request
+    if (this.onRequest) this.onRequest(this.logCount);
     try {
       await this.writer.write(encodeFrame(seq, cmd, encodeMap(obj)));
     } catch {

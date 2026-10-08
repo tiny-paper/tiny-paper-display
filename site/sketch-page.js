@@ -12,6 +12,7 @@ import {
 const HELLO_MS = 3000;
 // a full refresh of the largest panel takes several seconds; the device answers when the panel is done
 const SHOW_MS = 120000;
+const LOG_SHOWN = 40;
 const DEBUG_KEY = 'tp-sketch-debug-text';
 const BOARD_TITLES = { trmnl_x: 'TRMNL X', trmnl_og: 'TRMNL OG', picpak: 'PicPak' };
 
@@ -52,7 +53,7 @@ export function startSketchPage(env) {
   };
   const serial = env.navigator && 'serial' in env.navigator ? env.navigator.serial : null;
   const state = { link: null, port: null, hello: null, sender: null, pen: null, preview: null, client: null,
-    dbg: { ...DEBUG_DEFAULTS }, history: [], busy: false, test: null };
+    dbg: { ...DEBUG_DEFAULTS }, history: [], busy: false, test: null, mark: null };
   const store = {
     get: (k) => { try { return env.localStorage?.getItem(k) ?? null; } catch { return null; } },
     set: (k, v) => { try { env.localStorage?.setItem(k, v); } catch { /* not remembered */ } },
@@ -63,15 +64,29 @@ export function startSketchPage(env) {
     $('status').textContent = s.text;
     $('status').className = s.state === 'error' ? 'warn' : '';
     $('status').dataset.state = s.state;
+    if (s.state === 'sending' && !state.mark) state.mark = { anchored: false, n: state.link ? state.link.logCount : 0 };
     if (s.state === 'ok' || s.state === 'error') {
-      state.history.push({ at: new Date().toTimeString().slice(0, 8), text: s.text });
+      const mark = state.mark;
+      state.mark = null;
+      const lines = state.link && mark ? state.link.log.filter((l) => l.n > mark.n).map((l) => l.text) : [];
+      state.history.push({ at: new Date().toTimeString().slice(0, 8), text: s.text, lines });
       if (state.history.length > 12) state.history.shift();
     }
+    logBox();
     report();
   };
   const report = () => {
     $('report').value = reportText({ hello: state.hello, sketch: state.dbg, depthUsed: state.sender ? state.sender.ink.depth : null,
-      saw: $('debugsaw').value, history: state.history, test: state.test });
+      saw: $('debugsaw').value, history: state.history, test: state.test, withLog: $('reportlog').checked !== false,
+      logSeen: !!(state.link && state.link.logCount) });
+  };
+  /** The Device log box: the last lines the device wrote between and around its frames. */
+  const logBox = () => {
+    const link = state.link;
+    const stamp = (t) => new Date(t).toTimeString().slice(0, 8);
+    $('devicelog').textContent = link ? link.log.slice(-LOG_SHOWN).map((l) => `${stamp(l.at)} ${l.text}`).join('\n') : '';
+    $('devicelogwhy').textContent = !link ? '' : link.logCount ? `The last ${Math.min(LOG_SHOWN, link.log.length)} lines the device wrote (${link.logCount} so far).`
+      : state.history.length ? 'This firmware writes no log lines.' : 'No log lines yet: they come with the answers to updates.';
   };
   const device = (text, cls) => { $('device').textContent = text; $('device').className = cls || 'mut'; };
   const paint = (r) => {
@@ -208,6 +223,8 @@ export function startSketchPage(env) {
       throw e;
     }
     state.link = link; state.port = port; state.preview = preview;
+    link.onRequest = (n) => { if (state.mark && !state.mark.anchored) { state.mark.n = n; state.mark.anchored = true; } };
+    link.onLog = () => { logBox(); report(); };
     const title = BOARD_TITLES[hello.board] ?? hello.board;
     device(`${title}, ${hello.w} x ${hello.h}, display firmware ${hello.fw}.`, 'ok');
     $('partial').textContent = partialLine(hello);
@@ -343,6 +360,7 @@ export function startSketchPage(env) {
     lines(out);
   };
   $('debugsaw').oninput = report;
+  $('reportlog').onchange = report;
   $('reportcopy').onclick = async () => {
     const text = $('report').value;
     try { await env.navigator.clipboard.writeText(text); $('reportnote').textContent = 'Copied.'; } catch {

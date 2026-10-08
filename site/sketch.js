@@ -1120,6 +1120,13 @@ var MockDisplayDevice = class {
   onOutput(cb) {
     this.output = cb;
   }
+  /** The log lines the X writes after a refresh (panel_par.c, formats copied): the page's Device log shows what they look like. */
+  logFor(r) {
+    const y0 = Number(r.y), y1 = y0 + Number(r.h) - 1;
+    if (r.mode === "full") return [`panel full depth=${r.depth} ms=2591 clear=fast gray=stock rowmax=61@12 rc=0`, "panel rows drive=0us high=29/37/55 n=3 waited=0 absorbed=0 over=0 ckv=8424/6"];
+    if (Number(r.depth) > 1) return [`panel gpart depth=${r.depth} rows=${y0}..${y1} ms=2567 dark=${this.knobs[2]} light=${this.knobs[3]} gray=${this.knobs[0] ? "stock" : "fastepd"} steps=4 frames=9 chg=2400 drv=2400 rowmax=88@${y0} rc=0`, "panel rows drive=32us high=30/37/52 n=281 waited=0 absorbed=0 over=0 ckv=12636/9"];
+    return [`panel partial rows=${y0}..${y1} ms=1465 passes=4 kick=2/90ms main=4/180ms extra=0/0ms redrive=0@0..0 rowdly=2,2 rowmax=61@${y0} fresh=0/0ms since_full=1 rc=0`, "panel rows drive=32us high=30/37/52 n=281 waited=0 absorbed=0 over=0 ckv=11236/8"];
+  }
   write(bytes) {
     for (const ev of this.parser.push(bytes)) {
       if (ev.type !== "frame") continue;
@@ -1157,7 +1164,16 @@ var MockDisplayDevice = class {
           } else if (b.mode && b.mode !== "full") res = { mode: b.mode, why: b.mode === "partial" ? "changed" : "asked", depth: show.bits, ms: 0, x: b.x ?? 0, y: b.y ?? 0, w: show.w, h: show.h };
         }
       } else res = { err: 1, msg: "not a display command" };
-      setTimeout(() => this.output(encodeFrame({ seq, cmd: cmd | 128, payload: cborEncode(res) })), 1);
+      const log = cmd === 10 && this.hello.tuning ? this.logFor(res) : [];
+      setTimeout(() => {
+        const text = new TextEncoder().encode(log.map((l) => `# ${l}
+`).join(""));
+        if (text.length > 20) {
+          this.output(text.subarray(0, 20));
+          this.output(text.subarray(20));
+        } else if (text.length) this.output(text);
+        this.output(encodeFrame({ seq, cmd: cmd | 128, payload: cborEncode(res) }));
+      }, 1);
     }
   }
 };
@@ -1282,6 +1298,13 @@ function testPlan(name, w, h, paper) {
     { rect: { x: X(0.4), y: Y(0.58), w: X(0.2), h: Y(0.14) }, value: paper }
   ];
 }
+var REPORT_UPDATES = 12;
+var REPORT_LOG_LINES = 8;
+function pickLines(lines, max = REPORT_LOG_LINES) {
+  const idx = lines.map((l, i) => [l, i]);
+  const chosen = [...idx.filter(([l]) => /^(W |I )?panel\b/.test(l)), ...idx.filter(([l]) => !/^(W |I )?panel\b/.test(l))].slice(0, max).map(([, i]) => i).sort((a, b) => a - b);
+  return { kept: chosen.map((i) => lines[i]), cut: lines.length - chosen.length };
+}
 function reportText(o) {
   const h = o.hello;
   const lines = ["tiny-paper display report"];
@@ -1292,8 +1315,15 @@ no device connected`;
   lines.push(h.tuning ? `tuning: ${Object.entries(h.tuning).map(([k, v]) => `${k}=${v}`).join(" ")}` : "tuning: none (this device has no panel tuning)");
   lines.push(`sketch: depth=${o.sketch.depth ?? "auto"}${o.depthUsed ? ` (${o.depthUsed} bit in use)` : ""} mode=${o.sketch.mode} full_after=${o.sketch.full_after} erase=${o.sketch.erase}${o.test ? ` test=${o.test}` : ""}`);
   lines.push(`what I saw: ${o.saw.trim() || "(nothing written)"}`);
-  lines.push(`last ${Math.min(12, o.history.length)} status lines:`);
-  for (const l of o.history.slice(-12)) lines.push(`${l.at} ${l.text}`);
+  const note = o.withLog === false ? "" : !o.logSeen && o.history.length ? " (this firmware wrote no device log lines)" : " with the device log lines of each update, indented";
+  lines.push(`last ${Math.min(REPORT_UPDATES, o.history.length)} status lines${note}:`);
+  for (const l of o.history.slice(-REPORT_UPDATES)) {
+    lines.push(`${l.at} ${l.text}`);
+    if (o.withLog === false) continue;
+    const { kept: kept2, cut } = pickLines(l.lines ?? []);
+    for (const k of kept2) lines.push(`    | ${k}`);
+    if (cut) lines.push(`    | (${cut} more device log line${cut === 1 ? "" : "s"} cut; at most ${REPORT_LOG_LINES} are kept)`);
+  }
   return lines.join("\n");
 }
 export {
@@ -1308,6 +1338,8 @@ export {
   LIGHTEN_AFTER,
   MOCK_PANELS,
   MockDisplayDevice,
+  REPORT_LOG_LINES,
+  REPORT_UPDATES,
   SKETCH_TIMING,
   SketchModel,
   SketchPen,
@@ -1323,6 +1355,7 @@ export {
   displayHello,
   packedPng,
   parseDebug,
+  pickLines,
   reportText,
   sketchBrushes,
   sketchInk,

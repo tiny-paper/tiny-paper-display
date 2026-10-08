@@ -136,10 +136,19 @@ export function testPlan(name: TestName, w: number, h: number, paper: number): T
   ];
 }
 
-export interface HistoryLine { at: string; text: string }
+export interface HistoryLine { at: string; text: string; lines?: string[] }
+export const REPORT_UPDATES = 12;
+export const REPORT_LOG_LINES = 8;
+
+/** At most `max` of the lines, the `panel` ones first (they hold the breakdown), in their order; how many were cut. */
+export function pickLines(lines: readonly string[], max = REPORT_LOG_LINES): { kept: string[]; cut: number } {
+  const idx = lines.map((l, i) => [l, i] as const);
+  const chosen = [...idx.filter(([l]) => /^(W |I )?panel\b/.test(l)), ...idx.filter(([l]) => !/^(W |I )?panel\b/.test(l))].slice(0, max).map(([, i]) => i).sort((a, b) => a - b);
+  return { kept: chosen.map((i) => lines[i]!), cut: lines.length - chosen.length };
+}
 
 /** The report: compact text to copy into a chat (device, tuning, page settings, what was seen, the last status lines). */
-export function reportText(o: { hello: DisplayHello | null; sketch: DebugSketch; depthUsed: number | null; saw: string; history: readonly HistoryLine[]; test?: string | null }): string {
+export function reportText(o: { hello: DisplayHello | null; sketch: DebugSketch; depthUsed: number | null; saw: string; history: readonly HistoryLine[]; test?: string | null; withLog?: boolean; logSeen?: boolean }): string {
   const h = o.hello;
   const lines = ['tiny-paper display report'];
   if (!h) return `${lines[0]}\nno device connected`;
@@ -148,7 +157,14 @@ export function reportText(o: { hello: DisplayHello | null; sketch: DebugSketch;
   lines.push(h.tuning ? `tuning: ${Object.entries(h.tuning).map(([k, v]) => `${k}=${v}`).join(' ')}` : 'tuning: none (this device has no panel tuning)');
   lines.push(`sketch: depth=${o.sketch.depth ?? 'auto'}${o.depthUsed ? ` (${o.depthUsed} bit in use)` : ''} mode=${o.sketch.mode} full_after=${o.sketch.full_after} erase=${o.sketch.erase}${o.test ? ` test=${o.test}` : ''}`);
   lines.push(`what I saw: ${o.saw.trim() || '(nothing written)'}`);
-  lines.push(`last ${Math.min(12, o.history.length)} status lines:`);
-  for (const l of o.history.slice(-12)) lines.push(`${l.at} ${l.text}`);
+  const note = o.withLog === false ? '' : !o.logSeen && o.history.length ? ' (this firmware wrote no device log lines)' : ' with the device log lines of each update, indented';
+  lines.push(`last ${Math.min(REPORT_UPDATES, o.history.length)} status lines${note}:`);
+  for (const l of o.history.slice(-REPORT_UPDATES)) {
+    lines.push(`${l.at} ${l.text}`);
+    if (o.withLog === false) continue;
+    const { kept, cut } = pickLines(l.lines ?? []);
+    for (const k of kept) lines.push(`    | ${k}`);
+    if (cut) lines.push(`    | (${cut} more device log line${cut === 1 ? '' : 's'} cut; at most ${REPORT_LOG_LINES} are kept)`);
+  }
   return lines.join('\n');
 }

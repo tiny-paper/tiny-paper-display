@@ -88,7 +88,11 @@ computer. <a href="sketch.html?mock=x">See the page work without a device.</a></
       <button id="debugreset">Reset</button>
     </div>
     <pre id="debugresults" role="status" style="white-space:pre-wrap"></pre>
+    <h3>Device log</h3>
+    <p class="mut" id="devicelogwhy"></p>
+    <pre id="devicelog" style="max-height:14em;overflow:auto;white-space:pre-wrap;font:12px/1.4 ui-monospace,monospace"></pre>
     <h3>Report</h3>
+    <label><input id="reportlog" type="checkbox" checked> include the device log in the report</label><br>
     <label>What I saw <input id="debugsaw" type="text" style="width:70%" placeholder="for example: grays 3 to 9 darker than before"></label>
     <textarea id="report" rows="12" readonly aria-label="Report to copy" style="width:100%;box-sizing:border-box;font:13px/1.4 ui-monospace,monospace"></textarea>
     <div class="tools"><button id="reportcopy">Copy report</button><span id="reportnote" class="mut" role="status"></span></div>

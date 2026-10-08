@@ -36,7 +36,7 @@ const tuningOf = (vals) => Object.fromEntries(KNOBS.map(([n, , , , w], i) => [n,
  */
 export function fakeDisplay(over = {}) {
   const knobs = KNOBS.map((k) => k[3]);
-  const dev = { hello: over === null ? null : { ...HELLO, ...over }, shows: [], refuse: null, port: null, sets: [], knobs };
+  const dev = { hello: over === null ? null : { ...HELLO, ...over }, shows: [], refuse: null, port: null, sets: [], knobs, log: {} };
   if (dev.hello && dev.hello.tuning === true) dev.hello.tuning = tuningOf(knobs); // `tuning: true`: a board with the knobs
   let begin = {};
   let png = new Uint8Array();
@@ -77,7 +77,13 @@ export function fakeDisplay(over = {}) {
         ? { mode: begin.mode, why: begin.mode === 'partial' ? 'changed' : 'asked', depth: show.bits, ms: 7, x: begin.x ?? 0, y: begin.y ?? 0, w: show.w, h: show.h }
         : { mode: 'full', why: 'asked', depth: show.bits, ms: 9, x: 0, y: 0, w: dev.hello.w, h: dev.hello.h };
     } else res = { err: 1, msg: 'not a display command' };
-    return res ? [frameHex(seq, cmd | 0x80, toHex(Uint8Array.from(cbor(res))))] : [];
+    if (!res) return [];
+    // the device's log text: `dev.log[cmd] = { before: [...], after: [...], split: true }`, lines without the "# " and newline
+    const text = (lines) => lines.map((l) => toHex(new TextEncoder().encode(`# ${l}\n`)));
+    const log = dev.log[cmd] ?? {};
+    let before = text(log.before ?? []);
+    if (log.split && before.length) { const h = before[0]; before = [h.slice(0, 14), h.slice(14), ...before.slice(1)]; } // cut a line in two reads
+    return [...before, frameHex(seq, cmd | 0x80, toHex(Uint8Array.from(cbor(res)))), ...text(log.after ?? [])];
   });
   return dev;
 }
