@@ -2,7 +2,9 @@
 
 Show pictures on a device running the tiny-paper display firmware, over its USB cable. MIT. Python 3.9+; one
 dependency, pyserial. `pip install tiny-paper-display` works after the first release. Until then, use
-`pip install ./python` from the repository root.
+`pip install ./python` from the repository root, or
+`pip install "git+https://github.com/tiny-paper/tiny-paper-display#subdirectory=python"`. The guide with every step:
+`docs/use.md` (the site's "Use it" page).
 
 | Command | What |
 |---|---|
