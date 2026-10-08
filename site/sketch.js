@@ -952,6 +952,7 @@ var MockDisplayDevice = class {
       w: 1872,
       h: 1404,
       depths: [1, 2, 4],
+      partial_depths: [1, 2, 4],
       max_png: 1319644,
       modes: ["full", "partial", "partial_all", "inverse", "passes"]
     });
