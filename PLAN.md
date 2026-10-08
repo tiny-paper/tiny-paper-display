@@ -7,7 +7,7 @@ What this project is, what is done and what is still to do. Kept here instead of
 | # | What |
 |---|---|
 | 1 | Firmware: flash, back up, restore, from a static page |
-| 2 | Show a picture on the device over the USB cable and over Bluetooth |
+| 2 | Show a picture on the device over the USB cable and over Bluetooth. A Picture page exists (`site/picture.html`); a real picture on a real panel is still to be seen |
 | 3 | Packages on npm and PyPI as the API |
 | 4 | A sketch example in the browser |
 | 5 | Later: a sketch example in Python |

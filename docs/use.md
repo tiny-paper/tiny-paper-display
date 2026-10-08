@@ -19,7 +19,24 @@ else has been tried on a device. Where a section below depends on that, it says 
 | Where | What |
 |---|---|
 | [Sketch page](../site/sketch.html) | Plug the device in, press Connect, pick its port. Draw: each stroke goes to the panel as a partial update of the area that changed |
-| Without a device | [TRMNL X](../site/sketch.html?mock=x), [TRMNL OG](../site/sketch.html?mock=og) or [PicPak](../site/sketch.html?mock=picpak): a pretend device answers, nothing reaches a panel |
+| [Picture page](../site/picture.html) | Connect, then drop, pick or paste a picture, or use a test picture. The preview shows the exact pixels that will be sent. Choose fit, rotation, depth and dithering, then Send. The picture stays in the browser |
+| Without a device | [TRMNL X](../site/sketch.html?mock=x), [TRMNL OG](../site/sketch.html?mock=og) or [PicPak](../site/sketch.html?mock=picpak): a pretend device answers, nothing reaches a panel. The same on the [Picture page](../site/picture.html?mock=x) |
+
+### Picture page
+
+| Setting | Choices |
+|---|---|
+| Fit | whole picture with a border, fill and crop, stretch |
+| Rotate | 0, 90, 180, 270, auto (turns it when that fills more of the panel) |
+| Depth | each depth the device takes (1, 2, 4 bit gray), on the PicPak its four colours |
+| Dithering | none (nearest level; at 1 bit a threshold), Floyd-Steinberg, ordered 4x4 |
+| Refresh | auto, partial (only what changed; the device compares with the frame it keeps), full |
+
+Scaling averages the pixels a new pixel covers when shrinking and is bilinear when enlarging. Gray is luminance
+`0.299 R + 0.587 G + 0.114 B` on the stored values, not linear light. Dithering comes after scaling. The status line
+says what was asked, what the device did and why, the panel time and the total time. Compare sends the picture four ways
+(1 bit and the deepest depth, each nearest and Floyd-Steinberg, all full refreshes) with a pause you set, and Copy report
+gives a text to paste with a line for what you saw.
 
 ## Python
 
