@@ -27,6 +27,7 @@ const KNOBS = [
   ['gray_table', 0, 1, 1, ['fastepd', 'stock']], ['gray_partial', 0, 1, 1, ['off', 'on']], ['gray_dark', 0, 14, 0], ['gray_light', 0, 14, 0],
   ['passes_partial', 1, 14, 4], ['passes_full', 1, 14, 3], ['wave_kick', 0, 14, 2], ['wave_extra', 0, 14, 0], ['wave_redrive', 0, 3, 2],
   ['row_settle', 0, 20, 2], ['row_hold', 0, 20, 2], ['row_drive', 0, 200, 32], ['clear', 0, 3, 0, ['auto', 'none', 'fast', 'slow']],
+  ['step_neutral', 0, 1, 0, ['each', 'end']], ['row_skip', 0, 1, 0, ['off', 'on']], ['row_skip_us', 2, 50, 10], ['scan_min_ms', 0, 150, 0],
 ];
 const tuningOf = (vals) => Object.fromEntries(KNOBS.map(([n, , , , w], i) => [n, w ? w[vals[i]] : vals[i]]));
 

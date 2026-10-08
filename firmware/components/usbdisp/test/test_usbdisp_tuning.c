@@ -1,6 +1,7 @@
 /* usbdisp: the panel tuning of `set { tuning }` (docs/spec/usb-display.md "Tuning") against fake knobs: a good key applies,
  * a bad one is refused with why and its range while the rest still apply, an unknown key, a board without knobs,
  * "defaults", and hello and every answer reflect the knobs. SPDX-License-Identifier: GPL-3.0-or-later */
+#include "epd_scan.h"
 #include "usbdisp_fake.h"
 
 static const char *const W_TABLE[] = {"fastepd", "stock"};
@@ -14,12 +15,30 @@ static hal_tune_t K[] = {
 static int val[NK];
 static int sets;
 
-static size_t t_count(void *ctx) { (void)ctx; return NK; }
-static const hal_tune_t *t_info(void *ctx, size_t i) { (void)ctx; return &K[i]; }
-static int t_get(void *ctx, size_t i) { (void)ctx; return val[i]; }
+/* after the fake knobs, the X's scan keys as the driver defines them (epd_scan.h), wired as hal_esp panel_par.c does */
+static epd_scan_cfg_t scan = EPD_SCAN_CFG_DEFAULT;
+
+static size_t t_count(void *ctx) { (void)ctx; return NK + EPD_SCAN_KEYS; }
+static const hal_tune_t *t_info(void *ctx, size_t i)
+{
+    static hal_tune_t s[EPD_SCAN_KEYS];
+    (void)ctx;
+    if (i < NK)
+        return &K[i];
+    const epd_scan_key_t *k = epd_scan_key(i - NK);
+    s[i - NK] = (hal_tune_t){k->name, k->min, k->max, k->def, k->words};
+    return &s[i - NK];
+}
+static int t_get(void *ctx, size_t i) { (void)ctx; return i < NK ? val[i] : epd_scan_key_get(&scan, i - NK); }
 static bool t_set(void *ctx, size_t i, int v)
 {
     (void)ctx;
+    if (i >= NK) {
+        if (!epd_scan_key_set(&scan, i - NK, v))
+            return false;
+        sets++;
+        return true;
+    }
     if (v < K[i].min || v > K[i].max)
         return false;
     val[i] = v, sets++;
@@ -30,6 +49,7 @@ static void t_defaults(void *ctx)
     (void)ctx;
     for (size_t i = 0; i < NK; i++)
         val[i] = K[i].def;
+    epd_scan_key_defaults(&scan);
 }
 
 static void knobs(bool on)
@@ -205,6 +225,60 @@ static void test_a_board_without_knobs_refuses_every_key(void)
     TEST_ASSERT_EQUAL_STRING("this board has no panel tuning", sub_str("refused", "tuning"));
 }
 
+/* The scan keys of the X (step_neutral, row_skip, row_skip_us, scan_min_ms): hello shows defaults that leave the
+ * scans as before, words and numbers are taken, a value outside is refused in words with its range and nothing
+ * changes, "defaults" puts them back, and nothing is stored. */
+static void test_scan_keys(void)
+{
+    knobs(true);
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_HELLO, NULL, 0));
+    TEST_ASSERT_EQUAL_STRING("each", sub_str("tuning", "step_neutral"));
+    TEST_ASSERT_EQUAL_STRING("off", sub_str("tuning", "row_skip"));
+    TEST_ASSERT_EQUAL_STRING("10", sub_str("tuning", "row_skip_us"));
+    TEST_ASSERT_EQUAL_STRING("0", sub_str("tuning", "scan_min_ms"));
+    TEST_ASSERT_TRUE(epd_scan_cfg_stock(&scan));
+    const kv_t on[] = {{"step_neutral", 's', 0, "end"}, {"row_skip", 's', 0, "on"}, {"row_skip_us", 'u', 5, NULL},
+                       {"scan_min_ms", 'u', 60, NULL}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(on, 4));
+    TEST_ASSERT_FALSE(has("refused"));
+    TEST_ASSERT_EQUAL_STRING("end", sub_str("tuning", "step_neutral"));
+    TEST_ASSERT_EQUAL_STRING("on", sub_str("tuning", "row_skip"));
+    TEST_ASSERT_EQUAL_STRING("5", sub_str("tuning", "row_skip_us"));
+    TEST_ASSERT_EQUAL_STRING("60", sub_str("tuning", "scan_min_ms"));
+    const epd_scan_cfg_t want = {EPD_SCAN_NEUTRAL_END, 1, 5, 60};
+    TEST_ASSERT_EQUAL_MEMORY(&want, &scan, sizeof scan);
+    TEST_ASSERT_EQUAL_INT(0, F.kv_sets); /* not stored */
+    const kv_t bad[] = {{"step_neutral", 's', 0, "never"}, {"row_skip", 'u', 2, NULL}, {"row_skip_us", 'u', 1, NULL},
+                        {"scan_min_ms", 'u', 151, NULL}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(bad, 4));
+    TEST_ASSERT_EQUAL_STRING("not one of the words; allowed each, end", sub_str("refused", "step_neutral"));
+    TEST_ASSERT_EQUAL_STRING("out of range; allowed off, on", sub_str("refused", "row_skip"));
+    TEST_ASSERT_EQUAL_STRING("out of range; allowed 2 to 50", sub_str("refused", "row_skip_us"));
+    TEST_ASSERT_EQUAL_STRING("out of range; allowed 0 to 150", sub_str("refused", "scan_min_ms"));
+    TEST_ASSERT_EQUAL_MEMORY(&want, &scan, sizeof scan);
+    const kv_t top[] = {{"row_skip_us", 'u', 51, NULL}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(top, 1));
+    TEST_ASSERT_EQUAL_STRING("out of range; allowed 2 to 50", sub_str("refused", "row_skip_us"));
+    uint8_t p[32];
+    cbor_w_t w;
+    cbor_w_init(&w, p, sizeof p);
+    cbor_put_map(&w, 1);
+    cbor_put_str(&w, "tuning");
+    cbor_put_str(&w, "defaults");
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_SET, p, w.len));
+    TEST_ASSERT_EQUAL_STRING("each", sub_str("tuning", "step_neutral"));
+    TEST_ASSERT_EQUAL_STRING("off", sub_str("tuning", "row_skip"));
+    TEST_ASSERT_TRUE(epd_scan_cfg_stock(&scan));
+    /* another board: each key refused in words */
+    knobs(false);
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(on, 4));
+    TEST_ASSERT_EQUAL_STRING("this board has no panel tuning", sub_str("refused", "step_neutral"));
+    TEST_ASSERT_EQUAL_STRING("this board has no panel tuning", sub_str("refused", "row_skip"));
+    TEST_ASSERT_EQUAL_STRING("this board has no panel tuning", sub_str("refused", "row_skip_us"));
+    TEST_ASSERT_EQUAL_STRING("this board has no panel tuning", sub_str("refused", "scan_min_ms"));
+    TEST_ASSERT_TRUE(epd_scan_cfg_stock(&scan));
+}
+
 static void test_more_refusals_than_room_are_cut_not_overrun(void)
 {
     knobs(true);
@@ -228,6 +302,7 @@ int main(void)
     RUN_TEST(test_unknown_key_is_refused_with_the_known_ones);
     RUN_TEST(test_defaults_restore_every_knob);
     RUN_TEST(test_a_board_without_knobs_refuses_every_key);
+    RUN_TEST(test_scan_keys);
     RUN_TEST(test_more_refusals_than_room_are_cut_not_overrun);
     return UNITY_END();
 }

@@ -5,6 +5,7 @@
 #include "epd_par.h"
 #include "epd_parwin.h"
 #include "epd_parwave.h"
+#include "epd_scan.h"
 #include "esp_heap_caps.h"
 #include "epd_pins.h"
 #include "FastEPD.h"
@@ -36,6 +37,10 @@ static const char *TAG = "epdp";
 /* FastEPD 8dc8c74 src/FastEPD.inl, not in its header (external linkage in FastEPD.cpp) */
 void bbepIODeInit(void);
 int bbepIOInit(FASTEPDSTATE *pState);
+/* FastEPD 8dc8c74 src/FastEPD.inl: false while a row's data is on its way to the source drivers (bbepWriteRow
+ * waits for it before every row; the sequencer of epd_scan.h does before the rows it clocks through itself). A
+ * FastEPD that no longer has it fails the link, not the panel. */
+extern volatile bool dma_is_done;
 
 /* FastEPD keeps its state protected: read the pins it actually uses. */
 class FastEpdX : public FASTEPD {
@@ -67,6 +72,27 @@ public:
     uint32_t bus_hz() const { return _state.panelDef.bus_speed; }
     int powered() const { return _state.pwr_on; }
     bool soft_cs() const { return _state.panelDef.flags & BB_PANEL_FLAG_SLOW_SPH; }
+    bool mirror_y() const { return _state.iFlags & BB_PANEL_FLAG_MIRROR_Y; }
+    /* One FastEPD partial over the `careful` rows of a scan plan (epd_scan.h), `passes` drive frames (0: only its
+     * neutral scan), rails left on. FastEPD 8dc8c74 bbepPartialUpdate and bbepClear take the rows to write and
+     * their count from the state on every scan, so for the call the frames start at the first careful row and the
+     * height is their count; the sequencer (row_ctl) clocks the rows before and after, and sets the height to 0
+     * for a neutral scan it leaves out (the row loop of bbepClear then writes nothing). All put back after. */
+    int scan_partial(const epd_scan_rows_t &r, int passes)
+    {
+        const size_t off = (size_t)r.lead * (size_t)(_state.native_width / 8);
+        const int h = _state.native_height, pp = _state.iPartialPasses;
+        _state.pCurrent += off;
+        _state.pPrevious += off;
+        _state.native_height = r.careful;
+        _state.iPartialPasses = passes;
+        int rc = partialUpdate(true, 0, r.careful - 1);
+        _state.pCurrent -= off;
+        _state.pPrevious -= off;
+        _state.native_height = h;
+        _state.iPartialPasses = pp;
+        return rc;
+    }
     void hook_rows(BB_ROW_CONTROL *f)
     {
         s_ckv = (gpio_num_t)_state.panelDef.ioCKV;
@@ -143,55 +169,107 @@ static inline void IRAM_ATTR ckv_pulse(gpio_num_t ckv, uint32_t us)
 }
 /* FastEPD 8dc8c74 EPDiyV7RowControl (BB_PANEL_TRMNL_X), ROW_START's pulses unchanged; ROW_STEP with the settle
  * (CKV off -> LE) and hold (LE -> CKV on) delays. Fixed drive: the frame's first and every row's CKV is one
- * ckv_pulse (over before the row's data goes out); free: bbepWriteRow turns CKV on after the step returns and it
- * stays on until the next step. */
-static void IRAM_ATTR row_ctl(void *, int type)
+ * ckv_pulse; free: bbepWriteRow turns CKV on after the step returns and it stays on until the next step.
+ * What the pad carries with the fixed drive (the hardware count says so: ckv=30977/22 is 22 x 1408 + 1): bbepWriteRow
+ * sets CKV high again right after every step, so the pad is high from there through the row's data and the next
+ * step's pulse, low only between the pulse's end and that call; one rising edge per row, made by bbepWriteRow. A
+ * scan ends with CKV high, so the first start pulse of the next scan is no edge (4 edges in an update's first
+ * scan, 3 in the later ones, plus the start's own pulse). */
+static void IRAM_ATTR frame_start(void)
 {
-    const gpio_num_t ckv = FastEpdX::s_ckv, spv = FastEpdX::s_spv, le = FastEpdX::s_le;
+    const gpio_num_t ckv = FastEpdX::s_ckv, spv = FastEpdX::s_spv;
     const uint32_t drive = s_drive_us;
+    s_drive.frames++;
+    gpio_set_level(ckv, 1);
+    esp_rom_delay_us(7);
+    gpio_set_level(spv, 0);
+    esp_rom_delay_us(10);
+    gpio_set_level(ckv, 0);
+    gpio_set_level(ckv, 1);
+    esp_rom_delay_us(8);
+    gpio_set_level(spv, 1);
+    esp_rom_delay_us(10);
+    gpio_set_level(ckv, 0);
+    gpio_set_level(ckv, 1);
+    esp_rom_delay_us(10);
+    gpio_set_level(ckv, 0);
+    gpio_set_level(ckv, 1);
+    esp_rom_delay_us(10);
+    gpio_set_level(ckv, 0);
+    if (drive)
+        ckv_pulse(ckv, drive);
+    else {
+        gpio_set_level(ckv, 1);
+        s_on_us = now_us();
+    }
+    epd_row_stats_start(&s_row_stats, s_on_us);
+}
+
+static void IRAM_ATTR row_step(void)
+{
+    const gpio_num_t ckv = FastEpdX::s_ckv, le = FastEpdX::s_le;
+    const uint32_t drive = s_drive_us;
+    uint32_t now = now_us();
+    epd_row_stats_step(&s_row_stats, now);
+    if (drive)
+        epd_row_drive_step(&s_drive, s_on_us, now, drive); /* the pulse ended inside ckv_pulse: stalls only count */
+    else {
+        epd_row_drive_step(&s_drive, s_on_us, now, 0);
+        gpio_set_level(ckv, 0);
+    }
+    const bool on = s_rows_on;
+    if (on && s_rowd.settle) esp_rom_delay_us(s_rowd.settle);
+    gpio_set_level(le, 1);
+    gpio_set_level(le, 0);
+    if (on && s_rowd.hold) esp_rom_delay_us(s_rowd.hold);
+    if (drive)
+        ckv_pulse(ckv, drive);
+    else
+        s_on_us = now_us(); /* bbepWriteRow: CKV on right after this returns */
+}
+
+/* The scans of a partial (epd_scan.h). Default settings: FastEPD's own scans, row_ctl only counts them. Else the
+ * sequencer s_seq runs them (s_seq_on) through SCAN_IO: the frame start and row step above, and the bare gate
+ * clocks of the rows it skips. */
+static epd_scan_cfg_t s_scan_cfg = EPD_SCAN_CFG_DEFAULT; /* epdp_set_scan */
+static epd_scan_cfg_t s_scan_used = EPD_SCAN_CFG_DEFAULT; /* of the update running or run last */
+static epd_scan_seq_t s_seq;
+static volatile bool s_seq_on;
+static bool s_scan_skip; /* this update skips rows */
+
+static void io_frame_start(void *) { frame_start(); }
+static void io_row_step(void *) { row_step(); }
+static void io_data_wait(void *)
+{
+    while (!dma_is_done) esp_rom_delay_us(1);
+}
+static void io_ckv(void *, int level) { gpio_set_level(FastEpdX::s_ckv, (uint32_t)level); }
+static void io_delay(void *, uint32_t us) { esp_rom_delay_us(us); }
+static uint32_t io_now(void *) { return now_us(); }
+static void io_resume(void *, int row)
+{
+    s_on_us = s_row_stats.last_us = now_us(); /* the skipped rows are no row period and no stall */
+    s_row_stats.row = row;
+}
+static const epd_scan_io_t SCAN_IO = {io_frame_start, io_row_step, io_data_wait, io_ckv, io_delay, io_now, io_resume};
+
+static void IRAM_ATTR row_ctl(void *p, int type)
+{
+    if (s_seq_on) {
+        if (type == ROW_START) {
+            if (!epd_scan_seq_start(&s_seq)) ((FASTEPDSTATE *)p)->native_height = 0; /* FastEpdX::scan_partial */
+        } else if (type == ROW_STEP) {
+            epd_scan_seq_step(&s_seq);
+        }
+        return;
+    }
     if (type == ROW_START) {
-        s_drive.frames++;
-        gpio_set_level(ckv, 1);
-        esp_rom_delay_us(7);
-        gpio_set_level(spv, 0);
-        esp_rom_delay_us(10);
-        gpio_set_level(ckv, 0);
-        gpio_set_level(ckv, 1);
-        esp_rom_delay_us(8);
-        gpio_set_level(spv, 1);
-        esp_rom_delay_us(10);
-        gpio_set_level(ckv, 0);
-        gpio_set_level(ckv, 1);
-        esp_rom_delay_us(10);
-        gpio_set_level(ckv, 0);
-        gpio_set_level(ckv, 1);
-        esp_rom_delay_us(10);
-        gpio_set_level(ckv, 0);
-        if (drive)
-            ckv_pulse(ckv, drive);
-        else {
-            gpio_set_level(ckv, 1);
-            s_on_us = now_us();
-        }
-        epd_row_stats_start(&s_row_stats, s_on_us);
+        frame_start();
+        s_seq.st.frames++;
+        s_seq.st.careful++;
     } else if (type == ROW_STEP) {
-        uint32_t now = now_us();
-        epd_row_stats_step(&s_row_stats, now);
-        if (drive)
-            epd_row_drive_step(&s_drive, s_on_us, now, drive); /* the pulse ended inside ckv_pulse: stalls only count */
-        else {
-            epd_row_drive_step(&s_drive, s_on_us, now, 0);
-            gpio_set_level(ckv, 0);
-        }
-        const bool on = s_rows_on;
-        if (on && s_rowd.settle) esp_rom_delay_us(s_rowd.settle);
-        gpio_set_level(le, 1);
-        gpio_set_level(le, 0);
-        if (on && s_rowd.hold) esp_rom_delay_us(s_rowd.hold);
-        if (drive)
-            ckv_pulse(ckv, drive);
-        else
-            s_on_us = now_us(); /* bbepWriteRow: CKV on right after this returns */
+        row_step();
+        s_seq.st.careful++;
     }
 }
 
@@ -203,11 +281,15 @@ static void rows_begin(bool partial)
     ckv_pcnt_clear();
     s_drive_us = partial ? s_drive_set : 0;
     s_rows_on = partial;
+    s_seq_on = false;
+    s_scan_skip = false;
+    epd_scan_seq_init(&s_seq, &SCAN_IO, nullptr);
 }
 
 static void rows_end(void)
 {
     s_rows_on = false;
+    s_seq_on = false;
     gpio_set_level(FastEpdX::s_ckv, 0);
     s_drive_us = 0;
     s_drive.edges = ckv_pcnt_read();
@@ -489,6 +571,49 @@ extern "C" int epdp_gray_to_1bit(void)
     return EPDP_OK;
 }
 
+/* One step of a partial through the sequencer: FastEPD's partial over the careful rows, the others clocked
+ * through, the neutral scan after it or not (epd_scan.h). On the panel core, the trail rows included. */
+static int scan_step(const epd_scan_rows_t &r, int passes, bool neutral)
+{
+    return on_panel_core([&] {
+        epd_scan_seq_call(&s_seq, &r, passes, neutral, s_scan_used.skip_us, s_scan_skip ? s_scan_used.min_ms * 1000u : 0);
+        s_seq_on = true;
+        int rc = s_epd.scan_partial(r, passes);
+        epd_scan_seq_end(&s_seq);
+        s_seq_on = false;
+        return rc;
+    });
+}
+
+/* After rows_begin(true): whether this partial's scans go through the sequencer (false: FastEPD's own, the
+ * default). Rows are skipped only with the fixed drive (its row step leaves CKV low, which the bare clocks of
+ * the skipped rows start from) and a panel scanned top down; then the prime scan runs here (*rc). */
+static bool scan_begin(int *rc)
+{
+    s_scan_used = s_scan_cfg;
+    if (epd_scan_cfg_stock(&s_scan_used)) return false;
+    s_scan_skip = s_scan_used.skip && s_drive_us && !s_epd.mirror_y();
+    if (s_scan_skip) {
+        epd_scan_rows_t r;
+        epd_scan_rows(s_epd.height(), -1, -1, true, &r);
+        *rc = scan_step(r, 0, true);
+    }
+    return true;
+}
+
+/* A step's scans through the sequencer: the rows FastEPD's frames differ in now, joined with those of the
+ * update's earlier steps (a row driven before is still written with the timed step and reaches the neutral
+ * scan). */
+static int scan_run(const uint8_t *prev, const uint8_t *cur, size_t n, int *y0, int *y1, int frames, int step, int steps)
+{
+    int a0, a1;
+    epd_scan_rows_t r;
+    epd_scan_span(prev, cur, n, (size_t)(s_epd.width() / 8), &a0, &a1);
+    epd_scan_union(y0, y1, a0, a1);
+    epd_scan_rows(s_epd.height(), *y0, *y1, s_scan_skip, &r);
+    return scan_step(r, frames, epd_scan_step_neutral(s_scan_used.neutral, step, steps));
+}
+
 extern "C" int epdp_partial(int y0, int y1)
 {
     if (!s_open) return EPDP_E_STATE;
@@ -513,6 +638,8 @@ extern "C" int epdp_partial(int y0, int y1)
     epd_wave_fresh_info(redriven ? s_fresh : nullptr, n, (size_t)(s_epd.width() / 8), &s_redrive);
     rows_begin(true);
     int rc = BBEP_SUCCESS;
+    int sy0 = -1, sy1 = -1;
+    const bool seq = scan_begin(&rc);
     /* One FastEPD partial per step (epd_parwave.h), rails kept on in between. FastEPD copies current into
      * previous as it goes, so every step rebuilds both from the saved frames. */
     for (int i = 0; i < ns && rc == BBEP_SUCCESS; i++) {
@@ -520,7 +647,10 @@ extern "C" int epdp_partial(int y0, int y1)
         epd_wave_masks(st[i].phase, s_p, s_c, s_fresh, s_wave.redrive, prev, cur, n);
         epd_wave_drive(s_p, s_c, prev, cur, n, &s_given.drv[st[i].phase]);
         s_epd.setPasses(st[i].frames, s_full_passes);
-        rc = on_panel_core([&] { return s_epd.partialUpdate(i + 1 < ns, first, last); });
+        if (seq)
+            rc = scan_run(prev, cur, n, &sy0, &sy1, st[i].frames, i, ns);
+        else
+            rc = on_panel_core([&] { return s_epd.partialUpdate(i + 1 < ns, first, last); });
         s_wave_ms.ms[st[i].phase] = (uint16_t)((esp_timer_get_time() - t) / 1000);
         s_wave_ms.frames[st[i].phase] = st[i].frames;
     }
@@ -598,6 +728,8 @@ extern "C" int epdp_gray_partial(const epdp_gwin_t *win, int nw, const uint8_t *
     rows_begin(true);
     memset(&s_gpart, 0, sizeof s_gpart);
     int rc = BBEP_SUCCESS;
+    int sy0 = -1, sy1 = -1;
+    const bool seq = scan_begin(&rc);
     for (int i = 0; i < ns && rc == BBEP_SUCCESS; i++) {
         memset(prev, 0xff, n);
         memset(cur, 0xff, n);
@@ -613,7 +745,10 @@ extern "C" int epdp_gray_partial(const epdp_gwin_t *win, int nw, const uint8_t *
         }
         if (drv > s_gpart.driven_px) s_gpart.driven_px = drv;
         s_epd.setPasses(st[i].frames, s_full_passes);
-        rc = on_panel_core([&] { return s_epd.partialUpdate(i + 1 < ns, 0, H - 1); });
+        if (seq)
+            rc = scan_run(prev, cur, n, &sy0, &sy1, st[i].frames, i, ns);
+        else
+            rc = on_panel_core([&] { return s_epd.partialUpdate(i + 1 < ns, 0, H - 1); });
         s_gpart.steps++;
         s_gpart.frames = (uint8_t)(s_gpart.frames + st[i].frames);
     }
@@ -685,6 +820,20 @@ extern "C" const epd_row_drive_stats_t *epdp_last_drive(uint32_t *drive_us)
 }
 
 extern "C" bool epdp_drive_ok(void) { return s_drive_set != 0; }
+
+extern "C" int epdp_set_scan(const epd_scan_cfg_t *c)
+{
+    if (!epd_scan_cfg_valid(c)) return EPDP_E_ARG;
+    s_scan_cfg = *c;
+    return EPDP_OK;
+}
+
+extern "C" const epd_scan_stats_t *epdp_last_scan(epd_scan_cfg_t *used, bool *skipped)
+{
+    if (used) *used = s_scan_used;
+    if (skipped) *skipped = s_scan_skip;
+    return &s_seq.st;
+}
 
 extern "C" int epdp_set_bus_hz(uint32_t hz)
 {

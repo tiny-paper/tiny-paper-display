@@ -171,6 +171,19 @@ the driver's `!tp` console commands, with the bounds those commands check.
 | `row_hold` | 0 to 20 | 2 | microseconds each row holds after |
 | `row_drive` | 0 to 200 | 32 | microseconds of each partial row's drive (0: free running) |
 | `clear` | `auto`, `none`, `fast`, `slow` | `auto` | the clearing passes before a full refresh (auto: slow every 8th, else fast) |
+| `step_neutral` | `each`, `end` | `each` | the scan with every source output neutral that ends a step's drive: after each step of a partial update (a 4 bit one has about 10 steps, a 1 bit one 2), or only after the last; `end` saves one scan a step. Watch for: grays darker or uneven on a large area (the pause between steps, `gap=` in the log, lengthens the frame before it), ghosting |
+| `row_skip` | `off`, `on` | `off` | rows outside the changed rows get one short gate clock and no data instead of a timed row, the source outputs latched neutral; one row above and two below the changed rows stay timed. Needs `row_drive` above 0; a change within 2 rows of the last row is not skipped. Watch for: a stroke shifted, doubled or stretched, a faint band above or below it, weaker blacks or lighter grays (a scan is much shorter, so each frame may push less) |
+| `row_skip_us` | 2 to 50 | 10 | microseconds the gate clock is high for a skipped row (1 low before it). Watch for, when lowered: rows shifted up (clocks the gate driver missed) |
+| `scan_min_ms` | 0 to 150 | 0 | with `row_skip`: a scan lasts at least this long (it waits after its last row); about 120 gives every frame the time it has without skipping. Tells a weak drive (cured by it) from a misplaced row (not cured) |
+
+The last four are the scans of a partial update. With their defaults the scans are the library's own: every step is its
+drive frames and then one neutral scan, every scan writes all 1404 rows with the timed row step. The gate driver gets one
+clock per row in every scan whatever the keys say; the device counts the clock edges in hardware and the rows as it
+drives them, and logs both after each partial update: `panel scan neutral=<each|end> skip=<off|on/<us>us> frames=<scans>
+careful=<rows written> skipped=<rows clocked through> left=<neutral scans left out> gap=<longest pause between steps>
+<ok|BAD> per=<clock edges a scan, 1408>`; `careful + skipped` is `frames` times 1404, else `BAD` and a `W` line.
+With `row_skip` an update starts with one more scan that writes three neutral rows and skips the rest, so the source
+drivers hold neutral before any row is skipped.
 
 There is no key to skip a 1 bit black step for gray targets: a 4 bit rectangle goes straight to the gray partial, which
 drives only the pixels that changed, so there is no such step.

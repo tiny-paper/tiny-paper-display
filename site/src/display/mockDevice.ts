@@ -12,6 +12,8 @@ export const X_KNOBS: readonly { name: string; min: number; max: number; def: nu
   { name: 'wave_kick', min: 0, max: 14, def: 2 }, { name: 'wave_extra', min: 0, max: 14, def: 0 }, { name: 'wave_redrive', min: 0, max: 3, def: 2 },
   { name: 'row_settle', min: 0, max: 20, def: 2 }, { name: 'row_hold', min: 0, max: 20, def: 2 }, { name: 'row_drive', min: 0, max: 200, def: 32 },
   { name: 'clear', min: 0, max: 3, def: 0, words: ['auto', 'none', 'fast', 'slow'] },
+  { name: 'step_neutral', min: 0, max: 1, def: 0, words: ['each', 'end'] }, { name: 'row_skip', min: 0, max: 1, def: 0, words: ['off', 'on'] },
+  { name: 'row_skip_us', min: 2, max: 50, def: 10 }, { name: 'scan_min_ms', min: 0, max: 150, def: 0 },
 ];
 /** The knobs as hello and every `set` answer report them: a word where the knob has words, else the number. */
 export function tuningMap(values: readonly number[], knobs = X_KNOBS): Record<string, number | string> {

@@ -87,6 +87,7 @@
 #include "epd_par.h"
 #include "epd_parwave.h"
 #include "epd_parwin.h"
+#include "epd_scan.h"
 
 enum { CLEAR_AUTO = 0, CLEAR_NONE_ = 1, CLEAR_FAST_ = 2, CLEAR_SLOW_ = 3 };
 enum { GRAY_FASTEPD = 0, GRAY_STOCK = 1 };
@@ -105,6 +106,7 @@ static wave_cfg_t s_wave = {BOARD_EPD_WAVE_KICK, BOARD_EPD_WAVE_EXTRA, BOARD_EPD
 static epd_row_delay_t s_rows = {BOARD_EPD_ROW_SETTLE, BOARD_EPD_ROW_HOLD};
 static uint8_t s_drive = EPD_ROW_DRIVE_DEFAULT; /* NVS "xdrive": fixed partial row drive, us, 0 = free */
 static uint8_t s_bus_mhz;                       /* NVS "xbus": 0 = 26.67 MHz hardware CS, 1 = stock, 10..40 MHz */
+static epd_scan_cfg_t s_scan = EPD_SCAN_CFG_DEFAULT; /* the scans of a partial (epd_scan.h); tuning keys only */
 
 static gpart_cfg_t s_gp = {1, 0, 0}; /* on by default (display firmware): hello lists the gray partial depths; "!tp gpart off" */
 /* windows of a gray partial (depth 2/4): 4 bpp copies of old and new pixels, freed after the refresh */
@@ -203,17 +205,37 @@ static void tune_apply(void)
     epdp_set_wave(s_wave.kick, s_wave.extra, s_wave.redrive);
     epdp_set_rows(s_rows.settle, s_rows.hold);
     epdp_set_drive(s_drive);
+    epdp_set_scan(&s_scan);
 }
 
-size_t hal_panel_tune_count(void) { return NKNOBS; }
-const hal_tune_t *hal_panel_tune_info(size_t i) { return i < NKNOBS ? &KNOBS[i].t : NULL; }
-int hal_panel_tune_get(size_t i) { return i < NKNOBS ? *KNOBS[i].v : 0; }
+/* After KNOBS come the keys of the scans of a partial, defined and bounded in epd_scan.h (host-tested there and
+ * through usbdisp's tuning test); their defaults are the scans as they were before those keys. */
+size_t hal_panel_tune_count(void) { return NKNOBS + EPD_SCAN_KEYS; }
+
+const hal_tune_t *hal_panel_tune_info(size_t i)
+{
+    static hal_tune_t scan[EPD_SCAN_KEYS];
+    if (i < NKNOBS)
+        return &KNOBS[i].t;
+    const epd_scan_key_t *k = epd_scan_key(i - NKNOBS);
+    if (!k)
+        return NULL;
+    scan[i - NKNOBS] = (hal_tune_t){k->name, k->min, k->max, k->def, k->words};
+    return &scan[i - NKNOBS];
+}
+
+int hal_panel_tune_get(size_t i) { return i < NKNOBS ? *KNOBS[i].v : epd_scan_key_get(&s_scan, i - NKNOBS); }
 
 bool hal_panel_tune_set(size_t i, int v)
 {
-    if (i >= NKNOBS || v < KNOBS[i].t.min || v > KNOBS[i].t.max)
+    if (i >= NKNOBS) {
+        if (!epd_scan_key_set(&s_scan, i - NKNOBS, v))
+            return false;
+    } else if (v < KNOBS[i].t.min || v > KNOBS[i].t.max) {
         return false;
-    *KNOBS[i].v = (uint8_t)v;
+    } else {
+        *KNOBS[i].v = (uint8_t)v;
+    }
     tune_apply();
     return true;
 }
@@ -222,6 +244,7 @@ void hal_panel_tune_defaults(void)
 {
     for (size_t i = 0; i < NKNOBS; i++)
         *KNOBS[i].v = (uint8_t)KNOBS[i].t.def;
+    epd_scan_key_defaults(&s_scan);
     tune_apply();
 }
 
@@ -540,6 +563,7 @@ int hal_panel_refresh(void)
                  s_gray == GRAY_STOCK ? "stock" : "fastepd", g->steps, g->frames, (unsigned long)g->changed_px,
                  (unsigned long)g->driven_px, hal_esp_par_rows_str(rb, sizeof rb), rc);
         hal_esp_par_log_drive(s_mode == HAL_REFRESH_FULL);
+        hal_esp_par_log_scan();
     } else if (s_mode == HAL_REFRESH_PARTIAL) {
         rc = s_y1 >= s_y0 ? epdp_partial(s_y0, s_y1) : EPDP_OK;
         if (rc == EPDP_OK && s_since_full < UINT16_MAX)
@@ -564,6 +588,7 @@ int hal_panel_refresh(void)
             /* issue #203: the frames FastEPD was given at the drive call and its own state then */
             hal_esp_par_log_given(g);
             hal_esp_par_log_drive(s_mode == HAL_REFRESH_FULL);
+            hal_esp_par_log_scan();
         }
     } else {
         rc = epdp_full(clear_mode());

@@ -18,6 +18,7 @@
 
 #include "epd_parwave.h"
 #include "epd_rowtime.h"
+#include "epd_scan.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -109,6 +110,12 @@ int epdp_set_drive(int drive_us);
  * the pulse ended), and the drive set for partials (0 when free or without the RMT). */
 const epd_row_drive_stats_t *epdp_last_drive(uint32_t *drive_us);
 bool epdp_drive_ok(void); /* partial rows use the fixed CKV pulse (drive_us > 0) */
+/* The scans of partial updates (epd_scan.h): the neutral scan after each step or only after the last, rows outside
+ * the driven span clocked through or written. From the next partial; the default is FastEPD's own scans. Rows are
+ * skipped only with the fixed drive (epdp_set_drive above 0). */
+int epdp_set_scan(const epd_scan_cfg_t *c);
+/* The scans of the last update as counted while they ran, the settings it ran with and whether it skipped rows. */
+const epd_scan_stats_t *epdp_last_scan(epd_scan_cfg_t *used, bool *skipped);
 /* LCD bus before epdp_open_trmnl_x: hz with hardware chip select (default EPDP_BUS_HW_CS, FastEPD 8f76e90's TRMNL X
  * setting), 10..40 MHz, or 0 = FastEPD 8dc8c74 as stock pins it (20 MHz, SPH by software from the DMA interrupt). */
 #define EPDP_BUS_HW_CS 26666666u

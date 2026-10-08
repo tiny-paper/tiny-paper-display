@@ -11,6 +11,7 @@
 #include "epd_par.h"
 #include "epd_parwave.h"
 #include "epd_rowtime.h"
+#include "epd_scan.h"
 
 const char *hal_esp_par_rows_str(char *b, size_t n)
 {
@@ -31,6 +32,27 @@ void hal_esp_par_log_drive(bool full)
     if (st->frames && !epd_row_edges_ok(st->edges, st->frames, epdp_height(), &per))
         hal_logf("W panel rows: %u CKV edges per frame for %d rows (gate clocks %s; issue #203)", per, epdp_height(),
                  per > (unsigned)epdp_height() + EPD_ROW_START_EDGES ? "doubled" : "missing");
+}
+
+/* After a partial: "panel scan neutral=.. skip=.. frames=.. careful=.. skipped=.. left=.. gap=.. ok per=<edges a
+ * scan>" (epd_scan.h): the rows each scan wrote with the timed step and those it clocked through, as counted while
+ * they ran, next to the hardware's edge count. A W line when the rows do not add up to the panel's for every scan. */
+void hal_esp_par_log_scan(void)
+{
+    epd_scan_cfg_t c;
+    bool skip;
+    const epd_scan_stats_t *st = epdp_last_scan(&c, &skip);
+    const epd_row_drive_stats_t *dr = epdp_last_drive(NULL);
+    unsigned per = 0;
+    char b[128];
+    if (!st->frames)
+        return;
+    epd_row_edges_ok(dr->edges, dr->frames, epdp_height(), &per);
+    hal_logf("panel scan %s per=%u", epd_scan_str(&c, skip, st, epdp_height(), b, sizeof b), per);
+    if (!epd_scan_stats_ok(st, epdp_height()))
+        hal_logf("W panel scan: %lu rows written and %lu clocked through in %lu scans of %d rows, %lu stray row steps",
+                 (unsigned long)st->careful, (unsigned long)st->skipped, (unsigned long)st->frames, epdp_height(),
+                 (unsigned long)st->stray);
 }
 
 /* issue #203: the frames FastEPD was given at the drive call, its own state then, and per step (kick/main/extra)
