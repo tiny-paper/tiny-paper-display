@@ -83,6 +83,21 @@ Host tests model the gate driver and check one clock per row in every scan and t
 device logs the rows it wrote and skipped next to its clock count. Not seen on a panel yet: whether a skipped scan
 places rows right, whether the shorter scans draw as dark, and which combination looks right is still to be recorded.
 
+Measured later on 2026-10-08 on a TRMNL X (1 bit, `row_skip: on`): a 3 row line took 704 ms, 667 ms with
+`step_neutral: end` (expected was about 550). Of that a step spent about 100 ms and the pause between steps (`gap=`)
+112 to 128 ms on no scan at all, and about 200 ms more lay outside the steps: passes over the two 328 KB frames.
+Fewer passes (`passes_partial: 2`, `wave_kick: 1`) gave 565 ms and gray blacks: not the way.
+
+| Since then in the firmware (host-tested, none of it seen on a device yet) | Expected | To look for |
+|---|---|---|
+| a `panel time` log line per update with the split in ms, `pre=` in the `show` line (spec "Tuning") | the numbers that replace the estimates here | which part is largest |
+| `frame_work: rows`: the passes over the frames cover the changed rows only | a 3 row line with default passes, `row_skip: on`: about 250 ms (9 scans of about 20 ms, rails up and down, log lines); `gap=` a few ms | that the panel looks as with `whole` |
+| `rails_hold_ms`: rails kept up after a partial update, down by timer, on any failure and before sleep | `up=` of the next update 0 | the picture while the rails are held; whether to keep the key at all (owner: no more panel driving of our own) |
+| gray partial: codes from a table per step instead of per pixel; with `frame_work: rows` no whole-frame white per step | the time of a gray partial no longer grows with the window height | grays as before |
+| an answer longer than one USB write arrives whole | no cut hello or set answer | the garbled log lines seen once: cause not proven, raw bytes needed if seen again |
+
+`esp/epd_fastepd.cpp` has grown past 1100 lines: to split (rails, time split, gray partial) when the layer's future is decided.
+
 Seen on 2026-10-08: the grays are out of order around levels 5 and 6. With the stock table and a full refresh level 6
 is too light against its neighbours; with the FastEPD table and gray partial updates from white level 5 is darker than 4
 and 6, and 2 and 3 look the same (their rows in that table are the same). The tuning key `gray_row` replaces single
