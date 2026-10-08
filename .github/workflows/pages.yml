@@ -83,3 +83,10 @@ jobs:
           path: _site
       - id: deployment
         uses: actions/deploy-pages@v4
+      # a green deploy job is not a live site: read the live lists (past every cache) and fail when the release is not there
+      - name: The live site shows the release
+        if: ${{ inputs.tag != '' }}
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          TAG: ${{ inputs.tag }}
+        run: node site/publish.mjs verify "$PAGE_URL" "$TAG"

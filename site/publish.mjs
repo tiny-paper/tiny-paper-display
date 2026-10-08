@@ -44,7 +44,44 @@ export function assemble({ site, out, testing, all, tag }) {
   return list.map((r) => r.tagName);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+/**
+ * After a deploy: the LIVE site lists `tag` and serves its files. Read with a query that no cache has seen (a page
+ * is cached for ten minutes: an ordinary read can show the old list after a good deploy), and tried again for a while,
+ * because a deployment takes a moment to go live. Throws when it never does: the job fails instead of reporting success.
+ * `base`: the site's root URL with a trailing slash. A v* tag is checked on the main page and the testing page, a t* tag
+ * on the testing page.
+ */
+export async function verifyLive({ base, tag, fetchFn = fetch, tries = 12, waitMs = 10000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
+  const pages = tag.startsWith('v') ? [base, `${base}testing/`] : [`${base}testing/`];
+  let last = '';
+  for (let i = 1; i <= tries; i++) {
+    try {
+      last = '';
+      for (const page of pages) {
+        const bust = `cb=${Date.now()}${i}`;
+        const list = await fetchFn(`${page}fw/releases.json?${bust}`, { cache: 'no-store' });
+        if (!list.ok) { last = `${page}fw/releases.json: HTTP ${list.status}`; break; }
+        if (!(await list.json()).some((r) => r.tagName === tag)) { last = `${page}fw/releases.json does not list ${tag}`; break; }
+        const file = await fetchFn(`${page}fw/${encodeURIComponent(tag)}/trmnl_x__flash.txt?${bust}`, { cache: 'no-store' });
+        if (!file.ok) { last = `${page}fw/${tag}/trmnl_x__flash.txt: HTTP ${file.status}`; break; }
+      }
+    } catch (e) { last = String(e.message ?? e); }
+    if (!last) return;
+    if (i < tries) await sleep(waitMs);
+  }
+  throw new Error(`the live site does not show ${tag} after ${tries} tries: ${last}`);
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url) && process.argv[2] === 'verify') {
+  const [, , , base, tag] = process.argv;
+  try {
+    await verifyLive({ base: base.endsWith('/') ? base : `${base}/`, tag });
+    console.log(`the live site lists ${tag} and serves its files`);
+  } catch (e) {
+    console.error(`publish: ${e.message}`);
+    process.exit(1);
+  }
+} else if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [site, out, which, allFile, tag] = process.argv.slice(2);
   if (!site || !out || !['main', 'testing'].includes(which) || !allFile) {
     console.error('usage: publish.mjs <site dir> <out dir> main|testing <all releases json> [required tag]');

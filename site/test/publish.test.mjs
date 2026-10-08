@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { assemble, labelPage, releaseList } from '../publish.mjs';
+import { assemble, labelPage, releaseList, verifyLive } from '../publish.mjs';
 
 const SITE = join(dirname(fileURLToPath(import.meta.url)), '..');
 const WORKFLOWS = join(SITE, '..', '.github', 'workflows');
@@ -69,4 +69,40 @@ test('workflows: pages for both branches with the tag handed over, t* tags build
   const publish = readFileSync(join(WORKFLOWS, 'publish.yml'), 'utf8');
   assert.match(publish, /tags: \['v\*'\]/);
   assert.ok(!/'t\*'|branches/.test(publish.split('jobs:')[0]), 'publish.yml must not run for t* tags or branches');
+});
+
+const json = (body, ok = true, status = 200) => ({ ok, status, json: async () => body });
+const live = (state) => async (url) => {
+  state.calls.push(url);
+  if (url.includes('releases.json')) return json(state.list(url));
+  return json({}, state.file, state.file ? 200 : 404);
+};
+
+test('verifyLive: the live lists are read past every cache, retried until they show the release, and fail loudly when they never do', async () => {
+  const base = 'https://example.test/site/';
+  const slept = [];
+  const sleep = async (ms) => { slept.push(ms); };
+  // the old list for two reads, then the new one: a deployment going live
+  const state = { calls: [], file: true, list: () => (state.calls.filter((u) => u.includes('releases.json')).length < 3 ? [{ tagName: 'v0.1.0' }] : [{ tagName: 't1' }, { tagName: 'v0.1.0' }]) };
+  await verifyLive({ base, tag: 't1', fetchFn: live(state), sleep, waitMs: 1 });
+  assert.equal(slept.length, 2, 'two waits before the list showed the tag');
+  assert.ok(state.calls.every((u) => /[?&]cb=\d+/.test(u)), 'every read has a query no cache has seen');
+  assert.ok(state.calls.some((u) => u.startsWith(`${base}testing/fw/t1/trmnl_x__flash.txt`)), 'its files are read too');
+  assert.ok(!state.calls.some((u) => u.startsWith(`${base}fw/releases.json`)), 'a t* tag is not on the main page');
+  // a v* tag is on both pages
+  const both = { calls: [], file: true, list: () => [{ tagName: 'v1.0.0' }] };
+  await verifyLive({ base, tag: 'v1.0.0', fetchFn: live(both), sleep });
+  assert.ok(both.calls.some((u) => u.startsWith(`${base}fw/releases.json`)) && both.calls.some((u) => u.startsWith(`${base}testing/fw/releases.json`)));
+  // never listed
+  await assert.rejects(verifyLive({ base, tag: 't2', fetchFn: live({ calls: [], file: true, list: () => [{ tagName: 't1' }] }), sleep, tries: 3 }), /does not show t2 after 3 tries: .*does not list t2/);
+  // listed but the files are missing
+  await assert.rejects(verifyLive({ base, tag: 't1', fetchFn: live({ calls: [], file: false, list: () => [{ tagName: 't1' }] }), sleep, tries: 2 }), /trmnl_x__flash\.txt: HTTP 404/);
+  // the site unreachable
+  await assert.rejects(verifyLive({ base, tag: 't1', fetchFn: async () => { throw new Error('offline'); }, sleep, tries: 2 }), /offline/);
+});
+
+test('the flash page reads its release list past the cache; pages.yml checks the live site after a release deploy', () => {
+  assert.match(readFileSync(join(SITE, 'index.html'), 'utf8'), /fetch\(`fw\/releases\.json\?cb=\$\{Date\.now\(\)\}`, \{ cache: 'no-store' \}\)/);
+  const pages = readFileSync(join(WORKFLOWS, 'pages.yml'), 'utf8');
+  assert.match(pages, /if: \$\{\{ inputs\.tag != '' \}\}\n(.*\n)*?\s+run: node site\/publish\.mjs verify /);
 });
