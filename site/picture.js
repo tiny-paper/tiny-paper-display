@@ -519,7 +519,7 @@ var X_KNOBS = [
   { name: "gray_table", min: 0, max: 1, def: 1, words: ["fastepd", "stock"] },
   { name: "gray_partial", min: 0, max: 1, def: 1, words: ["off", "on"] },
   { name: "gray_dark", min: 0, max: 14, def: 0 },
-  { name: "gray_light", min: 0, max: 14, def: 3 },
+  { name: "gray_light", min: 0, max: 14, def: 0 },
   { name: "passes_partial", min: 1, max: 14, def: 4 },
   { name: "passes_full", min: 1, max: 14, def: 3 },
   { name: "wave_kick", min: 0, max: 14, def: 2 },
@@ -628,6 +628,13 @@ var MockDisplayDevice = class {
   onOutput(cb) {
     this.output = cb;
   }
+  /** The log lines the X writes after a refresh (panel_par.c, formats copied): the page's Device log shows what they look like. */
+  logFor(r) {
+    const y0 = Number(r.y), y1 = y0 + Number(r.h) - 1;
+    if (r.mode === "full") return [`panel full depth=${r.depth} ms=2591 clear=fast gray=stock rowmax=61@12 rc=0`, "panel rows drive=0us high=29/37/55 n=3 waited=0 absorbed=0 over=0 ckv=8424/6"];
+    if (Number(r.depth) > 1) return [`panel gpart depth=${r.depth} rows=${y0}..${y1} ms=2567 dark=${this.knobs[2]} light=${this.knobs[3]} gray=${this.knobs[0] ? "stock" : "fastepd"} steps=4 frames=9 chg=2400 drv=2400 rowmax=88@${y0} rc=0`, "panel rows drive=32us high=30/37/52 n=281 waited=0 absorbed=0 over=0 ckv=12636/9"];
+    return [`panel partial rows=${y0}..${y1} ms=1465 passes=4 kick=2/90ms main=4/180ms extra=0/0ms redrive=0@0..0 rowdly=2,2 rowmax=61@${y0} fresh=0/0ms since_full=1 rc=0`, "panel rows drive=32us high=30/37/52 n=281 waited=0 absorbed=0 over=0 ckv=11236/8"];
+  }
   write(bytes) {
     for (const ev of this.parser.push(bytes)) {
       if (ev.type !== "frame") continue;
@@ -665,7 +672,16 @@ var MockDisplayDevice = class {
           } else if (b.mode && b.mode !== "full") res = { mode: b.mode, why: b.mode === "partial" ? "changed" : "asked", depth: show.bits, ms: 0, x: b.x ?? 0, y: b.y ?? 0, w: show.w, h: show.h };
         }
       } else res = { err: 1, msg: "not a display command" };
-      setTimeout(() => this.output(encodeFrame({ seq, cmd: cmd | 128, payload: cborEncode(res) })), 1);
+      const log = cmd === 10 && this.hello.tuning ? this.logFor(res) : [];
+      setTimeout(() => {
+        const text = new TextEncoder().encode(log.map((l) => `# ${l}
+`).join(""));
+        if (text.length > 20) {
+          this.output(text.subarray(0, 20));
+          this.output(text.subarray(20));
+        } else if (text.length) this.output(text);
+        this.output(encodeFrame({ seq, cmd: cmd | 128, payload: cborEncode(res) }));
+      }, 1);
     }
   }
 };
