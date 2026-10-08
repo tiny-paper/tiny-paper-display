@@ -10,6 +10,8 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { startSketchPage } from '../sketch-page.js';
+import { inflateSync } from 'node:zlib';
+import { toneLevel } from '../sketch.js';
 import { FakeImageData, fakeDocument, pointer } from './fake-dom.mjs';
 import { fakeDisplay } from './fake-display.mjs';
 
@@ -23,14 +25,14 @@ async function until(what, cond, ms = 4000) {
 }
 
 /** The page in a browser with (or without) Web Serial; `dev`: what the port picker hands out. */
-function open({ dev = null, search = '', serial = true } = {}) {
+function open({ dev = null, search = '', serial = true, storage = null } = {}) {
   const document = fakeDocument(HTML);
   const listeners = {};
   const navigator = serial ? { serial: {
     requestPort: async () => { if (!dev) throw new Error('nothing picked'); return dev.port; },
     addEventListener: (type, f) => { listeners[type] = f; },
   } } : {};
-  const page = startSketchPage({ document, navigator, location: { search }, ImageData: FakeImageData });
+  const page = startSketchPage({ document, navigator, location: { search }, ImageData: FakeImageData, localStorage: storage });
   const el = (id) => document.getElementById(id);
   const stroke = (points) => {
     el('canvas').dispatch('pointerdown', pointer(...points[0]));
@@ -294,4 +296,60 @@ test('Erase and Undo where nothing stronger than partial exists (4 bit): counted
   await said(el, /^Asked for a full refresh of the whole drawing \(1872 x 445\)\. Full refresh: as requested \(9 ms\)\. \d+ ms in all\. Full refresh by itself: 3 sends in a row erased pixels by a partial update, which leaves faint traces\.$/);
   await sleep(400);
   assert.equal(dev.shows.length, 8, 'the count starts again after the full refresh');
+});
+
+/** The pixel levels of a grayscale panel PNG made by the page (filter 0, no interlace): rows of levels. */
+function levels(png) {
+  const v = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  const w = v.getUint32(16), h = v.getUint32(20), depth = png[24];
+  const idat = [];
+  for (let off = 8; off < png.length;) {
+    const len = v.getUint32(off), name = String.fromCharCode(...png.subarray(off + 4, off + 8));
+    if (name === 'IDAT') idat.push(png.subarray(off + 8, off + 8 + len));
+    off += len + 12;
+  }
+  const raw = inflateSync(Buffer.concat(idat)), stride = Math.ceil(w * depth / 8);
+  const out = [];
+  for (let y = 0; y < h; y++) {
+    assert.equal(raw[y * (stride + 1)], 0, 'filter 0');
+    for (let x = 0; x < w; x++) out.push((raw[y * (stride + 1) + 1 + Math.floor(x * depth / 8)] >> (8 - depth - (x * depth) % 8)) & ((1 << depth) - 1));
+  }
+  return out;
+}
+
+test('Tone: a stroke is sent at the remapped level, the swatch keeps its shade, the status line says which level went out, the setting is remembered per board', async () => {
+  const gray = { board: 'trmnl_x', w: 1872, depths: [1, 2, 4], partial_depths: [1, 2, 4], modes: ['full', 'partial'], max_png: 1319644 };
+  const store = new Map();
+  const storage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) };
+  const dev = fakeDisplay({ h: 446, ...gray });
+  const p = open({ dev, storage });
+  await p.page.connect();
+  await until('the whole drawing on connect', () => dev.shows.length === 1 && p.el('status').dataset.state === 'ok');
+  assert.equal(p.el('tonerow').hidden, false);
+  assert.equal(p.el('toneval').textContent, 'neutral');
+  p.page.state.pen.color = 8;
+  p.stroke([[300, 200], [340, 240]]);
+  await shown(dev, 2);
+  assert.ok(new Set(levels(dev.pngs[1])).has(8), 'neutral: level 8 goes out as 8');
+  p.el('tone').value = '3';
+  p.el('tone').oninput();
+  assert.equal(store.get('tp-sketch-tone-trmnl_x'), '3');
+  assert.match(p.el('toneval').textContent, /^darker 3 \(gamma 1\.73\)$/);
+  const sent = toneLevel(8, 15, 3);
+  assert.notEqual(sent, 8);
+  p.stroke([[500, 300], [540, 340]]);
+  await shown(dev, 3);
+  const got = new Set(levels(dev.pngs[2]));
+  assert.ok(got.has(sent) && !got.has(8), `the stroke goes out as level ${sent}: ${[...got]}`);
+  await said(p.el, new RegExp(`Tone: gray 8 sent as level ${sent}\\.$`));
+  assert.equal(p.page.state.pen.color, 8, 'the swatch keeps its shade');
+  assert.ok(p.page.state.sender.model.px.includes(8), 'the drawing keeps the swatch level, not the level sent');
+  // the same board, another visit: the setting is read back
+  const again = open({ dev: fakeDisplay({ h: 446, ...gray }), storage });
+  await again.page.connect();
+  await until('connected', () => again.el('tone').value === '3');
+  assert.equal(again.page.state.sender.tone, 3);
+  // a black and white device has no tone control
+  const bw = await connected(447, { board: 'trmnl_og' });
+  assert.equal(bw.el('tonerow').hidden, true);
 });

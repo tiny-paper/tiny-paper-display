@@ -1,4 +1,4 @@
-// esbuild 0.28.2, 12 source files of site/src (MIT): do not edit, run `npm run build` in site/.
+// esbuild 0.28.2, 13 source files of site/src (MIT): do not edit, run `npm run build` in site/.
 // src/display/client.ts
 var DISPLAY_MODES = ["full", "partial", "partial_all", "inverse", "passes"];
 var DISPLAY_ERRORS = {
@@ -406,6 +406,23 @@ function packRows(px, w, h, depth) {
   return out;
 }
 
+// src/display/tone.ts
+var TONE_MIN = -6;
+var TONE_MAX = 6;
+var BASE = 1.2;
+function toneGamma(step) {
+  const s = Number.isFinite(step) ? Math.min(TONE_MAX, Math.max(TONE_MIN, Math.round(step))) : 0;
+  return BASE ** s;
+}
+function toneLevel(level, max, step) {
+  if (!Number.isInteger(level) || !Number.isInteger(max) || max < 1 || level < 0 || level > max) throw new Error("The level is outside the depth");
+  if (toneGamma(step) === 1) return level;
+  return Math.round(max * (level / max) ** toneGamma(step));
+}
+function toneTable(max, step) {
+  return Uint8Array.from({ length: max + 1 }, (_, v) => toneLevel(v, max, step));
+}
+
 // src/display/sketchSender.ts
 var SKETCH_TIMING = { liftMs: 150, everyMs: 700, busyMs: 5e3 };
 var FULL_AFTER = 30;
@@ -430,6 +447,8 @@ var SketchSender = class {
   timing;
   /** Partial sends before an automatic full refresh; 0: never. */
   fullAfter = FULL_AFTER;
+  /** Tone step (tone.ts, a measuring aid): 0 sends every level as drawn. Gray panels only. */
+  tone = 0;
   onStatus = () => {
   };
   status = { state: "idle", text: "Nothing sent yet." };
@@ -528,7 +547,12 @@ var SketchSender = class {
     this.note = "";
     this.sending = true;
     this.sentAt = Date.now();
-    const rows = packRows(m.values(rect), rect.w, rect.h, this.ink.depth);
+    const drawn = m.values(rect);
+    const lut = !this.ink.color && this.ink.depth > 1 && toneGamma(this.tone) !== 1 ? toneTable(this.ink.paper, this.tone) : null;
+    const sent = lut ? drawn.map((v) => lut[v]) : drawn;
+    const rows = packRows(sent, rect.w, rect.h, this.ink.depth);
+    const remap = lut ? [...new Set(drawn)].filter((v) => v > 0 && v < this.ink.paper && lut[v] !== v).sort((a, b) => a - b).slice(0, 3).map((v) => `gray ${v} sent as level ${lut[v]}`) : [];
+    const toneNote = remap.length ? ` Tone: ${remap.join(", ")}.` : "";
     const at = `${rect.w} x ${rect.h} pixels at ${rect.x}, ${rect.y}`;
     const what = full ? `a full refresh of the whole drawing (${m.w} x ${m.h})` : clean ? `${clean.words} of ${at}, to clean the pixels that got lighter` : `a partial update of ${at}`;
     this.say("sending", `Asked for ${what}; waiting for the panel...`);
@@ -548,7 +572,7 @@ var SketchSender = class {
       const weak = lighter && !clean && r.mode === "partial";
       if (weak) this.lightened++;
       const trace = weak && this.lightened < LIGHTEN_AFTER ? ` Erasing by a partial update can leave faint traces at ${this.ink.depth} bit: a full refresh follows after ${LIGHTEN_AFTER} such sends (${this.lightened} so far).` : "";
-      this.say("ok", `Asked for ${what}. ${displayAnswer(r)} ${Date.now() - this.sentAt} ms in all.${lost && !all ? " The device had lost its picture: sending the whole drawing." : ""}${note}${trace}`);
+      this.say("ok", `Asked for ${what}. ${displayAnswer(r)} ${Date.now() - this.sentAt} ms in all.${lost && !all ? " The device had lost its picture: sending the whole drawing." : ""}${note}${trace}${toneNote}`);
     } catch (e) {
       if (link !== this.link) return;
       if (dirty) m.markDirty(dirty, lighter);
@@ -1078,6 +1102,8 @@ export {
   SketchModel,
   SketchPen,
   SketchSender,
+  TONE_MAX,
+  TONE_MIN,
   UNDO_STEPS,
   alignRect,
   cleanMode,
@@ -1086,5 +1112,8 @@ export {
   packedPng,
   sketchBrushes,
   sketchInk,
-  sketchSession
+  sketchSession,
+  toneGamma,
+  toneLevel,
+  toneTable
 };

@@ -59,6 +59,13 @@ computer. <a href="sketch.html?mock=x">See the page work without a device.</a></
     <label id="fullafterrow">Full refresh by itself after <input id="fullafter" type="number" min="0" max="250">
     partial updates (0: never)</label>
   </div>
+  <div class="tools" id="tonerow" hidden>
+    <label>Tone <input id="tone" type="range" min="-6" max="6" step="1" value="0" aria-describedby="tonehelp">
+    <span id="toneval">neutral</span></label>
+  </div>
+  <p id="tonehelp" class="mut" hidden>Tone is a measuring aid: it changes the gray level sent for a swatch (the swatch keeps its
+  shade here), to find the setting at which the panel matches the swatch. It applies to the next strokes; Full refresh
+  sends the whole drawing with it. Remembered in this browser for this board.</p>
   <p id="status" role="status"></p>
 </section>
 

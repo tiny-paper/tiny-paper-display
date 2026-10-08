@@ -27,7 +27,7 @@ export const HELLO = {
  * from the PNG it received). `refuse = { err, msg }`: the next show ends with that refusal. `hello: null`: silence.
  */
 export function fakeDisplay(over = {}) {
-  const dev = { hello: over === null ? null : { ...HELLO, ...over }, shows: [], refuse: null, port: null };
+  const dev = { hello: over === null ? null : { ...HELLO, ...over }, shows: [], pngs: [], refuse: null, port: null };
   let begin = {};
   let png = new Uint8Array();
   dev.port = fakePort((tx) => {
@@ -44,6 +44,7 @@ export function fakeDisplay(over = {}) {
       const v = new DataView(png.buffer);
       const show = { mode: begin.mode, ...(begin.passes === undefined ? {} : { passes: begin.passes }), x: begin.x, y: begin.y, w: v.getUint32(16), h: v.getUint32(20), bits: png[24], signature: toHex(png.subarray(0, 8)) };
       dev.shows.push(show);
+      dev.pngs.push(Uint8Array.from(png));
       res = begin.mode && begin.mode !== 'full'
         ? { mode: begin.mode, why: begin.mode === 'partial' ? 'changed' : 'asked', depth: show.bits, ms: 7, x: begin.x ?? 0, y: begin.y ?? 0, w: show.w, h: show.h }
         : { mode: 'full', why: 'asked', depth: show.bits, ms: 9, x: 0, y: 0, w: dev.hello.w, h: dev.hello.h };

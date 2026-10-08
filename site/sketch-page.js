@@ -4,7 +4,7 @@
 // is the one the Bluetooth setup uses. `?mock=x|og|picpak`: no device, a pretend one answers.
 // Every failure ends as plain words on the page.
 import { DisplayLink } from './bt-setup.js';
-import { BRUSH_NAMES, DisplayClient, FULL_AFTER, MOCK_PANELS, MockDisplayDevice, SketchPen, displayHello, sketchSession } from './sketch.js';
+import { BRUSH_NAMES, DisplayClient, FULL_AFTER, MOCK_PANELS, MockDisplayDevice, SketchPen, TONE_MAX, TONE_MIN, displayHello, sketchSession, toneGamma } from './sketch.js';
 
 const HELLO_MS = 3000;
 // a full refresh of the largest panel takes several seconds; the device answers when the panel is done
@@ -18,6 +18,9 @@ export function partialLine(hello) {
   const list = d.length === 1 ? `${d[0]}` : `${d.slice(0, -1).join(', ')} and ${d.at(-1)}`;
   return `Partial updates at: ${list} bit${d.at(-1) > 1 ? ` (${2 ** d.at(-1)} grays)` : ''}`;
 }
+
+const toneKey = (board) => `tp-sketch-tone-${board}`;
+const toneText = (step) => (step === 0 ? 'neutral' : `${step > 0 ? 'darker' : 'lighter'} ${Math.abs(step)} (gamma ${toneGamma(step).toFixed(2)})`);
 
 /** A pretend device as a Web Serial port: the page talks to it exactly as to a real one. */
 export function mockPort(device) {
@@ -36,7 +39,7 @@ export function mockPort(device) {
 }
 
 /**
- * Start the page in `env` ({ document, navigator, location, ImageData }): returns { ready, connect, disconnect, state }.
+ * Start the page in `env` ({ document, navigator, location, ImageData, localStorage? }): returns { ready, connect, disconnect, state }.
  * `ready` resolves when the preview device, if asked for, is attached.
  */
 export function startSketchPage(env) {
@@ -93,6 +96,15 @@ export function startSketchPage(env) {
     $('note').textContent = sender.ink.note;
     $('note').hidden = !sender.ink.note;
     $('fullafterrow').hidden = !sender.ink.partial;
+    const gray = sender.ink.depth > 1 && !sender.ink.color;
+    let step = 0;
+    try { step = Number(env.localStorage?.getItem(toneKey(hello.board)) ?? 0); } catch { /* no storage: neutral */ }
+    step = Number.isInteger(step) ? Math.min(TONE_MAX, Math.max(TONE_MIN, step)) : 0;
+    sender.tone = gray ? step : 0;
+    $('tone').value = String(sender.tone);
+    $('toneval').textContent = toneText(sender.tone);
+    $('tonerow').hidden = !gray;
+    $('tonehelp').hidden = !gray;
     $('fullafter').value = String(FULL_AFTER);
     sender.fullAfter = FULL_AFTER;
     canvas.width = sender.model.w;
@@ -189,6 +201,13 @@ export function startSketchPage(env) {
     const n = Number($('fullafter').value);
     state.sender.fullAfter = $('fullafter').value !== '' && Number.isInteger(n) && n >= 0 && n <= 250 ? n : FULL_AFTER;
   };
+  $('tone').oninput = () => {
+    const step = Number($('tone').value);
+    if (!state.sender || !Number.isInteger(step)) return;
+    state.sender.tone = step;
+    $('toneval').textContent = toneText(step);
+    try { env.localStorage?.setItem(toneKey(state.hello.board), String(step)); } catch { /* not remembered */ }
+  };
   $('connect').onclick = connect;
   $('connect').disabled = !serial;
   $('nosupport').hidden = !!serial;
@@ -209,4 +228,8 @@ export function startSketchPage(env) {
   return { ready, connect, disconnect, state };
 }
 
-if (typeof document !== 'undefined') startSketchPage({ document, navigator, location, ImageData });
+if (typeof document !== 'undefined') {
+  let storage = null;
+  try { storage = localStorage; } catch { /* blocked: the tone is not remembered */ }
+  startSketchPage({ document, navigator, location, ImageData, localStorage: storage });
+}
