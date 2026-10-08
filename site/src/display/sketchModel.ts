@@ -50,6 +50,7 @@ export class SketchModel {
   /** Called with every rectangle whose pixels changed (the page repaints it). */
   onPaint: (r: Rect) => void = () => {};
   private dirty: Box | null = null;
+  private light = false; // a pixel got lighter since the last send: a partial update turns black to white only weakly
   private stroke: Box | null = null;
   private before: Uint8Array | null = null;
   private scratch: Uint8Array;
@@ -85,6 +86,7 @@ export class SketchModel {
         if (Number.isNaN(half)) continue;
         for (let x = Math.max(0, cx - half), end = Math.min(this.w - 1, cx + half); x <= end; x++) {
           if (this.px[y * this.w + x] === value) continue;
+          if (value > this.px[y * this.w + x]!) this.light = true;
           this.px[y * this.w + x] = value;
           box = grow(box, x, y, x + 1, y + 1);
         }
@@ -105,13 +107,17 @@ export class SketchModel {
     this.begin();
     let box: Box | null = null;
     for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) if (this.px[y * this.w + x] !== this.paper) box = grow(box, x, y, x + 1, y + 1);
-    if (box) { this.px.fill(this.paper); this.changed(box); }
+    if (box) { this.px.fill(this.paper); this.light = true; this.changed(box); }
     this.end();
   }
   undo(): boolean {
     const u = this.undos.pop();
     if (!u) return false;
-    for (let y = 0; y < u.rect.h; y++) this.px.set(u.px.subarray(y * u.rect.w, (y + 1) * u.rect.w), (u.rect.y + y) * this.w + u.rect.x);
+    for (let y = 0; y < u.rect.h; y++) {
+      const row = (u.rect.y + y) * this.w + u.rect.x;
+      for (let x = 0; x < u.rect.w; x++) if (u.px[y * u.rect.w + x]! > this.px[row + x]!) this.light = true;
+      this.px.set(u.px.subarray(y * u.rect.w, (y + 1) * u.rect.w), row);
+    }
     this.before = this.stroke = null;
     this.changed([u.rect.x, u.rect.y, u.rect.x + u.rect.w, u.rect.y + u.rect.h]);
     return true;
@@ -122,8 +128,10 @@ export class SketchModel {
     this.dirty = null;
     return d ? alignRect(rectOf(d), this.w, this.h) : null;
   }
+  /** Whether a pixel got lighter since the last call (a send that cleans must follow). */
+  takeLighter(): boolean { const l = this.light; this.light = false; return l; }
   /** Put a rectangle back (its send failed). */
-  markDirty(r: Rect): void { this.dirty = grow(this.dirty, r.x, r.y, r.x + r.w, r.y + r.h); }
+  markDirty(r: Rect, lighter = false): void { this.dirty = grow(this.dirty, r.x, r.y, r.x + r.w, r.y + r.h); if (lighter) this.light = true; }
   /** The pixel values of a rectangle, rows top to bottom. */
   values(r: Rect): Uint8Array { return this.copy(this.px, r); }
   /** The rectangle as the panel shows it. */

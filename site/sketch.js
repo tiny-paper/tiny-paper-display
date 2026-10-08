@@ -214,6 +214,8 @@ var SketchModel = class {
   onPaint = () => {
   };
   dirty = null;
+  light = false;
+  // a pixel got lighter since the last send: a partial update turns black to white only weakly
   stroke = null;
   before = null;
   scratch;
@@ -248,6 +250,7 @@ var SketchModel = class {
         if (Number.isNaN(half)) continue;
         for (let x = Math.max(0, cx - half), end = Math.min(this.w - 1, cx + half); x <= end; x++) {
           if (this.px[y * this.w + x] === value) continue;
+          if (value > this.px[y * this.w + x]) this.light = true;
           this.px[y * this.w + x] = value;
           box = grow(box, x, y, x + 1, y + 1);
         }
@@ -270,6 +273,7 @@ var SketchModel = class {
     for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) if (this.px[y * this.w + x] !== this.paper) box = grow(box, x, y, x + 1, y + 1);
     if (box) {
       this.px.fill(this.paper);
+      this.light = true;
       this.changed(box);
     }
     this.end();
@@ -277,7 +281,11 @@ var SketchModel = class {
   undo() {
     const u = this.undos.pop();
     if (!u) return false;
-    for (let y = 0; y < u.rect.h; y++) this.px.set(u.px.subarray(y * u.rect.w, (y + 1) * u.rect.w), (u.rect.y + y) * this.w + u.rect.x);
+    for (let y = 0; y < u.rect.h; y++) {
+      const row = (u.rect.y + y) * this.w + u.rect.x;
+      for (let x = 0; x < u.rect.w; x++) if (u.px[y * u.rect.w + x] > this.px[row + x]) this.light = true;
+      this.px.set(u.px.subarray(y * u.rect.w, (y + 1) * u.rect.w), row);
+    }
     this.before = this.stroke = null;
     this.changed([u.rect.x, u.rect.y, u.rect.x + u.rect.w, u.rect.y + u.rect.h]);
     return true;
@@ -288,9 +296,16 @@ var SketchModel = class {
     this.dirty = null;
     return d ? alignRect(rectOf(d), this.w, this.h) : null;
   }
+  /** Whether a pixel got lighter since the last call (a send that cleans must follow). */
+  takeLighter() {
+    const l = this.light;
+    this.light = false;
+    return l;
+  }
   /** Put a rectangle back (its send failed). */
-  markDirty(r) {
+  markDirty(r, lighter = false) {
     this.dirty = grow(this.dirty, r.x, r.y, r.x + r.w, r.y + r.h);
+    if (lighter) this.light = true;
   }
   /** The pixel values of a rectangle, rows top to bottom. */
   values(r) {
@@ -370,7 +385,7 @@ var SketchPen = class {
   }
   clear() {
     this.sender.model.clear();
-    this.sender.lift();
+    this.sender.cleared();
   }
   undo() {
     if (this.sender.model.undo()) this.sender.lift();
@@ -394,6 +409,14 @@ function packRows(px, w, h, depth) {
 // src/display/sketchSender.ts
 var SKETCH_TIMING = { liftMs: 150, everyMs: 700, busyMs: 5e3 };
 var FULL_AFTER = 30;
+var LIGHTEN_AFTER = 3;
+function cleanMode(hello, depth) {
+  if (depth !== 1 || !hello.partial_depths.includes(1)) return null;
+  if (hello.modes.includes("inverse")) return { mode: "inverse", words: "an inverse update" };
+  if (hello.modes.includes("passes")) return { mode: "passes", passes: 2, words: "a repeated update (2 passes)" };
+  if (hello.modes.includes("partial_all")) return { mode: "partial_all", words: "an update of every pixel" };
+  return null;
+}
 var LOST = ["first", "refused", "cut", "failed", "memory", "depth", "board"];
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 var SketchSender = class {
@@ -420,6 +443,10 @@ var SketchSender = class {
   whole = true;
   asked = false;
   partials = 0;
+  lightened = 0;
+  // sends in a row that made pixels lighter by a plain partial update
+  note = "";
+  // why the next full refresh was asked, said in its status line
   strokeAt = 0;
   sentAt = 0;
   /** A device (again): it shows something else, so the whole drawing goes out once. null: no device. */
@@ -429,6 +456,7 @@ var SketchSender = class {
     this.link++;
     this.whole = true;
     this.partials = 0;
+    this.lightened = 0;
     this.drawing = false;
     this.cancel();
     if (client && this.ink.partial) this.schedule(Date.now(), true);
@@ -447,6 +475,16 @@ var SketchSender = class {
   lift() {
     this.drawing = false;
     this.schedule(Date.now() + this.timing.liftMs, true);
+  }
+  /** Clear: the whole drawing goes out in full mode, always (a partial update leaves faint traces of what was removed). */
+  cleared() {
+    if (!this.ink.partial) {
+      this.lift();
+      return;
+    }
+    this.drawing = false;
+    this.note = " Clear refreshes the whole panel: a partial update would leave faint traces of what was removed.";
+    this.fullRefresh();
   }
   /** Send the whole drawing in full mode. */
   fullRefresh() {
@@ -476,33 +514,48 @@ var SketchSender = class {
   async flush() {
     const client = this.client, hello = this.hello, link = this.link, m = this.model;
     if (!client || !hello || this.sending) return;
-    const full = this.asked || this.ink.partial && (this.whole || this.fullAfter > 0 && this.partials >= this.fullAfter);
+    const wornOut = this.lightened >= LIGHTEN_AFTER;
+    const full = this.asked || this.ink.partial && (this.whole || wornOut || this.fullAfter > 0 && this.partials >= this.fullAfter);
+    const note = this.asked ? this.note : wornOut && !this.whole ? ` Full refresh by itself: ${this.lightened} sends in a row erased pixels by a partial update, which leaves faint traces.` : "";
     if (!full && !this.ink.partial) return;
     const dirty = m.takeDirty();
+    const lighter = m.takeLighter();
+    const clean = lighter && !full ? cleanMode(hello, this.ink.depth) : null;
     if (!full && !dirty) return;
     const rect = full ? m.whole : dirty;
     const all = rect.w === m.w && rect.h === m.h;
     this.asked = false;
+    this.note = "";
     this.sending = true;
     this.sentAt = Date.now();
     const rows = packRows(m.values(rect), rect.w, rect.h, this.ink.depth);
-    const what = full ? `a full refresh of the whole drawing (${m.w} x ${m.h})` : `a partial update of ${rect.w} x ${rect.h} pixels at ${rect.x}, ${rect.y}`;
+    const at = `${rect.w} x ${rect.h} pixels at ${rect.x}, ${rect.y}`;
+    const what = full ? `a full refresh of the whole drawing (${m.w} x ${m.h})` : clean ? `${clean.words} of ${at}, to clean the pixels that got lighter` : `a partial update of ${at}`;
     this.say("sending", `Asked for ${what}; waiting for the panel...`);
     try {
       const png = await packedPng(rows, rect.w, rect.h, this.ink.depth, this.ink.color);
-      const options = full ? { mode: "full" } : all ? { mode: "partial" } : { x: rect.x, y: rect.y, mode: "partial" };
+      const mode = full ? { mode: "full" } : clean ? { mode: clean.mode, ...clean.passes ? { passes: clean.passes } : {} } : { mode: "partial" };
+      const options = full || all ? mode : { x: rect.x, y: rect.y, ...mode };
       const r = await this.showOnce(client, hello, png, options, what);
       if (link !== this.link) return;
       const lost = !full && r.mode === "full" && LOST.includes(String(r.why));
       if (full || all) this.whole = false;
       if (lost && !all) this.whole = true;
-      if (r.mode === "full") this.partials = 0;
-      else if (r.mode !== "none") this.partials++;
-      this.say("ok", `Asked for ${what}. ${displayAnswer(r)} ${Date.now() - this.sentAt} ms in all.${lost && !all ? " The device had lost its picture: sending the whole drawing." : ""}`);
+      if (r.mode === "full") {
+        this.partials = 0;
+        this.lightened = 0;
+      } else if (r.mode !== "none") this.partials++;
+      const weak = lighter && !clean && r.mode === "partial";
+      if (weak) this.lightened++;
+      const trace = weak && this.lightened < LIGHTEN_AFTER ? ` Erasing by a partial update can leave faint traces at ${this.ink.depth} bit: a full refresh follows after ${LIGHTEN_AFTER} such sends (${this.lightened} so far).` : "";
+      this.say("ok", `Asked for ${what}. ${displayAnswer(r)} ${Date.now() - this.sentAt} ms in all.${lost && !all ? " The device had lost its picture: sending the whole drawing." : ""}${note}${trace}`);
     } catch (e) {
       if (link !== this.link) return;
-      if (dirty) m.markDirty(dirty);
-      if (full) this.asked = true;
+      if (dirty) m.markDirty(dirty, lighter);
+      if (full) {
+        this.asked = true;
+        this.note = note;
+      }
       this.whole = true;
       this.say("error", `Asked for ${what}. Not shown: ${e.message}. ${this.client === client ? "Draw on or press Full refresh to send the whole drawing again." : ""}`.trim());
       return;
@@ -510,7 +563,7 @@ var SketchSender = class {
       this.sending = false;
       if (link !== this.link && this.client && this.ink.partial) this.schedule(Date.now(), true);
     }
-    const again = this.whole || m.hasDirty || this.asked || this.fullAfter > 0 && this.partials >= this.fullAfter;
+    const again = this.whole || m.hasDirty || this.asked || this.lightened >= LIGHTEN_AFTER || this.fullAfter > 0 && this.partials >= this.fullAfter;
     if (again && this.ink.partial) this.schedule(this.drawing && !this.whole ? this.sentAt + this.timing.everyMs : Date.now(), false);
   }
   /** BUSY: wait as long as the device says (bounded) and try once more. */
@@ -1003,7 +1056,7 @@ var MockDisplayDevice = class {
           if (this.lost) {
             this.lost = false;
             res = { ...res, why: "cut" };
-          } else if (b.mode === "partial") res = { mode: "partial", why: "changed", depth: show.bits, ms: 0, x: b.x ?? 0, y: b.y ?? 0, w: show.w, h: show.h };
+          } else if (b.mode && b.mode !== "full") res = { mode: b.mode, why: b.mode === "partial" ? "changed" : "asked", depth: show.bits, ms: 0, x: b.x ?? 0, y: b.y ?? 0, w: show.w, h: show.h };
         }
       } else res = { err: 1, msg: "not a display command" };
       setTimeout(() => this.output(encodeFrame({ seq, cmd: cmd | 128, payload: cborEncode(res) })), 1);
@@ -1018,6 +1071,7 @@ export {
   DisplayClient,
   DisplayError,
   FULL_AFTER,
+  LIGHTEN_AFTER,
   MOCK_PANELS,
   MockDisplayDevice,
   SKETCH_TIMING,
@@ -1026,6 +1080,7 @@ export {
   SketchSender,
   UNDO_STEPS,
   alignRect,
+  cleanMode,
   displayAnswer,
   displayHello,
   packedPng,

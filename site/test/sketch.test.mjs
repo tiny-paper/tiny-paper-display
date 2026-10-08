@@ -81,10 +81,10 @@ test('a stroke arrives as one partial show: x and width in steps of 8, around th
   assert.match(el('status').textContent, new RegExp(`^Asked for a partial update of ${s.w} x ${s.h} pixels at ${s.x}, ${s.y}\\. Changed area refreshed: changed pixels \\(7 ms\\)\\. \\d+ ms in all\\.$`));
   assert.ok(el('canvas').puts.length > 1, 'the canvas shows the stroke');
   assert.equal(el('undo').disabled, false);
-  // undo is a change too: it goes out as a partial show of the same area
+  // undo is a change too, and it makes pixels lighter: this device has `inverse` at 1 bit, so the same area goes out as that
   el('undo').onclick();
   await until('the undo', () => dev.shows.length === 3);
-  assert.deepEqual([dev.shows[2].mode, dev.shows[2].x, dev.shows[2].w], ['partial', s.x, s.w]);
+  assert.deepEqual([dev.shows[2].mode, dev.shows[2].x, dev.shows[2].w], ['inverse', s.x, s.w]);
   assert.equal(el('undo').disabled, true);
 });
 
@@ -233,4 +233,65 @@ test('a device with gray partial depths: 16 swatches, strokes go as partial upda
   assert.equal(bw.el('partial').textContent, 'Partial updates at: 1 bit', 'what the device reported, so a device without grays is seen on the page');
   assert.equal(bw.el('swatches').children.length, 2);
   assert.equal(bw.el('note').hidden, false);
+});
+
+const shown = (dev, n) => until(`${n} shows`, () => dev.shows.length >= n);
+const said = (el, re) => until(`the status ${re}`, () => re.test(el('status').textContent) && el('status').dataset.state === 'ok');
+
+test('Clear: the whole panel goes out in one full show, at 1 bit and at 4 bit, never as a partial update', async () => {
+  for (const [h, over, bits] of [[440, {}, 1], [441, { board: 'trmnl_x', w: 1872, depths: [1, 2, 4], partial_depths: [1, 2, 4], modes: ['full', 'partial', 'partial_all', 'inverse', 'passes'] }, 4]]) {
+    const { dev, el, stroke } = await connected(h, over);
+    const w = over.w ?? 800;
+    stroke([[101, 50], [117, 55], [133, 61]]);
+    await shown(dev, 2);
+    el('clear').onclick();
+    await shown(dev, 3);
+    const s = dev.shows[2];
+    assert.deepEqual([s.mode, s.x, s.y, s.w, s.h, s.bits], ['full', undefined, undefined, w, h, bits]);
+    await said(el, new RegExp(`^Asked for a full refresh of the whole drawing \\(${w} x ${h}\\)\\. Full refresh: as requested \\(9 ms\\)\\. \\d+ ms in all\\. Clear refreshes the whole panel: a partial update would leave faint traces of what was removed\\.$`));
+    await sleep(400);
+    assert.equal(dev.shows.length, 3, 'nothing more is sent after the Clear');
+  }
+});
+
+test('Erase and Undo at 1 bit: the strongest region clean the device offers, said in the status line', async () => {
+  const cases = [
+    [442, ['full', 'partial', 'inverse', 'passes'], 'inverse', undefined, /^Asked for an inverse update of \d+ x \d+ pixels at \d+, \d+, to clean the pixels that got lighter\. Inverse then picture refreshed: as requested/],
+    [443, ['full', 'partial', 'passes', 'partial_all'], 'passes', 2, /^Asked for a repeated update \(2 passes\) of \d+ x \d+ pixels at \d+, \d+, to clean the pixels that got lighter\. Repeated area refresh: as requested/],
+    [444, ['full', 'partial', 'partial_all'], 'partial_all', undefined, /^Asked for an update of every pixel of \d+ x \d+ pixels at \d+, \d+, to clean the pixels that got lighter\. Whole area refreshed: as requested/],
+  ];
+  for (const [h, modes, mode, passes, re] of cases) {
+    const { dev, el, stroke } = await connected(h, { modes });
+    stroke([[101, 50], [117, 55], [133, 61]]);
+    await shown(dev, 2);
+    assert.equal(dev.shows[1].mode, 'partial', 'drawing black on white darkens: a plain partial update');
+    el('eraser').onclick();
+    stroke([[101, 50], [117, 55], [133, 61]]);
+    await shown(dev, 3);
+    assert.deepEqual([dev.shows[2].mode, dev.shows[2].passes], [mode, passes]);
+    await said(el, re);
+  }
+});
+
+test('Erase and Undo where nothing stronger than partial exists (4 bit): counted, and the third brings the full refresh forward, said in the status line', async () => {
+  const gray = { board: 'trmnl_x', w: 1872, depths: [1, 2, 4], partial_depths: [1, 2, 4], modes: ['full', 'partial', 'partial_all', 'inverse', 'passes'] };
+  const { dev, el, stroke } = await connected(445, gray);
+  for (const y of [100, 200, 300]) { stroke([[101, y], [133, y + 6]]); await shown(dev, dev.shows.length + 1); }
+  assert.equal(dev.shows.length, 4);
+  el('undo').onclick();
+  await shown(dev, 5);
+  assert.equal(dev.shows[4].mode, 'partial', 'no inverse at 4 bit, whatever the modes list says');
+  await said(el, /^Asked for a partial update of .* Changed area refreshed: changed pixels \(7 ms\)\. \d+ ms in all\. Erasing by a partial update can leave faint traces at 4 bit: a full refresh follows after 3 such sends \(1 so far\)\.$/);
+  el('undo').onclick();
+  await shown(dev, 6);
+  await said(el, /\(2 so far\)\.$/);
+  el('undo').onclick();
+  await shown(dev, 7);
+  assert.equal(dev.shows[6].mode, 'partial');
+  await shown(dev, 8);
+  const f = dev.shows[7];
+  assert.deepEqual([f.mode, f.x, f.w, f.h, f.bits], ['full', undefined, 1872, 445, 4]);
+  await said(el, /^Asked for a full refresh of the whole drawing \(1872 x 445\)\. Full refresh: as requested \(9 ms\)\. \d+ ms in all\. Full refresh by itself: 3 sends in a row erased pixels by a partial update, which leaves faint traces\.$/);
+  await sleep(400);
+  assert.equal(dev.shows.length, 8, 'the count starts again after the full refresh');
 });

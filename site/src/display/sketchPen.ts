@@ -45,6 +45,6 @@ export class SketchPen {
     this.sender.model.end(); this.sender.lift();
     return true;
   }
-  clear(): void { this.sender.model.clear(); this.sender.lift(); }
+  clear(): void { this.sender.model.clear(); this.sender.cleared(); }
   undo(): void { if (this.sender.model.undo()) this.sender.lift(); }
 }

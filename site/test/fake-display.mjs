@@ -42,10 +42,10 @@ export function fakeDisplay(over = {}) {
     else if (cmd === 10 && dev.refuse) { res = dev.refuse; dev.refuse = null; }
     else if (cmd === 10) {
       const v = new DataView(png.buffer);
-      const show = { mode: begin.mode, x: begin.x, y: begin.y, w: v.getUint32(16), h: v.getUint32(20), bits: png[24], signature: toHex(png.subarray(0, 8)) };
+      const show = { mode: begin.mode, ...(begin.passes === undefined ? {} : { passes: begin.passes }), x: begin.x, y: begin.y, w: v.getUint32(16), h: v.getUint32(20), bits: png[24], signature: toHex(png.subarray(0, 8)) };
       dev.shows.push(show);
-      res = begin.mode === 'partial'
-        ? { mode: 'partial', why: 'changed', depth: show.bits, ms: 7, x: begin.x ?? 0, y: begin.y ?? 0, w: show.w, h: show.h }
+      res = begin.mode && begin.mode !== 'full'
+        ? { mode: begin.mode, why: begin.mode === 'partial' ? 'changed' : 'asked', depth: show.bits, ms: 7, x: begin.x ?? 0, y: begin.y ?? 0, w: show.w, h: show.h }
         : { mode: 'full', why: 'asked', depth: show.bits, ms: 9, x: 0, y: 0, w: dev.hello.w, h: dev.hello.h };
     } else res = { err: 1, msg: 'not a display command' };
     return res ? [frameHex(seq, cmd | 0x80, toHex(Uint8Array.from(cbor(res))))] : [];
