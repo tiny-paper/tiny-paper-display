@@ -6,7 +6,6 @@ import type { CborMap } from '../protocol/cbor.ts';
 import { DisplayError, displayAnswer, type DisplayHello, type DisplayMode } from './client.ts';
 import { packedPng } from './png.ts';
 import { SketchModel, sketchInk, type SketchInk } from './sketchModel.ts';
-import { toneGamma, toneTable } from './tone.ts';
 
 /** The part of DisplayClient the sketch uses. */
 export interface SketchShow { show(png: Uint8Array, hello: DisplayHello, options?: { mode?: DisplayMode; passes?: number; x?: number; y?: number }): Promise<CborMap> }
@@ -35,8 +34,6 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 export class SketchSender {
   /** Partial sends before an automatic full refresh; 0: never. */
   fullAfter = FULL_AFTER;
-  /** Tone step (tone.ts, a measuring aid): 0 sends every level as drawn. Gray panels only. */
-  tone = 0;
   onStatus: (s: SketchStatus) => void = () => {};
   status: SketchStatus = { state: 'idle', text: 'Nothing sent yet.' };
   private client: SketchShow | null = null;
@@ -105,12 +102,7 @@ export class SketchSender {
     this.asked = false; this.note = '';
     this.sending = true;
     this.sentAt = Date.now();
-    const drawn = m.values(rect);
-    const lut = !this.ink.color && this.ink.depth > 1 && toneGamma(this.tone) !== 1 ? toneTable(this.ink.paper, this.tone) : null;
-    const sent = lut ? drawn.map((v) => lut[v]!) : drawn;
-    const rows = packRows(sent, rect.w, rect.h, this.ink.depth); // the pixels as they are now, before any wait
-    const remap = lut ? [...new Set(drawn)].filter((v) => v > 0 && v < this.ink.paper && lut[v] !== v).sort((a, b) => a - b).slice(0, 3).map((v) => `gray ${v} sent as level ${lut[v]}`) : [];
-    const toneNote = remap.length ? ` Tone: ${remap.join(', ')}.` : '';
+    const rows = packRows(m.values(rect), rect.w, rect.h, this.ink.depth); // the pixels as they are now, before any wait
     const at = `${rect.w} x ${rect.h} pixels at ${rect.x}, ${rect.y}`;
     const what = full ? `a full refresh of the whole drawing (${m.w} x ${m.h})` : clean ? `${clean.words} of ${at}, to clean the pixels that got lighter` : `a partial update of ${at}`;
     this.say('sending', `Asked for ${what}; waiting for the panel...`);
@@ -127,7 +119,7 @@ export class SketchSender {
       const weak = lighter && !clean && r.mode === 'partial';
       if (weak) this.lightened++;
       const trace = weak && this.lightened < LIGHTEN_AFTER ? ` Erasing by a partial update can leave faint traces at ${this.ink.depth} bit: a full refresh follows after ${LIGHTEN_AFTER} such sends (${this.lightened} so far).` : '';
-      this.say('ok', `Asked for ${what}. ${displayAnswer(r)} ${Date.now() - this.sentAt} ms in all.${lost && !all ? ' The device had lost its picture: sending the whole drawing.' : ''}${note}${trace}${toneNote}`);
+      this.say('ok', `Asked for ${what}. ${displayAnswer(r)} ${Date.now() - this.sentAt} ms in all.${lost && !all ? ' The device had lost its picture: sending the whole drawing.' : ''}${note}${trace}`);
     } catch (e) {
       if (link !== this.link) return;
       if (dirty) m.markDirty(dirty, lighter);
