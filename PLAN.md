@@ -81,6 +81,12 @@ Host tests model the gate driver and check one clock per row in every scan and t
 device logs the rows it wrote and skipped next to its clock count. Not seen on a panel yet: whether a skipped scan
 places rows right, whether the shorter scans draw as dark, and which combination looks right is still to be recorded.
 
+Seen on 2026-10-08: the grays are out of order around levels 5 and 6. With the stock table and a full refresh level 6
+is too light against its neighbours; with the FastEPD table and gray partial updates from white level 5 is darker than 4
+and 6, and 2 and 3 look the same (their rows in that table are the same). The tuning key `gray_row` replaces single
+rows of the table in use for comparing on the device (spec "Tuning", with both tables printed); which rows look
+right is still to be recorded, and then become the table.
+
 Idea, not started: drive light grays directly from white instead of through black.
 
 The drive options of the X (gray table, pre-push frames, passes, waveform, row timing, clear) are reachable from the Sketch
