@@ -1,44 +1,64 @@
 # Plan
 
-What was decided and what is still to do. Kept here, in the repository, instead of an issue tracker.
+What this project is, what is done and what is still to do. Kept here instead of an issue tracker.
 
-## Decided
+## Scope
 
-| Date | Decision |
+| # | What |
 |---|---|
-| 2026-10-07 | A firmware of its own for the boards we can test: TRMNL X, TRMNL OG, PicPak. Driven only over the USB cable: no WiFi, no account. One job: show the picture it is given |
-| 2026-10-07 | One name for project, packages and commands: tiny-paper display, `tiny-paper-display` |
-| 2026-10-07 | Partial refresh is the default where the panel can do it. The same picture is not sent or drawn twice while the device stays connected |
-| 2026-10-08 | Bluetooth Low Energy as a second way to send pictures: same firmware, off by default, switched on in a setup step after flashing, bonded devices only |
-| 2026-10-08 | The standard of what a device accepts is what TRMNL renders for that model: such a picture is uploadable as it is |
-| 2026-10-08 | The device says what it supports and a host can ask: depths, colours, picture kinds, refresh modes |
-| 2026-10-08 | Refresh is auto by default; the user may insist on partial or full. Every call reports what was asked, what was done and why. A board that cannot do something says so in words |
-| 2026-10-08 | Converting a picture (resize, fit, dither) is an optional add-on and the user's choice per call: auto, never (sent untouched, or refused before sending), always, or the user's own function |
-| 2026-10-08 | Libraries in Python and JavaScript. The example app is a sketch app that draws with the palette the connected device has; in the browser the painting itself is done by a JavaScript drawing library |
-| 2026-10-08 | The site is static, with no account. One page, two tabs: Flash (with backup and restore) and Test (sketching). After a successful install it switches to Test |
-| 2026-10-08 | This repository is the project's home, independent of the tiny-paper main project. Code both need is copied by hand |
-| 2026-10-08 | Releases to PyPI and npm are made by hand decision only; npm versions are staged and approved on npm |
+| 1 | Firmware: flash, back up, restore, from a static page |
+| 2 | Show a picture on the device over the USB cable and over Bluetooth |
+| 3 | Packages on npm and PyPI as the API |
+| 4 | A sketch example in the browser |
+| 5 | Later: a sketch example in Python |
+| 6 | Partial refresh, at every bit depth where it has been seen to work on a device |
 
-## To do
+Anything else is out until asked for.
 
-| What | Notes |
-|---|---|
-| The site as one page with two tabs | Flash: install, back up this device, restore a backup, a plain warning that installing erases the firmware on the device (stronger when it is not ours). Test: sketching first. Switch to Test after an install, keeping the cable connection |
-| The painting by a JavaScript drawing library | The canvas is snapped to the device's levels before anything is compared or sent |
-| Picture conversion as an add-on | fit, background, rotation, dither, gamma; the result says in words what was done |
-| JavaScript package | Same commands and behaviour as Python, for the browser (Web Serial) and Node; the two libraries give the same pixels for the same input |
-| Logo and startup screen | Shown once after flashing, never over a picture the host sent |
-| First releases | PyPI and npm, version 0.1.0 |
+## Branches and pages
 
-## Set aside
+| Branch | Page | Flash installs |
+|---|---|---|
+| `main` | the site | numbered releases |
+| `testing` | the site under `testing/` | test builds, marked as such |
+
+Work lands on `testing` first; `main` moves by promoting a state that was tried on a device.
+
+## State
+
+| Scope | Done | To do |
+|---|---|---|
+| 1 Flash, backup, restore | a flash page | backup and restore; one page with the tabs Flash and Test, switching to Test after an install; a plain warning that installing erases the firmware on the device |
+| 2 USB and Bluetooth | the firmware and its protocol; Bluetooth off by default with a setup step | the first run on a real device, on each board, cable and Bluetooth |
+| 3 Packages | a Python package | the JavaScript package; first releases, version 0.1.0 |
+| 4 Sketch in the browser | a sketch page, black and white | the device's grays; the painting by a drawing library; into the Test tab |
+| 5 Sketch in Python | a first version exists | later |
+| 6 Partial refresh | in the firmware | seen on a device per board and depth before it is offered there (table below) |
+
+### Partial refresh, what has been seen on a device
+
+| Board | 1 bit | Grays |
+|---|---|---|
+| TRMNL X | yes, with the firmware this project grew out of | not yet: on in test builds so it can be looked at |
+| TRMNL OG | yes, with the firmware this project grew out of | not yet |
+| PicPak | not yet | not yet |
+
+## Clean-up
+
+The firmware folder still carries code from the project it grew out of that the display firmware does not use
+(picture decoders other than PNG, touch, update over the air, headers of plugins, albums and stores). To remove:
+everything that no board's build links.
+
+## Out for now
 
 | What | Why |
 |---|---|
-| An example that renders TRMNL plugins locally and shows them | Later |
-| Flashing from the Python package | The flash page does it |
+| The film example and the speed test tool | not in the scope above |
+| An example that renders TRMNL plugins locally | later, if asked |
+| Flashing from the Python package | the flash page does it |
 
 ## Not proven yet
 
 Nothing here has been seen on a real panel. To check on each board (TRMNL X, TRMNL OG, PicPak): the firmware starts,
-a picture shows, a partial update shows without a flash, sketching, backup, flash, restore, and going back to the
-device's own firmware.
+a picture shows over the cable and over Bluetooth, a partial update shows without a flash at each depth, sketching,
+backup, flash, restore, and going back to the device's own firmware.
