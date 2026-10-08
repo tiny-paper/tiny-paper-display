@@ -213,14 +213,21 @@ static void tune_apply(void)
 }
 
 /* After KNOBS come the keys of the scans of a partial, defined and bounded in epd_scan.h (host-tested there and
- * through usbdisp's tuning test); their defaults are the scans as they were before those keys. */
-size_t hal_panel_tune_count(void) { return NKNOBS + EPD_SCAN_KEYS; }
+ * through usbdisp's tuning test); their defaults are the scans as they were before those keys. Last: the hold time
+ * of the rails (epd_rails.h), a number too large for a KNOBS byte. */
+#define RAILS_KEY (NKNOBS + EPD_SCAN_KEYS)
+static const hal_tune_t RAILS_TUNE = {EPD_RAILS_KEY, 0, EPD_RAILS_HOLD_MAX_MS, 0, NULL};
+size_t hal_panel_tune_count(void) { return RAILS_KEY + 1; }
+
+void hal_esp_panel_rails_off(void) { epdp_rails_off(); }
 
 const hal_tune_t *hal_panel_tune_info(size_t i)
 {
     static hal_tune_t scan[EPD_SCAN_KEYS];
     if (i < NKNOBS)
         return &KNOBS[i].t;
+    if (i == RAILS_KEY)
+        return &RAILS_TUNE;
     const epd_scan_key_t *k = epd_scan_key(i - NKNOBS);
     if (!k)
         return NULL;
@@ -228,10 +235,15 @@ const hal_tune_t *hal_panel_tune_info(size_t i)
     return &scan[i - NKNOBS];
 }
 
-int hal_panel_tune_get(size_t i) { return i < NKNOBS ? *KNOBS[i].v : epd_scan_key_get(&s_scan, i - NKNOBS); }
+int hal_panel_tune_get(size_t i)
+{
+    return i == RAILS_KEY ? epdp_rails_hold() : i < NKNOBS ? *KNOBS[i].v : epd_scan_key_get(&s_scan, i - NKNOBS);
+}
 
 bool hal_panel_tune_set(size_t i, int v)
 {
+    if (i == RAILS_KEY)
+        return epdp_set_rails_hold(v) == EPDP_OK;
     if (i >= NKNOBS) {
         if (!epd_scan_key_set(&s_scan, i - NKNOBS, v))
             return false;
@@ -249,6 +261,7 @@ void hal_panel_tune_defaults(void)
     for (size_t i = 0; i < NKNOBS; i++)
         *KNOBS[i].v = (uint8_t)KNOBS[i].t.def;
     epd_scan_key_defaults(&s_scan);
+    epdp_set_rails_hold(0);
     s_tab.passes = 0; /* the table's own rows again */
     tune_apply();
 }

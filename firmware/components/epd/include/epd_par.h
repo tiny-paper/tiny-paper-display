@@ -5,8 +5,9 @@
  * Framebuffer: FastEPD's own buffer in PSRAM, rows packed at the active depth:
  *   4 bpp: 2 px per byte, high nibble first, 0 = black .. 15 = white (FastEPD convention)
  *   1 bpp: 8 px per byte, MSB first, 1 = white, 0 = black
- * Every call powers the panel rails off when it returns (keep_on is never used), so a failed or
- * interrupted command never leaves the panel driven.
+ * Every call powers the panel rails off when it returns, so a failed or interrupted command never leaves the
+ * panel driven; only with a hold time set (epdp_set_rails_hold) a partial that went well leaves them up, for
+ * that time at most.
  * C11 API. SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef TINY_EPD_PAR_H
@@ -17,6 +18,7 @@
 #include <stdint.h>
 
 #include "epd_parwave.h"
+#include "epd_rails.h"
 #include "epd_rowtime.h"
 #include "epd_scan.h"
 #include "epd_split.h"
@@ -136,8 +138,15 @@ int epdp_set_matrix(const uint8_t *matrix, int n);
  * the new pixels to epdp_buffer() and the old ones to epdp_prev_buffer() (same layout, epdp_stride()). */
 int epdp_partial_begin(void);
 uint8_t *epdp_prev_buffer(void);
-/* Panel rails off, IO lines to high impedance. */
+/* The update is over: panel rails off (unless a hold time keeps them up, below), IO lines to high impedance. */
 void epdp_close(void);
+/* Rails kept up for ms after a partial update, so the next one inside that time skips the power up (epd_rails.h:
+ * 0, the default, is down at the end of every update; 0..EPD_RAILS_HOLD_MAX_MS). They come down when the time
+ * passes, when an update fails, before a full refresh, at a restart, and with epdp_rails_off, which the caller
+ * runs before any sleep. */
+int epdp_set_rails_hold(int ms);
+int epdp_rails_hold(void);
+void epdp_rails_off(void);
 uint32_t epdp_last_ms(void);       /* duration of the last update */
 /* Where the time of the last update went (epd_split.h): the driver's parts, up to after. */
 const epd_split_t *epdp_last_split(void);

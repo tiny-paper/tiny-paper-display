@@ -249,6 +249,9 @@ void hal_esp_par_force_full(void);
 const char *hal_esp_par_rows_str(char *b, size_t n);
 void hal_esp_par_log_drive(bool full);
 void hal_esp_par_log_scan(void); /* the "panel scan" line after a partial (epd_scan.h) */
+/* Panel rails down now (TRMNL X: a tuning key may keep them up after a partial, epd_rails.h); before every sleep.
+ * The other boards: nothing to do (sys.c). */
+void hal_esp_panel_rails_off(void);
 struct epd_split;
 /* the "panel time" line, last of an update's lines (epd_split.h): where its time went */
 void hal_esp_par_log_time(const struct epd_split *caller, int64_t t_begin, int64_t t_log);

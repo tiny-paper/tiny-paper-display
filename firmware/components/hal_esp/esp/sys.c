@@ -277,6 +277,7 @@ static _Noreturn void restart(void)
         N.deep_restart = 1;
         esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
         esp_sleep_enable_timer_wakeup(1000);
+        hal_esp_panel_rails_off();
         esp_deep_sleep_start();
     }
     esp_restart();
@@ -546,6 +547,7 @@ static void light_sleep_counted(void)
     hal_link_flush();
     hal_esp_light_sleep_pins(true);
     uint64_t t0 = hal_rtc_us();
+    hal_esp_panel_rails_off(); /* its timer does not run while asleep */
     esp_light_sleep_start();
     s_light_us += hal_rtc_us() - t0;
     hal_esp_light_sleep_pins(false);
@@ -703,6 +705,7 @@ static _Noreturn void deep_sleep(uint64_t rtc_us, bool button_wake)
 #endif
     }
     hal_link_flush();
+    hal_esp_panel_rails_off();
     esp_deep_sleep_start();
 }
 
@@ -740,6 +743,7 @@ __attribute__((weak)) void hal_busy_hook(void) {}
 __attribute__((weak)) void hal_log_hook(const char *line, size_t len) { (void)line, (void)len; }
 
 #if !BOARD_PANEL_FASTEPD
+void hal_esp_panel_rails_off(void) {} /* TRMNL X only: panel_par.c */
 bool hal_live_seconds(void) { return false; } /* TRMNL X only: panel_par.c */
 size_t hal_panel_tune_count(void) { return 0; } /* TRMNL X only: panel_par.c */
 const hal_tune_t *hal_panel_tune_info(size_t i) { (void)i; return NULL; }

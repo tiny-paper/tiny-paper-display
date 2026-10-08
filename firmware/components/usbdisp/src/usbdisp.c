@@ -488,7 +488,7 @@ static void set_tuning(usbdisp_t *d, const link_frame_t *f, char refused[][LINK_
             const hal_tune_t *t = d->c.tune_info(d->c.ctx, idx);
             int64_t v = -1;
             bool have = false;
-            if (val.type == CBOR_UINT && val.u <= 1000) {
+            if (val.type == CBOR_UINT && val.u <= 1000000) { /* above every key's range: "out of range" */
                 v = (int64_t)val.u, have = true;
             } else if (val.type == CBOR_TRUE || val.type == CBOR_FALSE) {
                 v = val.type == CBOR_TRUE, have = t->words && t->max == 1;

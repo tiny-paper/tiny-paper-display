@@ -2,6 +2,7 @@
  * a bad one is refused with why and its range while the rest still apply, an unknown key, a board without knobs,
  * "defaults", and hello and every answer reflect the knobs. SPDX-License-Identifier: GPL-3.0-or-later */
 #include "epd_graytab.h"
+#include "epd_rails.h"
 #include "epd_scan.h"
 #include "usbdisp_fake.h"
 
@@ -29,21 +30,44 @@ static bool g_rows_set(void *ctx, const char *s, size_t len, char *why, size_t c
 }
 static void g_rows_get(void *ctx, char *out, size_t cap) { (void)ctx; epd_graytab_rows_str(&tab, out, cap); }
 
-static size_t t_count(void *ctx) { (void)ctx; return NK + EPD_SCAN_KEYS; }
+/* last, the hold time of the rails with the policy that keeps it (epd_rails.h), wired as hal_esp panel_par.c does */
+#define RAILS_KEY (NK + EPD_SCAN_KEYS)
+static const hal_tune_t RAILS_TUNE = {EPD_RAILS_KEY, 0, EPD_RAILS_HOLD_MAX_MS, 0, NULL};
+static epd_rails_t rails;
+static int r_power(void *ctx, bool on) { (void)ctx, (void)on; return 0; }
+static bool r_arm(void *ctx, uint32_t ms) { (void)ctx, (void)ms; return true; }
+static void r_disarm(void *ctx) { (void)ctx; }
+static const epd_rails_io_t R_IO = {r_power, r_arm, r_disarm};
+
+static size_t t_count(void *ctx) { (void)ctx; return RAILS_KEY + 1; }
 static const hal_tune_t *t_info(void *ctx, size_t i)
 {
     static hal_tune_t s[EPD_SCAN_KEYS];
     (void)ctx;
     if (i < NK)
         return &K[i];
+    if (i == RAILS_KEY)
+        return &RAILS_TUNE;
     const epd_scan_key_t *k = epd_scan_key(i - NK);
     s[i - NK] = (hal_tune_t){k->name, k->min, k->max, k->def, k->words};
     return &s[i - NK];
 }
-static int t_get(void *ctx, size_t i) { (void)ctx; return i < NK ? val[i] : epd_scan_key_get(&scan, i - NK); }
+static int t_get(void *ctx, size_t i)
+{
+    (void)ctx;
+    return i == RAILS_KEY ? rails.hold_ms : i < NK ? val[i] : epd_scan_key_get(&scan, i - NK);
+}
 static bool t_set(void *ctx, size_t i, int v)
 {
     (void)ctx;
+    if (i == RAILS_KEY) {
+        if (!rails.io)
+            epd_rails_init(&rails, &R_IO, NULL);
+        if (!epd_rails_set_hold(&rails, v))
+            return false;
+        sets++;
+        return true;
+    }
     if (i >= NK) {
         if (!epd_scan_key_set(&scan, i - NK, v))
             return false;
@@ -63,6 +87,7 @@ static void t_defaults(void *ctx)
     for (size_t i = 0; i < NK; i++)
         val[i] = K[i].def;
     epd_scan_key_defaults(&scan);
+    epd_rails_init(&rails, &R_IO, NULL);
     epd_graytab_select(&tab, K[0].def);
 }
 
@@ -239,6 +264,36 @@ static void test_a_board_without_knobs_refuses_every_key(void)
     cbor_put_str(&w, "defaults");
     TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_SET, p, w.len));
     TEST_ASSERT_EQUAL_STRING("this board has no panel tuning", sub_str("refused", "tuning"));
+}
+
+/* rails_hold_ms (the X): hello shows 0, the rails down after every update as before; a time is taken, one past the
+ * limit refused in words and nothing changes, "defaults" puts 0 back, another board refuses it in words. */
+static void test_rails_hold_key(void)
+{
+    knobs(true);
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_HELLO, NULL, 0));
+    TEST_ASSERT_EQUAL_STRING("0", sub_str("tuning", "rails_hold_ms"));
+    const kv_t on[] = {{"rails_hold_ms", 'u', 1500, NULL}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(on, 1));
+    TEST_ASSERT_EQUAL_STRING("1500", sub_str("tuning", "rails_hold_ms"));
+    TEST_ASSERT_EQUAL_UINT16(1500, rails.hold_ms);
+    const kv_t bad[] = {{"rails_hold_ms", 'u', EPD_RAILS_HOLD_MAX_MS + 1, NULL}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(bad, 1));
+    TEST_ASSERT_EQUAL_STRING("out of range; allowed 0 to 10000", sub_str("refused", "rails_hold_ms"));
+    TEST_ASSERT_EQUAL_UINT16(1500, rails.hold_ms);
+    uint8_t p[32];
+    cbor_w_t w;
+    cbor_w_init(&w, p, sizeof p);
+    cbor_put_map(&w, 1);
+    cbor_put_str(&w, "tuning");
+    cbor_put_str(&w, "defaults");
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_SET, p, w.len));
+    TEST_ASSERT_EQUAL_STRING("0", sub_str("tuning", "rails_hold_ms"));
+    TEST_ASSERT_EQUAL_UINT16(0, rails.hold_ms);
+    knobs(false);
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(on, 1));
+    TEST_ASSERT_EQUAL_STRING("this board has no panel tuning", sub_str("refused", "rails_hold_ms"));
+    TEST_ASSERT_EQUAL_UINT16(0, rails.hold_ms);
 }
 
 /* An answer longer than the link takes in one write arrives whole (the device's USB write takes 512 bytes a call; a
@@ -423,6 +478,7 @@ int main(void)
     RUN_TEST(test_unknown_key_is_refused_with_the_known_ones);
     RUN_TEST(test_defaults_restore_every_knob);
     RUN_TEST(test_a_board_without_knobs_refuses_every_key);
+    RUN_TEST(test_rails_hold_key);
     RUN_TEST(test_a_long_answer_arrives_whole);
     RUN_TEST(test_scan_keys);
     RUN_TEST(test_gray_row);

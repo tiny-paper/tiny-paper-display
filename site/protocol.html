@@ -440,6 +440,12 @@ the driver&#39;s <code>!tp</code> console commands, with the bounds those comman
 <td><code>whole</code></td>
 <td>the passes over the two 328 KB frames around the scans of a 1 bit partial update (copies, the search for new blacks, the codes of each step, the redrive counts, setting the frames white) cover whole frames, or only the changed rows (with <code>wave_redrive</code> above 0 joined with the rows of the blacks still to be driven again). The library is handed the same frames either way (host-tested byte for byte), so the panel shows the same; <code>rows</code> takes the pause between steps (<code>gap=</code>) from about 110 ms to a few. With <code>rows</code> the fingerprints of the <code>panel given</code> line cover the worked rows only. Watch for: anything that differs from <code>whole</code></td>
 </tr>
+<tr>
+<td><code>rails_hold_ms</code></td>
+<td>0 to 10000</td>
+<td>0</td>
+<td>milliseconds the panel&#39;s supply rails stay up after a partial update, so the next one inside that time skips the power up (<code>up=</code> in the <code>panel time</code> line shows what that is worth). 0: down at the end of every update. They come down when the time passes, at once when an update fails or the key is set to 0, before a full refresh, a restart and any sleep. Watch for: the picture fading or graying while the rails are held (nothing is driven then, but the supply is on), and battery use</td>
+</tr>
 </tbody></table>
 <p><code>step_neutral</code> to <code>scan_min_ms</code> are the scans of a partial update. With their defaults the scans are the library&#39;s own: every step is its
 drive frames and then one neutral scan, every scan writes all 1404 rows with the timed row step. The gate driver gets one

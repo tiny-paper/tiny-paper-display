@@ -6,6 +6,7 @@
 #include "epd_parwin.h"
 #include "epd_parwave.h"
 #include "epd_parjob.h"
+#include "epd_rails.h"
 #include "epd_scan.h"
 #include "epd_split.h"
 #include "esp_heap_caps.h"
@@ -14,6 +15,7 @@
 #include "driver/i2c_master.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_system.h"
 #include "esp_attr.h"
 #include "esp_rom_sys.h"
 #include "driver/gpio.h"
@@ -73,6 +75,13 @@ public:
     }
     uint32_t bus_hz() const { return _state.panelDef.bus_speed; }
     int powered() const { return _state.pwr_on; }
+    /* Rails down whatever the library believes: its power down returns at once when it thinks they are down, which
+     * is what it thinks after a power up that failed half way. */
+    int force_down()
+    {
+        _state.pwr_on = 1;
+        return einkPower(0);
+    }
     bool soft_cs() const { return _state.panelDef.flags & BB_PANEL_FLAG_SLOW_SPH; }
     bool mirror_y() const { return _state.iFlags & BB_PANEL_FLAG_MIRROR_Y; }
     /* One FastEPD partial over the `careful` rows of a scan plan (epd_scan.h), `passes` drive frames (0: only its
@@ -368,15 +377,94 @@ template <class F> static int lib_call(int part, F &&f)
     s_lap = n;
     return rc;
 }
-/* Rails up before the first scan, so the time it takes is seen on its own (the library's own power up at the start
- * of each update then finds them up and returns). The time before goes to `part`. */
+/* The rails (epd_rails.h): up at the start of a partial update unless they were kept up, down at its end or, with a
+ * hold time (epdp_set_rails_hold), when a one-shot timer fires. s_rails_mu serialises the policy's calls; the timer's
+ * callback only tries it and comes back a little later when it is taken. */
+static epd_rails_t s_rails;
+static SemaphoreHandle_t s_rails_mu;
+static esp_timer_handle_t s_rails_timer;
+
+static int rails_power(void *, bool on)
+{
+    if (on) return s_epd.einkPower(1);
+    int rc = s_epd.force_down();
+    s_epd.ioPinMode(IOX_GAUGE_RST, 1);
+    return rc;
+}
+static void rails_timer_cb(void *)
+{
+    if (xSemaphoreTake(s_rails_mu, 0) != pdTRUE) {
+        esp_timer_start_once(s_rails_timer, 5000);
+        return;
+    }
+    epd_rails_timer(&s_rails);
+    xSemaphoreGive(s_rails_mu);
+}
+static bool rails_arm(void *, uint32_t ms)
+{
+    if (!s_rails_timer) {
+        esp_timer_create_args_t a = {};
+        a.callback = rails_timer_cb;
+        a.name = "epdrails";
+        if (esp_timer_create(&a, &s_rails_timer) != ESP_OK) {
+            s_rails_timer = nullptr;
+            return false;
+        }
+    }
+    esp_timer_stop(s_rails_timer);
+    return esp_timer_start_once(s_rails_timer, (uint64_t)ms * 1000u) == ESP_OK;
+}
+static void rails_disarm(void *)
+{
+    if (s_rails_timer) esp_timer_stop(s_rails_timer);
+}
+static const epd_rails_io_t RAILS_IO = {rails_power, rails_arm, rails_disarm};
+
+/* false: no lock, the policy cannot run (the caller then powers down itself). */
+static bool rails_lock(void)
+{
+    if (!s_rails_mu) {
+        s_rails_mu = xSemaphoreCreateMutex();
+        epd_rails_init(&s_rails, &RAILS_IO, nullptr);
+    }
+    return s_rails_mu && xSemaphoreTake(s_rails_mu, portMAX_DELAY) == pdTRUE;
+}
+/* Rails up before the first scan unless they were kept up, so the time it takes is seen on its own (the library's
+ * own power up at the start of each update then finds them up and returns). The time before goes to `part`. */
 static int rails_up(int part)
 {
     lap(part);
-    int rc = s_epd.einkPower(1);
+    int rc = BBEP_IO_ERROR;
+    if (rails_lock()) {
+        rc = epd_rails_begin(&s_rails, nullptr) ? BBEP_IO_ERROR : BBEP_SUCCESS;
+        xSemaphoreGive(s_rails_mu);
+    }
     lap(EPD_SPLIT_UP);
     return rc;
 }
+/* The partial update is over (ok: every step ran): rails down, or kept up for the hold time. */
+static void rails_end(int part, bool ok)
+{
+    lap(part);
+    if (rails_lock()) {
+        epd_rails_end(&s_rails, ok);
+        xSemaphoreGive(s_rails_mu);
+    } else {
+        rails_power(nullptr, false);
+    }
+    lap(EPD_SPLIT_DOWN);
+}
+/* Rails down now, whatever the hold. */
+static void rails_off(void)
+{
+    if (rails_lock()) {
+        epd_rails_off(&s_rails);
+        xSemaphoreGive(s_rails_mu);
+    } else {
+        rails_power(nullptr, false);
+    }
+}
+/* After a full refresh, where the library powers up and down itself. */
 static void rails_down(int part)
 {
     lap(part);
@@ -575,6 +663,8 @@ extern "C" int epdp_open_trmnl_x(int partial_passes, int full_passes)
     s_epd.setPasses((uint8_t)partial_passes, (uint8_t)full_passes);
     s_epd.setMode(BB_MODE_4BPP);
     s_open = true;
+    static bool shut;
+    if (!shut) shut = esp_register_shutdown_handler(epdp_rails_off) == ESP_OK; /* a restart with the rails kept up */
     return EPDP_OK;
 }
 
@@ -601,6 +691,7 @@ extern "C" int epdp_full(int clear_mode)
     if (clear_mode < 0 || clear_mode > 3) return EPDP_E_ARG;
     if (!iox_alive()) return EPDP_E_IO;
     int64_t t0 = esp_timer_get_time();
+    rails_off(); /* kept up by a partial: the library's full refresh powers up and down itself */
     split_begin();
     if (s_fresh) memset(s_fresh, 0, EPD_FRESH_PLANES * (size_t)(s_epd.width() / 8) * s_epd.height()); /* all driven by the full waveform */
     epd_parjob_fresh_none(&s_job);
@@ -732,7 +823,7 @@ extern "C" int epdp_partial(int y0, int y1)
     rows_end();
     s_given.pwr_after = (uint8_t)s_epd.powered();
     s_epd.setPasses(s_wave.main, s_full_passes);
-    rails_down(EPD_SPLIT_MASKS);
+    rails_end(EPD_SPLIT_MASKS, rc == BBEP_SUCCESS);
     mark_slow_driven(n, redriven);
     if (epd_parjob_end(&s_job, rc == BBEP_SUCCESS)) s_fresh_dirty = true;
     lap(EPD_SPLIT_AFTER);
@@ -828,7 +919,7 @@ extern "C" int epdp_gray_partial(const epdp_gwin_t *win, int nw, const uint8_t *
     }
     rows_end();
     s_epd.setPasses(s_wave.main, s_full_passes);
-    rails_down(EPD_SPLIT_MASKS);
+    rails_end(EPD_SPLIT_MASKS, rc == BBEP_SUCCESS);
     /* changed pixels went through the whole table: no longer fresh partial blacks */
     uint8_t chg[1872 / 8], tp[1872 / 8], tc[1872 / 8];
     for (int k = 0; k < nw && (size_t)win[k].w / 8 <= sizeof chg; k++) {
@@ -964,7 +1055,31 @@ extern "C" uint8_t *epdp_prev_buffer(void) { return s_open ? s_epd.previousBuffe
 extern "C" void epdp_close(void)
 {
     if (!s_open) return;
+    /* the update is over: rails off unless a partial keeps them up for its hold time (epd_rails.h) */
+    bool held = false;
+    if (rails_lock()) {
+        held = s_rails.up;
+        xSemaphoreGive(s_rails_mu);
+    }
+    if (held) return;
     s_epd.einkPower(0);
     s_epd.ioPinMode(IOX_GAUGE_RST, 1);
     /* deInit() would free the buffers and the LCD bus; the bring-up keeps the panel object for the session. */
 }
+
+extern "C" void epdp_rails_off(void)
+{
+    if (s_open) rails_off();
+}
+
+extern "C" int epdp_set_rails_hold(int ms)
+{
+    int rc = EPDP_E_ARG;
+    if (rails_lock()) {
+        rc = epd_rails_set_hold(&s_rails, ms) ? EPDP_OK : EPDP_E_ARG;
+        xSemaphoreGive(s_rails_mu);
+    }
+    return rc;
+}
+
+extern "C" int epdp_rails_hold(void) { return s_rails.hold_ms; }
