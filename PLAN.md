@@ -31,7 +31,7 @@ Work lands on `testing` first; `main` moves by promoting a state that was tried 
 | 1 Flash, backup, restore | a flash page | backup and restore; one page with the tabs Flash and Test, switching to Test after an install; a plain warning that installing erases the firmware on the device |
 | 2 USB and Bluetooth | the firmware and its protocol; Bluetooth off by default with a setup step | the first run on a real device, on each board, cable and Bluetooth |
 | 3 Packages | a Python package that installs from the git URL; a guide page ("Use it") | the JavaScript package; first releases, version 0.1.0 |
-| 4 Sketch in the browser | a sketch page with 16 grays on the TRMNL X (seen on a device); Clear is a full refresh and leaves the panel clean (seen); a Tone control to measure the panel's gray response | the curve found with Tone becomes the board's default (below); erasing in grays judged; the painting by a drawing library; into the Test tab |
+| 4 Sketch in the browser | a sketch page with 16 grays on the TRMNL X (seen on a device); Clear is a full refresh and leaves the panel clean (seen) | erasing in grays judged; the painting by a drawing library; into the Test tab |
 | 5 Sketch in Python | a first version exists | later |
 | 6 Partial refresh | in the firmware | seen on a device per board and depth before it is offered there (table below) |
 
@@ -39,7 +39,7 @@ Work lands on `testing` first; `main` moves by promoting a state that was tried 
 
 | Board | 1 bit | Grays |
 |---|---|---|
-| TRMNL X | yes: on 2026-10-08 with this firmware over the cable, black strokes crisp and in place (see below) | yes, they appear (see below); every gray is lighter than its swatch on the screen; slow |
+| TRMNL X | yes: on 2026-10-08 with this firmware over the cable, black strokes crisp and in place (see below) | yes, they appear (see below); slow |
 | TRMNL OG | yes, with the firmware this project grew out of | not yet |
 | PicPak | not yet | not yet |
 
@@ -52,8 +52,8 @@ Later on 2026-10-08, with a test build on the same TRMNL X: the device reported 
 cause of the missing grays was a setting stored by the firmware the device ran before, which the display firmware no
 longer reads). Clear as a full refresh leaves the panel clean. A gray stroke is first drawn black and then lightens to
 its shade (the gray partial drive goes through black). The grays are even, consistent between strokes and in the right
-order (mid looks mid, light looks light), but every gray on the panel is lighter than the same swatch on the computer
-screen.
+order (mid looks mid, light looks light). Grays on the TRMNL X are even and in the right order and come out lighter than
+the same shade on a computer screen; accepted as the panel's character, not being worked on.
 
 ### Known limits (TRMNL X, seen on a device, 2026-10-08)
 
@@ -61,16 +61,9 @@ screen.
 |---|---|
 | A black partial update (1 bit) | 1465 ms on the panel, 1673 ms in all, the same for any size of area |
 | A mid gray partial update | 3219 ms on the panel, 3573 ms in all |
-| Gray tone | every level lighter than the same swatch on the screen |
 
 Ideas, not started: skip quickly over the rows outside the changed area (the time does not depend on the area today);
 drive light grays directly from white instead of through black.
-
-### To do from this
-
-The curve that makes the panel match the swatches is found with the Tone control of the Sketch page on a device, then it
-becomes the board's default, in what the device reports about its gray levels, so every host gets it right without a
-slider.
 
 ## Clean-up
 
