@@ -69,8 +69,19 @@ its shade).
 | Gray full refresh | 2.59 s |
 | Gray pre-push (light frames) | no effect on pixels that start white, about 0.7 s: the default is now none |
 
-Ideas, not started: skip quickly over the rows outside the changed area (the time does not depend on the area today);
-drive light grays directly from white instead of through black.
+Measured on 2026-10-08 from the device's own log: a 4 bit partial update of a line 3 rows high ran 22 scans of all 1404
+rows (12 drive frames in 10 steps, each step followed by one neutral scan) in 2987 ms, about 136 ms a scan, whatever the
+height; a window 876 rows high took 4381 ms with the same 22 scans (the gray codes of the window's rows are computed
+again for every step); a gray full refresh ran 43 scans in 2542 ms, 59 ms a scan (rows free running, no timed gate
+pulse).
+
+Tuning keys for this, all off by default (spec "Tuning"): `step_neutral: end` leaves out the neutral scan between
+steps, `row_skip: on` clocks the rows outside the changed ones through without data (`row_skip_us`, `scan_min_ms`).
+Host tests model the gate driver and check one clock per row in every scan and the same data on every gate; the
+device logs the rows it wrote and skipped next to its clock count. Not seen on a panel yet: whether a skipped scan
+places rows right, whether the shorter scans draw as dark, and which combination looks right is still to be recorded.
+
+Idea, not started: drive light grays directly from white instead of through black.
 
 The drive options of the X (gray table, pre-push frames, passes, waveform, row timing, clear) are reachable from the Sketch
 page's Debug section for comparison, without reflashing; 1 bit looked best, which of the gray settings looks best is still to be recorded.
