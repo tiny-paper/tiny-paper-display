@@ -775,3 +775,49 @@ test('A long diagonal stroke at 4 bit is shown (partial or full), never refused:
   await until('small stroke answered', () => /Changed area refreshed/.test(p.el('status').textContent));
   assert.deepEqual(dev.refusals, []);
 });
+
+test('Stroke splitting: a long diagonal stroke goes out as several rectangles that each fit hello.partial_max and together cover every changed pixel', async () => {
+  const MAX = 50000, h = 530;
+  const dev = fakeDisplay({ h, ...XDEV, partial_max: { 2: MAX, 4: MAX } });
+  dev.limit = MAX; // the device refuses a partial over it: a box of 1600 x 400 would be refused or become a full refresh
+  const p = open({ dev, storage: graysOn('trmnl_x') });
+  await p.page.connect();
+  await until('the whole drawing', () => dev.shows.length === 1 && p.el('status').dataset.state === 'ok');
+  p.stroke([[100, 50], [500, 150], [900, 250], [1300, 350], [1700, 450]]);
+  const stroked = p.page.state.sender.model.px; // what the page drew: black (0) on white
+  const changed = [];
+  stroked.forEach((v, i) => { if (v !== p.page.state.sender.ink.paper) changed.push(i); });
+  assert.ok(changed.length > 5000);
+  // wait until the sends are done: no more shows for a while after the last
+  await until('rectangles sent', () => dev.shows.length >= 4);
+  await sleep(1500); // nothing more follows
+  const rects = dev.shows.slice(1);
+  assert.ok(rects.length >= 3, `several rectangles, got ${rects.length}`);
+  const covered = new Uint8Array(1872 * h);
+  for (const s of rects) {
+    assert.equal(s.mode, undefined, 'no mode named at 4 bit');
+    assert.equal(s.x % 8, 0, 'x in steps of 8');
+    assert.equal(s.w % 8, 0, 'width in steps of 8');
+    assert.ok(s.w * s.h <= MAX, `${s.w} x ${s.h} fits ${MAX}`);
+    assert.equal(s.bits, 4);
+    for (let y = s.y; y < s.y + s.h; y++) covered.fill(1, y * 1872 + s.x, y * 1872 + s.x + s.w);
+  }
+  assert.ok(changed.every((i) => covered[i] === 1), 'every changed pixel is inside a rectangle sent');
+  assert.deepEqual(dev.refusals, [], 'no refusal');
+  assert.ok(dev.shows.every((s, i) => i === 0 || s.x !== undefined), 'no whole-panel send after the first');
+  assert.ok(!/too much changed/.test(p.el('status').textContent), 'all of them partial updates, no full refresh');
+  // the box of the stroke is over the limit: a single request would have been too large
+  assert.ok(1600 * 400 > MAX);
+});
+
+test('Stroke splitting: a device without partial_max in hello gets the old single request', async () => {
+  const dev = fakeDisplay({ h: 531, ...XDEV });
+  const p = open({ dev, storage: graysOn('trmnl_x') });
+  await p.page.connect();
+  await until('the whole drawing', () => dev.shows.length === 1 && p.el('status').dataset.state === 'ok');
+  p.stroke([[100, 50], [500, 150], [900, 250], [1300, 350], [1700, 450]]);
+  await shown(dev, 2);
+  await sleep(500);
+  assert.equal(dev.shows.length, 2, 'one rectangle for the whole stroke');
+  assert.ok(dev.shows[1].w * dev.shows[1].h > 50000);
+});
