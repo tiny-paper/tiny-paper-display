@@ -529,7 +529,11 @@ var X_KNOBS = [
   { name: "row_settle", min: 0, max: 20, def: 2 },
   { name: "row_hold", min: 0, max: 20, def: 2 },
   { name: "row_drive", min: 0, max: 200, def: 32 },
-  { name: "clear", min: 0, max: 3, def: 0, words: ["auto", "none", "fast", "slow"] }
+  { name: "clear", min: 0, max: 3, def: 0, words: ["auto", "none", "fast", "slow"] },
+  { name: "step_neutral", min: 0, max: 1, def: 0, words: ["each", "end"] },
+  { name: "row_skip", min: 0, max: 1, def: 0, words: ["off", "on"] },
+  { name: "row_skip_us", min: 2, max: 50, def: 10 },
+  { name: "scan_min_ms", min: 0, max: 150, def: 0 }
 ];
 function tuningMap(values, knobs = X_KNOBS) {
   return Object.fromEntries(knobs.map((k, i) => [k.name, k.words ? k.words[values[i] - k.min] : values[i]]));
