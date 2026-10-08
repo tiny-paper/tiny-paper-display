@@ -11,6 +11,14 @@ const HELLO_MS = 3000;
 const SHOW_MS = 120000;
 const BOARD_TITLES = { trmnl_x: 'TRMNL X', trmnl_og: 'TRMNL OG', picpak: 'PicPak' };
 
+/** What the device's hello says about partial updates, in words: "Partial updates at: 1, 2 and 4 bit (16 grays)". */
+export function partialLine(hello) {
+  const d = [...hello.partial_depths].sort((a, b) => a - b);
+  if (!d.length) return 'Partial updates at: none (full refreshes only)';
+  const list = d.length === 1 ? `${d[0]}` : `${d.slice(0, -1).join(', ')} and ${d.at(-1)}`;
+  return `Partial updates at: ${list} bit${d.at(-1) > 1 ? ` (${2 ** d.at(-1)} grays)` : ''}`;
+}
+
 /** A pretend device as a Web Serial port: the page talks to it exactly as to a real one. */
 export function mockPort(device) {
   const port = {
@@ -106,6 +114,7 @@ export function startSketchPage(env) {
     if (state.sender) { state.sender.attach(null); $('full').disabled = true; }
     $('connect').textContent = 'Connect';
     $('preview').hidden = true;
+    $('partial').hidden = true;
     if (text) device(text, 'warn');
     if (link) await link.close();
   }
@@ -128,6 +137,8 @@ export function startSketchPage(env) {
     state.link = link; state.port = port; state.preview = preview;
     const title = BOARD_TITLES[hello.board] ?? hello.board;
     device(`${title}, ${hello.w} x ${hello.h}, display firmware ${hello.fw}.`, 'ok');
+    $('partial').textContent = partialLine(hello);
+    $('partial').hidden = false;
     $('connect').textContent = preview ? 'Connect a device' : 'Disconnect';
     $('preview').textContent = preview ? `Preview: no device is attached. A pretend ${MOCK_PANELS[preview]} answers, so nothing reaches a panel.` : '';
     $('preview').hidden = !preview;

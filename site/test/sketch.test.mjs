@@ -51,6 +51,8 @@ async function connected(h, over = {}) {
 test('connect: the device named, a canvas of the panel\'s pixels, its two colours, the whole drawing sent once in full', async () => {
   const { dev, el } = await connected(480);
   assert.match(el('device').textContent, /^TRMNL OG, 800 x 480, display firmware 0\.0\.0\+test\.$/);
+  assert.equal(el('partial').textContent, 'Partial updates at: 1 bit');
+  assert.equal(el('partial').hidden, false);
   assert.equal(el('pad').hidden, false);
   assert.deepEqual([el('canvas').width, el('canvas').height], [800, 480]);
   assert.deepEqual(el('swatches').children.map((b) => b.title), ['black', 'white']);
@@ -192,6 +194,7 @@ test('preview (?mock=): a pretend device answers with no Web Serial at all, per 
   assert.deepEqual([pic.el('canvas').width, pic.el('canvas').height], [400, 300]);
   assert.deepEqual(pic.el('swatches').children.map((b) => b.title), ['black', 'white', 'red', 'yellow']);
   assert.match(pic.el('note').textContent, /no partial refresh/);
+  assert.equal(pic.el('partial').textContent, 'Partial updates at: none (full refreshes only)');
   assert.equal(pic.el('fullafterrow').hidden, true);
   pic.stroke([[30, 30], [60, 60]]);
   await sleep(300);
@@ -218,6 +221,7 @@ test('a browser without Web Serial: the note with the way to the preview, no Con
 
 test('a device with gray partial depths: 16 swatches, strokes go as partial updates at 4 bit; without them black and white and the note', async () => {
   const gray = await connected(1404, { board: 'trmnl_x', w: 1872, depths: [1, 2, 4], partial_depths: [1, 2, 4], modes: ['full', 'partial', 'partial_all', 'inverse', 'passes'], max_png: 1319644 });
+  assert.equal(gray.el('partial').textContent, 'Partial updates at: 1, 2 and 4 bit (16 grays)');
   assert.equal(gray.el('swatches').children.length, 16);
   assert.equal(gray.el('note').hidden, true);
   gray.page.state.pen.color = 6;
@@ -226,6 +230,7 @@ test('a device with gray partial depths: 16 swatches, strokes go as partial upda
   assert.equal(gray.dev.shows[1].mode, 'partial');
   assert.equal(gray.dev.shows[1].bits, 4);
   const bw = await connected(1403, { board: 'trmnl_x', w: 1872, depths: [1, 2, 4], partial_depths: [1] });
+  assert.equal(bw.el('partial').textContent, 'Partial updates at: 1 bit', 'what the device reported, so a device without grays is seen on the page');
   assert.equal(bw.el('swatches').children.length, 2);
   assert.equal(bw.el('note').hidden, false);
 });
