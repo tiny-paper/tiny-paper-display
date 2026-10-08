@@ -36,6 +36,7 @@ static struct {
     uint16_t next_row; /* the row the next band must start at (top first) or end at (bottom first) */
     int fail_begin, fail_write, fail_refresh;
     uint32_t refresh_us;
+    size_t write_max; /* 0: the link takes every write whole */
     uint32_t alloc_us; /* the clock moves this much at every allocation */
     const uint8_t *during;
     size_t during_len;
@@ -56,6 +57,8 @@ static inline long f_read(void *ctx, uint8_t *buf, size_t cap, uint32_t timeout_
 static inline long f_write(void *ctx, const uint8_t *buf, size_t len)
 {
     (void)ctx;
+    if (F.write_max && len > F.write_max) /* a link that takes only so much a call, as the device's USB write */
+        len = F.write_max;
     TEST_ASSERT_TRUE(F.out_len + len <= sizeof F.out);
     memcpy(F.out + F.out_len, buf, len);
     F.out_len += len;

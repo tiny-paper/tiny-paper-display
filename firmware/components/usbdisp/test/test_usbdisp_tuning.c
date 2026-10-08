@@ -241,6 +241,23 @@ static void test_a_board_without_knobs_refuses_every_key(void)
     TEST_ASSERT_EQUAL_STRING("this board has no panel tuning", sub_str("refused", "tuning"));
 }
 
+/* An answer longer than the link takes in one write arrives whole (the device's USB write takes 512 bytes a call; a
+ * hello or set answer with the tuning map is longer, was cut there, and the host then read the log lines that
+ * followed as the rest of the frame: garbled log text and a lost answer). A link that takes nothing ends the send. */
+static void test_a_long_answer_arrives_whole(void)
+{
+    knobs(true);
+    F.write_max = 64;
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_HELLO, NULL, 0)); /* request() checks the frame's length and CRC */
+    TEST_ASSERT_TRUE(F.out_len > 64);
+    TEST_ASSERT_EQUAL_STRING("each", sub_str("tuning", "step_neutral"));
+    const kv_t on[] = {{"row_skip", 's', 0, "on"}};
+    TEST_ASSERT_EQUAL_INT(0, set_tuning(on, 1));
+    TEST_ASSERT_TRUE(F.out_len > 64);
+    TEST_ASSERT_EQUAL_STRING("on", sub_str("tuning", "row_skip"));
+    F.write_max = 0;
+}
+
 /* The scan keys of the X (step_neutral, row_skip, row_skip_us, scan_min_ms): hello shows defaults that leave the
  * scans as before, words and numbers are taken, a value outside is refused in words with its range and nothing
  * changes, "defaults" puts them back, and nothing is stored. */
@@ -406,6 +423,7 @@ int main(void)
     RUN_TEST(test_unknown_key_is_refused_with_the_known_ones);
     RUN_TEST(test_defaults_restore_every_knob);
     RUN_TEST(test_a_board_without_knobs_refuses_every_key);
+    RUN_TEST(test_a_long_answer_arrives_whole);
     RUN_TEST(test_scan_keys);
     RUN_TEST(test_gray_row);
     RUN_TEST(test_more_refusals_than_room_are_cut_not_overrun);

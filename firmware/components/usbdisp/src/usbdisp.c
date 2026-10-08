@@ -110,7 +110,23 @@ void usbdisp_send(usbdisp_t *d, const link_frame_t *f, const cbor_w_t *w)
     if (n && d->via_bt)
         d->c.bt_write(d->c.ctx, out, n);
     else if (n)
-        d->c.write(d->c.ctx, out, n);
+        usbdisp_write_all(d, out, n);
+}
+
+/* The whole frame, however little the link takes per call (the device's USB write takes 512 bytes at most: an answer
+ * longer than that was cut there, and the host read the log lines after it as the rest of the frame). A link that
+ * takes nothing or fails ends it: the host is gone. */
+void usbdisp_write_all(usbdisp_t *d, const uint8_t *buf, size_t len)
+{
+    while (len) {
+        long k = d->c.write(d->c.ctx, buf, len);
+        if (k <= 0)
+            return;
+        if ((size_t)k > len)
+            k = (long)len;
+        buf += k;
+        len -= (size_t)k;
+    }
 }
 
 void usbdisp_refuse(usbdisp_t *d, const link_frame_t *f, int err, const char *msg, const char *dkey, uint32_t dval)

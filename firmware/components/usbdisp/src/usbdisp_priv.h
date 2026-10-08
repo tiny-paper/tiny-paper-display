@@ -27,6 +27,8 @@ void usbdisp_send(usbdisp_t *d, const link_frame_t *f, const cbor_w_t *w);
 /* { err, msg, detail?: { <dkey>: dval } }. A refused show request also forgets the frame kept. */
 void usbdisp_refuse(usbdisp_t *d, const link_frame_t *f, int err, const char *msg, const char *dkey, uint32_t dval);
 void usbdisp_log(usbdisp_t *d, const char *s);
+/* Every byte to the USB link, in as many writes as it takes. */
+void usbdisp_write_all(usbdisp_t *d, const uint8_t *buf, size_t len);
 bool usbdisp_get_uint(const link_frame_t *f, const char *key, uint64_t *out);
 /* Drop the transfer (the PNG); the frame kept stays. */
 void usbdisp_xfer_drop(usbdisp_t *d);

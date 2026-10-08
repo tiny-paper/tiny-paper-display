@@ -1,5 +1,6 @@
 /* usbdisp on tiny/hal.h: the device's (and the simulator's) link, heap, clock and panel.
  * SPDX-License-Identifier: GPL-3.0-or-later */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -107,9 +108,15 @@ static void h_sleep(void *ctx)
 static void h_log(void *ctx, const char *line)
 {
     (void)ctx;
-    hal_console_write("# display ", 10);
-    hal_console_write(line, strlen(line));
-    hal_console_write("\n", 1);
+    /* one write: the link's lock is held per write, and a line in three pieces let another task's line in between */
+    char b[272];
+    int n = snprintf(b, sizeof b, "# display %s", line);
+    if (n < 0)
+        return;
+    if ((size_t)n > sizeof b - 2)
+        n = (int)sizeof b - 2;
+    b[n++] = '\n';
+    hal_console_write(b, (size_t)n);
 }
 
 void usbdisp_hal_cfg(usbdisp_cfg_t *cfg, const char *fw)

@@ -155,7 +155,8 @@ void hal_console_write(const char *s, size_t len)
     if (!s_ready)
         return;
     xSemaphoreTake(s_mu, portMAX_DELAY);
-    tr_write(s, len);
+    for (int n; len && (n = tr_write(s, len)) > 0; s += n, len -= (size_t)n) {
+    }
     xSemaphoreGive(s_mu);
 }
 
@@ -301,10 +302,15 @@ long hal_link_write(hal_link_t t, const uint8_t *buf, size_t len)
         return hal_ble_write(buf, len);
     if (t != HAL_LINK_USB || !s_ready)
         return HAL_E_NOTFOUND;
+    /* all of it under one lock (tr_write takes 512 bytes a call): a frame in two writes would let a log line of
+     * another task land inside it. Stops when the link takes nothing (no host). */
     xSemaphoreTake(s_mu, portMAX_DELAY);
-    int n = tr_write(buf, len);
+    size_t done = 0;
+    int n = 0;
+    while (done < len && (n = tr_write(buf + done, len - done)) > 0)
+        done += (size_t)n;
     xSemaphoreGive(s_mu);
-    return n < 0 ? HAL_E_IO : n;
+    return done ? (long)done : n < 0 ? HAL_E_IO : 0;
 }
 
 bool hal_link_stash_wait(uint32_t timeout_ms)
