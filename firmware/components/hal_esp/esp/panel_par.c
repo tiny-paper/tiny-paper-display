@@ -40,7 +40,7 @@
  *   !tp gpart <on|off> [dark] [light] gray partial (experimental, NVS "dgpart", default on): when a partial
  *                                     changes grays (depth 2/4, gray mode hybrid), the gray table runs on the
  *                                     changed pixels only (epd_parwave.h EPD_GP_*), no clearing flash, instead
- *                                     of a full refresh. dark/light 0..14 (default 0 3): frames pushing the
+ *                                     of a full refresh. dark/light 0..14 (default 0 0: light frames do nothing for pixels that start white and cost about 0.7 s): frames pushing the
  *                                     changed pixels dark, then light, first. Log: panel gpart ...
  *   !tp clear <auto|none|fast|slow>   clear passes before a full refresh; auto = slow every 8th full, else fast
  *                                     (stock display.cpp)
@@ -106,7 +106,7 @@ static epd_row_delay_t s_rows = {BOARD_EPD_ROW_SETTLE, BOARD_EPD_ROW_HOLD};
 static uint8_t s_drive = EPD_ROW_DRIVE_DEFAULT; /* NVS "xdrive": fixed partial row drive, us, 0 = free */
 static uint8_t s_bus_mhz;                       /* NVS "xbus": 0 = 26.67 MHz hardware CS, 1 = stock, 10..40 MHz */
 
-static gpart_cfg_t s_gp = {1, 0, 3}; /* on by default (display firmware): hello lists the gray partial depths; "!tp gpart off" */
+static gpart_cfg_t s_gp = {1, 0, 0}; /* on by default (display firmware): hello lists the gray partial depths; "!tp gpart off" */
 /* windows of a gray partial (depth 2/4): 4 bpp copies of old and new pixels, freed after the refresh */
 #define GP_MAX 16
 static epdp_gwin_t s_gw[GP_MAX];
@@ -184,7 +184,7 @@ static const struct {
     {{"gray_table", GRAY_FASTEPD, GRAY_STOCK, GRAY_STOCK, W_GRAY}, &s_gray},
     {{"gray_partial", 0, 1, 1, W_ONOFF}, &s_gp.on},
     {{"gray_dark", 0, 14, 0, NULL}, &s_gp.dark},
-    {{"gray_light", 0, 14, 3, NULL}, &s_gp.light},
+    {{"gray_light", 0, 14, 0, NULL}, &s_gp.light},
     {{"passes_partial", 1, 14, BOARD_EPD_PARTIAL_PASSES, NULL}, &s_pass.partial},
     {{"passes_full", 1, 14, BOARD_EPD_FULL_PASSES, NULL}, &s_pass.full},
     {{"wave_kick", 0, 14, BOARD_EPD_WAVE_KICK, NULL}, &s_wave.kick},

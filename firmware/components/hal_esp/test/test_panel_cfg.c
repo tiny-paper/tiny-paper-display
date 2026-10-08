@@ -11,7 +11,7 @@ void setUp(void)
 }
 void tearDown(void) {}
 
-static const gpart_cfg_t ON = {1, 0, 3};
+static const gpart_cfg_t ON = {1, 0, 0};
 
 static void test_nothing_stored_is_the_default(void)
 {

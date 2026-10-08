@@ -154,7 +154,7 @@ the driver's `!tp` console commands, with the bounds those commands check.
 | `gray_table` | `fastepd`, `stock` | `stock` | the 16 gray waveform of a gray partial: FastEPD's 8 passes, or the stock firmware's 9 |
 | `gray_partial` | `off`, `on` | `on` | gray partial updates; `off` refuses a partial update at 2 and 4 bit (hello's `partial_depths` is read at start and does not change) |
 | `gray_dark` | 0 to 14 | 0 | frames that push the changed pixels dark before the table runs |
-| `gray_light` | 0 to 14 | 3 | frames that push the changed pixels light before the table runs (after `gray_dark`) |
+| `gray_light` | 0 to 14 | 0 | frames that push the changed pixels light before the table runs (after `gray_dark`); on the X they do nothing for pixels that start white and cost about 0.7 s a frame group |
 | `passes_partial` | 1 to 14 | 4 | FastEPD passes of a 1 bit partial update: more is darker, less ghosting of the old picture, slower |
 | `passes_full` | 1 to 14 | 3 | FastEPD passes of a full refresh |
 | `wave_kick` | 0 to 14 | 2 | frames of the 1 bit partial waveform that run before the passes |
