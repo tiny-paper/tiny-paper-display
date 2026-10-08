@@ -79,6 +79,7 @@ export function startPicturePage(env) {
     const ctx = canvas.getContext('2d');
     if (ctx) ctx.putImageData(new env.ImageData(levelsToRgba(p.levels, p.depth, p.color), p.w, p.h), 0, 0);
     canvas.style.width = state.zoom ? `${p.w}px` : '';
+    canvas.style.imageRendering = state.zoom ? 'pixelated' : 'auto'; // shrunk to the page: smoothed, as the eye would; 1:1: every pixel as it is
   }
 
   /** The picture prepared with the controls as they are; the scaled picture is kept while only depth or dithering change. */
@@ -280,6 +281,7 @@ export function startPicturePage(env) {
     $('zoom').textContent = state.zoom ? 'Fit to width' : 'Show 1:1';
     $('zoomnote').textContent = state.zoom ? 'Shown 1:1: one panel pixel is one screen pixel; scroll to see the rest.' : 'Shown to fit the page width.';
     canvas.style.width = state.zoom && state.prepared ? `${state.prepared.w}px` : '';
+    canvas.style.imageRendering = state.zoom ? 'pixelated' : 'auto';
   };
   const drop = $('drop');
   if (drop.addEventListener) {

@@ -1040,7 +1040,7 @@ function scene(w, h) {
     g = mix(g, 250, sun);
     b = mix(b, 215, sun);
     const far = 0.55 + 0.05 * Math.sin(u * 7 + 1) + 0.02 * Math.sin(u * 19), near = 0.7 + 0.05 * Math.sin(u * 4 + 3) + 0.015 * Math.sin(u * 23);
-    const a1 = smooth(far + 6e-3, far - 6e-3, v), a2 = smooth(near + 6e-3, near - 6e-3, v);
+    const a1 = smooth(far - 6e-3, far + 6e-3, v), a2 = smooth(near - 6e-3, near + 6e-3, v);
     r = mix(r, 95, a1);
     g = mix(g, 120, a1);
     b = mix(b, 135, a1);
@@ -1102,10 +1102,10 @@ function lines(w, h) {
   c.line(bx + bw - 4, by + bh * 0.3, bx + bw - 4, by + bh, 2);
   c.line(bx + 4, by + bh, bx + bw - 4, by + bh, 2);
   c.rect(Math.round(bx + bw * 0.42), Math.round(by + bh * 0.6), Math.round(bw * 0.16), Math.round(bh * 0.4), 0);
-  c.text("LINE DRAWING 1 PX AND 2 PX", Math.round(w * 0.05), Math.round(h * 0.93), u, 0);
-  c.text("SMALL TEXT FOR READING", Math.round(w * 0.55), Math.round(h * 0.84), u, 0);
-  c.text("MEDIUM TEXT", Math.round(w * 0.55), Math.round(h * 0.88), 2 * u, 0);
-  c.text("BIG", Math.round(w * 0.55), Math.round(h * 0.94), 3 * u, 0);
+  c.text("LINE DRAWING 1 PX AND 2 PX", Math.round(w * 0.05), Math.round(h * 0.95), u, 0);
+  c.text("SMALL TEXT FOR READING", Math.round(w * 0.55), Math.round(h * 0.79), u, 0);
+  c.text("MEDIUM TEXT", Math.round(w * 0.55), Math.round(h * 0.83), 2 * u, 0);
+  c.text("BIG", Math.round(w * 0.55), Math.round(h * 0.89), 3 * u, 0);
   return { w, h, rgba: c.rgba };
 }
 function builtinPicture(kind, w, h, levels) {
