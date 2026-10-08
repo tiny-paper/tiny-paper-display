@@ -106,6 +106,9 @@ test('the flash page reads its release list past the cache; pages.yml checks the
   const pages = readFileSync(join(WORKFLOWS, 'pages.yml'), 'utf8');
   assert.match(pages, /run: node site\/publish\.mjs verify "\$PAGE_URL" "\$TAG" "\$GITHUB_RUN_ID"/, 'every deploy asks the live site whether it is this run');
   assert.match(pages, /tee _site\/build\.json > _site\/testing\/build\.json/);
+  assert.match(pages, /id: verify1\n\s+continue-on-error: true/, 'a deployment that was not applied is not the end');
+  assert.match(pages, /if: steps\.verify1\.outcome == 'failure'\n\s+uses: actions\/deploy-pages@v4/, 'it is deployed again');
+  assert.match(pages, /last try, fails the job/);
 });
 
 test('verifyLive: a deployment that reports success but is not the live one is caught by its run id', async () => {

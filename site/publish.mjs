@@ -80,9 +80,9 @@ export async function verifyLive({ base, tag = '', run = '', fetchFn = fetch, tr
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url) && process.argv[2] === 'verify') {
-  const [, , , base, tag, run] = process.argv;
+  const [, , , base, tag, run, tries] = process.argv;
   try {
-    await verifyLive({ base: base.endsWith('/') ? base : `${base}/`, tag: tag || '', run: run || '' });
+    await verifyLive({ base: base.endsWith('/') ? base : `${base}/`, tag: tag || '', run: run || '', ...(tries ? { tries: Number(tries) } : {}) });
     console.log(`the live site is ${run ? `run ${run}` : 'up'}${tag ? ` and lists ${tag} and serves its files` : ''}`);
   } catch (e) {
     console.error(`publish: ${e.message}`);

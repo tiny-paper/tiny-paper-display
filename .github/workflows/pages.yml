@@ -85,9 +85,35 @@ jobs:
           path: _site
       - id: deployment
         uses: actions/deploy-pages@v4
-      # a green deploy job is not a live site: read the live lists (past every cache) and fail when the release is not there
+      # A deployment can report success and not be applied (seen on 2026-10-08: the artifact held the release, the live site
+      # did not, files of one deployment came from two versions; the same sha deployed again a minute later was applied).
+      # So the live site is asked whether it is THIS run, and when it is not the same artifact is deployed again, twice at most.
       - name: The live site is this deployment and shows the release
+        id: verify1
+        continue-on-error: true
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
           TAG: ${{ inputs.tag }}
-        run: node site/publish.mjs verify "$PAGE_URL" "$TAG" "$GITHUB_RUN_ID"
+        run: node site/publish.mjs verify "$PAGE_URL" "$TAG" "$GITHUB_RUN_ID" 6
+      - name: Deploy again (the first deployment was not applied)
+        id: deployment2
+        if: steps.verify1.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+      - name: The live site is this deployment (second try)
+        id: verify2
+        if: steps.verify1.outcome == 'failure'
+        continue-on-error: true
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          TAG: ${{ inputs.tag }}
+        run: node site/publish.mjs verify "$PAGE_URL" "$TAG" "$GITHUB_RUN_ID" 6
+      - name: Deploy again (the second deployment was not applied either)
+        id: deployment3
+        if: steps.verify1.outcome == 'failure' && steps.verify2.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+      - name: The live site is this deployment (last try, fails the job)
+        if: steps.verify1.outcome == 'failure' && steps.verify2.outcome == 'failure'
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          TAG: ${{ inputs.tag }}
+        run: node site/publish.mjs verify "$PAGE_URL" "$TAG" "$GITHUB_RUN_ID" 12
