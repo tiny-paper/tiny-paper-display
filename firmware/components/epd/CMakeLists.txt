@@ -5,7 +5,7 @@
 # esp32s3 (TRMNL X): parallel panel through FastEPD (idf_component.yml pulls it, pinned), epd_par.h.
 # esp32s3 (Xteink X4 Pro): esp/epd_x4p.c, SSD1677 / UC8179 / UC8279 over SPI (epd_x4p.h; src/epd_x4p.c host-tested).
 set(EPD_SRCS esp/epd_uc8179.c esp/epd_bwry.c src/epd_lut.c src/epd_gray.c src/epd_rects.c src/epd_pins.c src/epd_parwin.c
-             src/epd_parwave.c src/epd_parjob.c src/epd_rails.c src/epd_gridcell.c src/epd_bwpart.c src/epd_rowtime.c src/epd_scan.c src/epd_split.c src/epd_graytab.c src/epd_bwspeed.c src/epd_bwrymap.c src/epd_bwseq.c src/epd_bwcard.c src/epd_bwfast.c
+             src/epd_parwave.c src/epd_parjob.c src/epd_gpartlut.c src/epd_rails.c src/epd_gridcell.c src/epd_bwpart.c src/epd_rowtime.c src/epd_scan.c src/epd_split.c src/epd_graytab.c src/epd_bwspeed.c src/epd_bwrymap.c src/epd_bwseq.c src/epd_bwcard.c src/epd_bwfast.c
               src/epd_rev.c)
 set(EPD_PRIV)
 if(IDF_TARGET STREQUAL "esp32s3")

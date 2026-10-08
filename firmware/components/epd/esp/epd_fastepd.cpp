@@ -6,6 +6,7 @@
 #include "epd_parwin.h"
 #include "epd_parwave.h"
 #include "epd_parjob.h"
+#include "epd_gpartlut.h"
 #include "epd_rails.h"
 #include "epd_scan.h"
 #include "epd_split.h"
@@ -890,28 +891,68 @@ extern "C" int epdp_gray_partial(const epdp_gwin_t *win, int nw, const uint8_t *
     int64_t t0 = esp_timer_get_time();
     split_begin();
     uint8_t *cur = s_epd.currentBuffer(), *prev = s_epd.previousBuffer();
+    memset(&s_gpart, 0, sizeof s_gpart);
+    /* Once an update: which pixels changed, a bit mask per window row (epd_gpartlut.h); the steps then take their
+     * codes from a table per step. Without memory for the masks: the per-pixel way, same frames. The rows the
+     * windows cover: outside them both frames are white from epdp_partial_begin on (the library only copies
+     * current to previous), which epdp_set_work uses to leave them alone. */
+    size_t chg_bytes = 0;
+    int gy0 = H, gy1 = -1;
+    for (int k = 0; k < nw; k++) {
+        chg_bytes += (size_t)(win[k].w / 8) * (size_t)win[k].h;
+        if (win[k].y < gy0) gy0 = win[k].y;
+        if (win[k].y + win[k].h - 1 > gy1) gy1 = win[k].y + win[k].h - 1;
+    }
+    uint8_t *chg = chg_bytes ? (uint8_t *)heap_caps_malloc(chg_bytes, MALLOC_CAP_SPIRAM) : nullptr;
+    if (chg) {
+        uint8_t *c = chg;
+        for (int k = 0; k < nw; k++) {
+            const epdp_gwin_t &g = win[k];
+            for (int r = 0; r < g.h; r++, c += g.w / 8)
+                s_gpart.changed_px += epd_gpart_changed(g.old4 + (size_t)r * g.stride, g.new4 + (size_t)r * g.stride, g.w, c);
+        }
+    }
+    const bool rows = s_work_rows && chg && gy1 >= gy0;
+    const size_t goff = rows ? (size_t)gy0 * ds : 0, glen = rows ? (size_t)(gy1 - gy0 + 1) * ds : n;
     int rc = rails_up(EPD_SPLIT_PREP);
     rows_begin(true);
-    memset(&s_gpart, 0, sizeof s_gpart);
     int sy0 = -1, sy1 = -1;
     const bool seq = rc == BBEP_SUCCESS && scan_begin(&rc);
     for (int i = 0; i < ns && rc == BBEP_SUCCESS; i++) {
-        memset(prev, 0xff, n);
-        memset(cur, 0xff, n);
         uint32_t drv = 0;
-        for (int k = 0; k < nw; k++) {
-            const epdp_gwin_t &g = win[k];
-            for (int r = 0; r < g.h; r++) {
-                size_t o = (size_t)(g.y + r) * ds + (size_t)g.x / 8;
-                epd_gpart_row(st[i].kind, st[i].j, matrix, passes, g.old4 + (size_t)r * g.stride,
-                              g.new4 + (size_t)r * g.stride, g.w, prev + o, cur + o, nullptr);
-                drv += epd_gpart_driven(prev + o, cur + o, g.w);
+        if (chg) {
+            /* every byte of every window is written below, so with epdp_set_work the frames need no white first */
+            if (!rows) {
+                memset(prev, 0xff, n);
+                memset(cur, 0xff, n);
+            }
+            epd_gpart_lut_t lut;
+            epd_gpart_lut(st[i].kind, st[i].j, matrix, passes, &lut);
+            const uint8_t *c = chg;
+            for (int k = 0; k < nw; k++) {
+                const epdp_gwin_t &g = win[k];
+                for (int r = 0; r < g.h; r++, c += g.w / 8) {
+                    size_t o = (size_t)(g.y + r) * ds + (size_t)g.x / 8;
+                    drv += epd_gpart_row_lut(&lut, g.new4 + (size_t)r * g.stride, c, g.w, prev + o, cur + o);
+                }
+            }
+        } else {
+            memset(prev, 0xff, n);
+            memset(cur, 0xff, n);
+            for (int k = 0; k < nw; k++) {
+                const epdp_gwin_t &g = win[k];
+                for (int r = 0; r < g.h; r++) {
+                    size_t o = (size_t)(g.y + r) * ds + (size_t)g.x / 8;
+                    epd_gpart_row(st[i].kind, st[i].j, matrix, passes, g.old4 + (size_t)r * g.stride,
+                                  g.new4 + (size_t)r * g.stride, g.w, prev + o, cur + o, nullptr);
+                    drv += epd_gpart_driven(prev + o, cur + o, g.w);
+                }
             }
         }
         if (drv > s_gpart.driven_px) s_gpart.driven_px = drv;
         s_epd.setPasses(st[i].frames, s_full_passes);
         if (seq)
-            rc = scan_run(prev, cur, n, 0, &sy0, &sy1, st[i].frames, i, ns);
+            rc = scan_run(prev + goff, cur + goff, glen, rows ? gy0 : 0, &sy0, &sy1, st[i].frames, i, ns);
         else
             rc = lib_call(EPD_SPLIT_MASKS, [&] { return s_epd.partialUpdate(i + 1 < ns, 0, H - 1); });
         s_gpart.steps++;
@@ -921,23 +962,31 @@ extern "C" int epdp_gray_partial(const epdp_gwin_t *win, int nw, const uint8_t *
     s_epd.setPasses(s_wave.main, s_full_passes);
     rails_end(EPD_SPLIT_MASKS, rc == BBEP_SUCCESS);
     /* changed pixels went through the whole table: no longer fresh partial blacks */
-    uint8_t chg[1872 / 8], tp[1872 / 8], tc[1872 / 8];
-    for (int k = 0; k < nw && (size_t)win[k].w / 8 <= sizeof chg; k++) {
+    uint8_t tmp[1872 / 8], tp[1872 / 8], tc[1872 / 8];
+    const uint8_t *c = chg;
+    for (int k = 0; k < nw && (size_t)win[k].w / 8 <= sizeof tmp; k++) {
         const epdp_gwin_t &g = win[k];
         for (int r = 0; r < g.h; r++) {
-            epd_gpart_row(EPD_GP_DARK, 0, matrix, passes, g.old4 + (size_t)r * g.stride, g.new4 + (size_t)r * g.stride,
-                          g.w, tp, tc, chg);
+            const uint8_t *m = c;
+            if (c) {
+                c += g.w / 8;
+            } else {
+                epd_gpart_row(EPD_GP_DARK, 0, matrix, passes, g.old4 + (size_t)r * g.stride, g.new4 + (size_t)r * g.stride,
+                              g.w, tp, tc, tmp);
+                m = tmp;
+            }
             uint8_t *f = s_fresh + (size_t)(g.y + r) * ds + (size_t)g.x / 8, *fh = f + n;
             for (int x = 0; x < g.w / 8; x++) {
-                s_gpart.changed_px += (uint32_t)__builtin_popcount(chg[x]);
-                if ((f[x] | fh[x]) & chg[x]) s_fresh_dirty = true;
-                f[x] = (uint8_t)(f[x] & ~chg[x]);
-                fh[x] = (uint8_t)(fh[x] & ~chg[x]);
+                if (!chg) s_gpart.changed_px += (uint32_t)__builtin_popcount(m[x]);
+                if ((f[x] | fh[x]) & m[x]) s_fresh_dirty = true;
+                f[x] = (uint8_t)(f[x] & ~m[x]);
+                fh[x] = (uint8_t)(fh[x] & ~m[x]);
             }
         }
     }
-    memset(prev, 0xff, n);
-    memset(cur, 0xff, n);
+    heap_caps_free(chg);
+    memset(prev + goff, 0xff, glen);
+    memset(cur + goff, 0xff, glen);
     epd_parjob_is_white(&s_job);
     lap(EPD_SPLIT_AFTER);
     s_last_ms = (uint32_t)((esp_timer_get_time() - t0) / 1000);
