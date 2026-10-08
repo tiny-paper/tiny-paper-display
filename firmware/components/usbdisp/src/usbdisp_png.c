@@ -8,7 +8,8 @@
 
 static const uint8_t SIG[8] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
 
-int usbdisp_png_check(const usbdisp_cfg_t *c, const uint8_t *png, size_t n, usbdisp_pnginfo_t *out, const char **why)
+int usbdisp_png_check(const usbdisp_cfg_t *c, const uint8_t *png, size_t n, bool area, usbdisp_pnginfo_t *out,
+                      const char **why)
 {
     static char msg[LINK_MSG_CAP]; /* one request at a time */
     imgdec_info_t in;
@@ -29,7 +30,9 @@ int usbdisp_png_check(const usbdisp_cfg_t *c, const uint8_t *png, size_t n, usbd
         *why = "an interlaced PNG, or one without a header, is not taken";
         return USBDISP_E_DEPTH;
     }
-    if (in.w != c->w || in.h != c->h) {
+    out->w = (uint16_t)in.w;
+    out->h = (uint16_t)in.h;
+    if (!area && (in.w != c->w || in.h != c->h)) {
         snprintf(msg, sizeof msg, "the PNG is %ux%u, the panel is %ux%u: send exactly the panel's size", (unsigned)in.w,
                  (unsigned)in.h, (unsigned)c->w, (unsigned)c->h);
         *why = msg;
@@ -85,7 +88,7 @@ static void dec_free(void *ctx, void *p) { ((dec_t *)ctx)->c->free(((dec_t *)ctx
 static int dec_info(void *ctx, const imgdec_info_t *in)
 {
     dec_t *d = ctx;
-    return in->format != IMG_PNG || in->w != d->c->w || in->h != d->c->h;
+    return in->format != IMG_PNG || in->w != d->pi->w || in->h != d->pi->h;
 }
 
 /* Palette code of an exact panel color (assets.md "Palette frames": 0 black, 1 red, 2 yellow, 3 white), -1 other. */
@@ -106,10 +109,10 @@ static int dec_row8(void *ctx, uint16_t y, const uint8_t *px, uint16_t w, uint8_
 {
     dec_t *d = ctx;
     uint8_t depth = d->pi->depth;
-    if (y >= d->c->h || w != d->c->w || (ch == 3) != d->pi->indexed)
+    if (y >= d->pi->h || w != d->pi->w || (ch == 3) != d->pi->indexed)
         return 1;
     uint8_t *row = d->frame + (size_t)y * d->stride;
-    memset(row, 0, d->stride);
+    memset(row, 0, ((size_t)w * depth + 7) / 8);
     for (uint16_t x = 0; x < w; x++) {
         int v;
         if (ch == 3) {
@@ -147,7 +150,7 @@ int usbdisp_png_frame(const usbdisp_cfg_t *c, const uint8_t *png, size_t n, cons
         *why = "no memory to decode the PNG";
         return USBDISP_E_NOMEM;
     }
-    if (rc != IMGDEC_OK || d.rows != c->h) {
+    if (rc != IMGDEC_OK || d.rows != pi->h) {
         *why = "the PNG data is damaged or cut short";
         return USBDISP_E_BAD_PNG;
     }

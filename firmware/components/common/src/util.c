@@ -276,3 +276,16 @@ __attribute__((weak)) bool hal_button_brush(void) { return false; }
 
 /* Panels without a box partial (hal.h): the press overlay on them takes its own refresh rule */
 __attribute__((weak)) bool hal_panel_box_partial(void) { return false; }
+
+/* Boards that cannot choose the partial drive or count gate clocks (hal.h) */
+__attribute__((weak)) bool hal_panel_partial_all(bool all)
+{
+    (void)all;
+    return false;
+}
+__attribute__((weak)) void hal_panel_fresh_ram(bool ram_only) { (void)ram_only; }
+__attribute__((weak)) bool hal_panel_gate_clocks(hal_gate_clocks_t *g)
+{
+    (void)g;
+    return false;
+}

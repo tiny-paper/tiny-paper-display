@@ -69,6 +69,19 @@ void epd_wave_masks(int phase, const uint8_t *P, const uint8_t *C, const uint8_t
     }
 }
 
+void epd_wave_drive(const uint8_t *P, const uint8_t *C, const uint8_t *prev_out, const uint8_t *cur_out, size_t n,
+                    epd_wave_drive_t *out)
+{
+    out->driven = out->same = 0;
+    for (size_t i = 0; i < n; i++) {
+        uint8_t d = (uint8_t)(prev_out[i] ^ cur_out[i]);
+        if (!d)
+            continue;
+        out->driven += (uint32_t)__builtin_popcount(d);
+        out->same += (uint32_t)__builtin_popcount((uint8_t)(d & ~(P[i] ^ C[i])));
+    }
+}
+
 bool epd_wave_track(uint8_t *fresh, const uint8_t *P, const uint8_t *C, size_t n, bool redriven, uint8_t budget)
 {
     if (budget > EPD_WAVE_REDRIVE_MAX)
@@ -212,6 +225,14 @@ void epd_gpart_row(int kind, int j, const uint8_t *matrix, int passes, const uin
         if (changed)
             changed[x] = ch;
     }
+}
+
+uint32_t epd_gpart_driven(const uint8_t *P, const uint8_t *C, int w)
+{
+    uint32_t n = 0;
+    for (int x = 0; x < w / 8; x++)
+        n += (uint32_t)__builtin_popcount((uint8_t)(P[x] ^ C[x]));
+    return n;
 }
 
 int epd_gpart_groups(const uint8_t *matrix, int passes, uint8_t *first, uint8_t *len)

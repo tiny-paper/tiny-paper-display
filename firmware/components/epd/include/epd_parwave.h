@@ -78,6 +78,16 @@ void epd_wave_scan(const uint8_t *P, const uint8_t *C, const uint8_t *fresh, siz
 void epd_wave_masks(int phase, const uint8_t *P, const uint8_t *C, const uint8_t *fresh, bool redrive, uint8_t *prev_out,
                     uint8_t *cur_out, size_t n);
 
+/* What one step drives, for the log and the guard of issue #203 (an unchanged pixel gets no drive): prev_out and
+ * cur_out are the step's frames (epd_wave_masks), P and C the frames given. driven: pixels with a code
+ * (prev_out != cur_out); same: those of them whose P == C (unchanged; only a redrive puts any there, and only
+ * blacks). */
+typedef struct {
+    uint32_t driven, same;
+} epd_wave_drive_t;
+void epd_wave_drive(const uint8_t *P, const uint8_t *C, const uint8_t *prev_out, const uint8_t *cur_out, size_t n,
+                    epd_wave_drive_t *out);
+
 /* After the partial: if `redriven` (a kick with redrive ran), every count goes down by one; then W->B pixels
  * get `budget` (0..EPD_WAVE_REDRIVE_MAX) and B->W pixels 0. True if fresh changed. */
 bool epd_wave_track(uint8_t *fresh, const uint8_t *P, const uint8_t *C, size_t n, bool redriven, uint8_t budget);
@@ -106,6 +116,7 @@ enum { EPD_GP_DARK = 0, EPD_GP_LIGHT = 1, EPD_GP_PASS = 2 };
 
 /* One row of w pixels (w % 8 == 0): old4/new4 4 bpp (high nibble first, 0 black .. 15 white), P/C w/8 bytes
  * (1 bpp, MSB first), changed (w/8 bytes, 1 = changed) may be NULL. j: the pass for EPD_GP_PASS. */
+uint32_t epd_gpart_driven(const uint8_t *P, const uint8_t *C, int w); /* pixels of such a row with a code */
 void epd_gpart_row(int kind, int j, const uint8_t *matrix, int passes, const uint8_t *old4, const uint8_t *new4, int w,
                    uint8_t *P, uint8_t *C, uint8_t *changed);
 

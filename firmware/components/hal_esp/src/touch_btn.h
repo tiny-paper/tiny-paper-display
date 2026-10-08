@@ -73,6 +73,7 @@
 #define TBTN_RETRY_US 200000       /* after a failed forced read */
 #define TBTN_MAX_US 30000000
 #define TBTN_REST_US 8000000       /* a press this long is a resting object: never acts (X, owner 2026-10-03) */
+#define TBTN_SIDE_REST_US 1900000  /* ... on the left or right zone alone (no holds there): rests after this, so no busy step passes 2 s */
 #define TBTN_QUIET_US 1000000      /* presses ignored this long after the reseed */
 #define TBTN_G_SWIPE_POS 0x0a      /* swipe + (bit 1), flick + (bit 3) */
 #define TBTN_G_SWIPE_NEG 0x14      /* swipe - (bit 2), flick - (bit 4) */
@@ -131,6 +132,8 @@ bool tbtn_brush_of(uint8_t zones, unsigned slide, unsigned ms);
 void tbtn_drop(tbtn_t *b);
 /* True once after a resting touch started (8 s) or ended: x_board.c re-ATIs the chip, then calls tbtn_quiet. */
 bool tbtn_reseed_take(tbtn_t *b);
+/* How long a press that touched `zones` (bit 0 CH0 left, 1 CH1 middle, 2 CH2 right) lasts before it is a resting object. */
+int64_t tbtn_rest_us(uint8_t zones);
 /* Ignore touched reads until `until_us` (then a read without touch is needed first). */
 void tbtn_quiet(tbtn_t *b, int64_t until_us);
 /* The press that ended last (or is down now) is a brush. */

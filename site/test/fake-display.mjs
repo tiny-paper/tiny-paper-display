@@ -1,0 +1,54 @@
+// SPDX-License-Identifier: MIT
+// A display firmware behind the fake serial port, for the Sketch page: hello, show (begin, chunks, end) and what it was
+// asked. Its own CBOR writer and the fake port's own CRC, so the tests do not trust the bundle under test; requests
+// are read with the site's decoder (frame.js, checked against the spec's vectors in bt-setup.test.mjs).
+// Not a test file (the runner takes *.test.mjs).
+import { decodeMap } from '../frame.js';
+import { fakePort, frameHex, fromHex, toHex } from './fake-port.mjs';
+
+const head = (major, n) => (n < 24 ? [(major << 5) | n] : n < 256 ? [(major << 5) | 24, n] : n < 65536 ? [(major << 5) | 25, n >> 8, n & 255]
+  : [(major << 5) | 26, (n >>> 24) & 255, (n >> 16) & 255, (n >> 8) & 255, n & 255]);
+function cbor(v) {
+  if (typeof v === 'boolean') return [v ? 0xf5 : 0xf4];
+  if (Number.isInteger(v) && v >= 0) return head(0, v);
+  if (typeof v === 'string') { const b = [...new TextEncoder().encode(v)]; return [...head(3, b.length), ...b]; }
+  if (Array.isArray(v)) return [...head(4, v.length), ...v.flatMap(cbor)];
+  const keys = Object.keys(v);
+  return [...head(5, keys.length), ...keys.flatMap((k) => [...cbor(k), ...cbor(v[k])])];
+}
+
+export const HELLO = {
+  proto: 1, project: 'display', fw: '0.0.0+test', board: 'trmnl_og', w: 800, h: 480, depths: [1, 2], partial_depths: [1],
+  modes: ['full', 'partial', 'inverse'], full_every: 20, max_png: 131072, max_payload: 6144, chunk: 4096,
+};
+
+/**
+ * { port, shows, hello, refuse }: `shows` holds every finished show ({ mode, x, y, w, h, bits } with w, h and bits read
+ * from the PNG it received). `refuse = { err, msg }`: the next show ends with that refusal. `hello: null`: silence.
+ */
+export function fakeDisplay(over = {}) {
+  const dev = { hello: over === null ? null : { ...HELLO, ...over }, shows: [], refuse: null, port: null };
+  let begin = {};
+  let png = new Uint8Array();
+  dev.port = fakePort((tx) => {
+    const b = fromHex(tx);
+    const seq = b[4];
+    const cmd = b[5];
+    const req = decodeMap(b.subarray(6, b.length - 2));
+    let res;
+    if (cmd === 1) res = dev.hello;
+    else if (cmd === 8) { begin = req; png = new Uint8Array(req.size); res = { next: 0, chunk: 4096 }; }
+    else if (cmd === 9) { png.set(req.data, req.off); res = { next: req.off + req.data.length }; }
+    else if (cmd === 10 && dev.refuse) { res = dev.refuse; dev.refuse = null; }
+    else if (cmd === 10) {
+      const v = new DataView(png.buffer);
+      const show = { mode: begin.mode, x: begin.x, y: begin.y, w: v.getUint32(16), h: v.getUint32(20), bits: png[24], signature: toHex(png.subarray(0, 8)) };
+      dev.shows.push(show);
+      res = begin.mode === 'partial'
+        ? { mode: 'partial', why: 'changed', depth: show.bits, ms: 7, x: begin.x ?? 0, y: begin.y ?? 0, w: show.w, h: show.h }
+        : { mode: 'full', why: 'asked', depth: show.bits, ms: 9, x: 0, y: 0, w: dev.hello.w, h: dev.hello.h };
+    } else res = { err: 1, msg: 'not a display command' };
+    return res ? [frameHex(seq, cmd | 0x80, toHex(Uint8Array.from(cbor(res))))] : [];
+  });
+  return dev;
+}

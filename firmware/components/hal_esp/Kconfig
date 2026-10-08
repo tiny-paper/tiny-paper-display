@@ -79,6 +79,16 @@ config TINY_BLE
         the image, a 3 s hold opens the WiFi setup portal (docs/spec/setup.md), ble_setup answers UNSUPPORTED.
         On: build with app/sdkconfig.ble appended (firmware/README.md). Core define TINY_BLE (tiny/hal.h).
 
+config TINY_BLE_GATED
+    bool "Bluetooth for bonded hosts only, pairing only in a window (display firmware)"
+    depends on TINY_BLE
+    default n
+    help
+        The display firmware (docs/spec/usb-display.md "Bluetooth"): RX takes only an encrypted, passkey-checked
+        link, pairing is refused unless hal_esp_ble_pairing(true) opened the window, a link that is encrypted
+        without an authenticated bond is dropped and its key deleted, advertising every 100 ms, and the bring-up
+        text command "!tp ble open" is not there (the stack starts only through hal_link_open).
+
 config TINY_ALBUM
     bool "Photo album (docs/spec/album.md: /album/ rasters, link commands 0x28..0x2F, album mode of steps tasks)"
     default y

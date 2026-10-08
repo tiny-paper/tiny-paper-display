@@ -124,9 +124,18 @@ static bool num(const char *s, long lo, long hi, long *out)
  * changed ones (diff, the default). Read at boot and on every change. */
 static uint8_t s_win_all;
 static bool s_win_read;
+static int8_t s_win_over = -1; /* hal_panel_partial_all (the display firmware): wins over the setting; -1 none */
+
+bool hal_panel_partial_all(bool all)
+{
+    s_win_over = all;
+    return true;
+}
 
 bool hal_esp_par_win_all(void)
 {
+    if (s_win_over >= 0)
+        return s_win_over;
     if (!s_win_read) {
         uint8_t v;
         if (hal_kv_get("xwinall", &v, 1) == 1)

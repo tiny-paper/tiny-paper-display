@@ -248,6 +248,8 @@ void hal_esp_par_force_full(void);
 /* panel_par_log.c: "rowmax=..." of the last update into b; the "panel rows" line (and its W line) after an update */
 const char *hal_esp_par_rows_str(char *b, size_t n);
 void hal_esp_par_log_drive(bool full);
+struct epdp_given; /* epd_par.h epdp_given_t */
+void hal_esp_par_log_given(const struct epdp_given *g);
 /* Console partials (panel_par_box.c): not refused by a pending full of the app; the state for their error line. */
 void hal_esp_par_console(bool on);
 void hal_esp_par_state_str(char *b, size_t n);

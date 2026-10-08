@@ -18,10 +18,12 @@
   #log { border: 1px solid var(--line); max-height: 220px; overflow: auto; padding: 8px; white-space: pre-wrap; font: 12px/1.4 ui-monospace, monospace; }
   .warn { color: var(--bad); font-weight: 600; } .ok { color: var(--ok); font-weight: 600; } .mut { color: var(--mut); }
   progress { width: 100%; }
+  nav a { margin-right: 16px; } nav a[aria-current] { font-weight: 600; text-decoration: none; }
   a { color: inherit; }
 </style>
 </head>
 <body>
+<nav><a href="index.html" aria-current="page">Flash</a><a href="sketch.html">Sketch</a><a href="api.html">API</a></nav>
 <h1>tiny-paper display</h1>
 <p>Turns a TRMNL OG, a PicPak or a TRMNL X into a plain e-paper display: plug it into a computer with its USB cable
 and send it a picture. <a href="api.html">The API</a> is three commands.</p>
@@ -40,7 +42,27 @@ and send it a picture. <a href="api.html">The API</a> is three commands.</p>
   <progress id="prog" max="1" value="0"></progress>
   <div id="state" class="mut">Plug the device in with a USB data cable, then press Install and pick its port
   ("USB JTAG/serial debug unit").</div>
+  <p id="next" class="ok" hidden>Installed: now <a href="sketch.html">draw on it</a>.</p>
   <div id="log" hidden></div>
+</section>
+
+<section id="btbox">
+  <h2>Bluetooth (optional)</h2>
+  <p class="mut">Off by default. This step talks to the device over the same cable, after an install or on its own.</p>
+  <button id="btopen">Bluetooth setup</button>
+  <div id="btctl" hidden>
+    <div id="btnone" class="warn" hidden></div>
+    <div id="btrow">
+      <label>Bluetooth <select id="bt">
+        <option value="off">off (default)</option>
+        <option value="on">on</option>
+      </select></label>
+      <button id="btpair">Pair a device now</button>
+      <button id="btforget">Forget all paired devices</button>
+    </div>
+    <ul id="btwords" class="mut"></ul>
+  </div>
+  <div id="btstate" class="mut"></div>
 </section>
 
 <section>
@@ -69,6 +91,7 @@ read from this site and written to the device by your browser.</p>
 
 <script type="module">
 import { ESPTOOL_JS, BOARDS, install, supportNote } from './flash.js';
+import { BT_WORDS, openBtSetup } from './bt-setup.js';
 
 const $ = (id) => document.getElementById(id);
 const say = (text, cls) => { $('state').textContent = text; $('state').className = cls || 'mut'; };
@@ -89,6 +112,7 @@ try {
 
 $('install').onclick = async () => {
   $('install').disabled = true;
+  $('next').hidden = true;
   try {
     const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] });
     say('Loading the flasher...');
@@ -99,11 +123,65 @@ $('install').onclick = async () => {
       log, progress: (p) => { $('prog').value = p; },
     });
     say(`Done: ${BOARDS[done.board].title} now runs the display firmware ${done.version}. Send it a picture.`, 'ok');
+    $('next').hidden = false;
+    $('btstate').textContent = 'Next, if you want Bluetooth: press "Bluetooth setup".';
+    lastPort = port;
   } catch (e) {
     say(e && e.message ? e.message : String(e), 'warn');
   }
   $('install').disabled = false;
 };
+
+// Bluetooth setup over the cable: the port of the install when there is one (the device restarted), else ask
+let lastPort = null;
+let setup = null;
+const btsay = (text, cls) => { $('btstate').textContent = text; $('btstate').className = cls || 'mut'; };
+const btbusy = (on) => { for (const id of ['btopen', 'bt', 'btpair', 'btforget']) $(id).disabled = on; };
+const btshow = () => {
+  const has = setup.state.bt !== null;
+  $('btnone').hidden = has;
+  $('btnone').textContent = BT_WORDS.none;
+  $('btrow').hidden = !has;
+  $('btwords').innerHTML = '';
+  if (has) for (const w of [BT_WORDS.cost, BT_WORDS.pairing, BT_WORDS.cable]) $('btwords').append(Object.assign(document.createElement('li'), { textContent: w }));
+  if (has) $('bt').value = setup.state.bt;
+  $('btctl').hidden = false;
+};
+const btdo = async (job, okText) => {
+  btbusy(true);
+  try {
+    await job();
+    btshow();
+    btsay(okText(), 'ok');
+  } catch (e) {
+    btsay(e && e.message ? e.message : String(e), 'warn');
+    if (setup) btshow();
+  }
+  btbusy(false);
+};
+$('btopen').onclick = async () => {
+  if (setup) { await setup.close(); setup = null; }
+  btbusy(true);
+  btsay('Waiting for the device...');
+  try {
+    let port = lastPort;
+    if (!port) {
+      try { port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] }); } catch { port = null; }
+    }
+    setup = await openBtSetup(port);
+    btshow();
+    btsay(setup.state.bt === null ? '' : `Bluetooth is ${setup.state.bt}.`, 'ok');
+  } catch (e) {
+    lastPort = null;
+    btsay(e && e.message ? e.message : String(e), 'warn');
+  }
+  btbusy(false);
+  if (!setup) $('btopen').disabled = !!note;
+};
+$('bt').onchange = () => btdo(() => setup.setOn($('bt').value === 'on'), () => `Bluetooth is ${setup.state.bt}.`);
+$('btpair').onclick = () => btdo(() => setup.pair(), () => 'Look at the panel: it shows 6 digits for 2 minutes. Type them on the computer or phone.');
+$('btforget').onclick = () => btdo(() => setup.forget(), () => 'All paired devices are forgotten.');
+if (note) $('btopen').disabled = true;
 </script>
 </body>
 </html>

@@ -39,6 +39,7 @@
 #define TALB_PHOTO_HDR 16
 #define TALB_KIND_JPEG 1     /* a JPEG, decoded and dithered for the screen when shown */
 #define TALB_KIND_RASTER 2   /* a TIMG raster of the screen (the fallback) */
+#define TALB_KIND_FILE 3     /* a picture as it was served (JPEG or PNG), drawn by a layout's widget ("Layout sources") */
 #define TALB_DEPTH_JPEG 8    /* index entry `depth` of a kind jpeg photo (older firmware never shows it) */
 #define TALB_WALL_FILE 0xFF  /* index entry `wall` of a photo file (older firmware never shows it) */
 typedef struct {

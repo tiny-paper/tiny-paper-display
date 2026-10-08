@@ -1,4 +1,4 @@
-# The GitHub Pages site: the flash page and the API page (site/), with the files of the published releases copied next
+# The GitHub Pages site: the flash page, the Sketch page and the API page (site/), with the files of the published releases copied next
 # to them (fw/<tag>/), because a browser cannot read release downloads from another origin. Runs after a release, on a
 # change of site/ on main, and by hand. Publishes only when Pages is switched on for the repository (source: GitHub
 # Actions).
@@ -32,7 +32,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p _site/fw
-          cp site/index.html site/api.html site/flash.js site/reset.js site/md5.js _site/
+          cp site/*.html site/*.js _site/   # every page and script (site/test/pages.test.mjs: nothing a page loads is left out)
           gh release list --exclude-drafts --exclude-pre-releases --limit 5 --json tagName,publishedAt > _site/fw/releases.json
           for tag in $(gh release list --exclude-drafts --exclude-pre-releases --limit 5 --json tagName --jq '.[].tagName'); do
             gh release download "$tag" --dir "_site/fw/$tag"

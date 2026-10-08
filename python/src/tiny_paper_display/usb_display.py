@@ -19,6 +19,37 @@ class DisplayError(Exception):
     """A bounded, user-facing failure, including a device error response."""
 
 
+class NotPaired(DisplayError):
+    """AUTH (12): a request over Bluetooth on a link that is not bonded."""
+
+
+class CableOnly(DisplayError):
+    """CABLE (38): the Bluetooth setting, pairing window and bonds change only over the USB cable."""
+
+
+PLAIN = {12: (NotPaired, "not paired: run setup with the cable and press the device's button"),
+         38: (CableOnly, "this works only over the USB cable (the Bluetooth setting, pairing and bonds)")}
+
+
+def refusal_error(reply):
+    """The clear error for AUTH and CABLE answers, else None."""
+    if reply.get("err") in PLAIN:
+        cls, words = PLAIN[reply["err"]]
+        return cls(words)
+    return None
+
+
+def open_port(port=None, bluetooth=None, scan_s=None):
+    """The serial port `port`, or the display named or addressed `bluetooth`, with the timeouts the examples use."""
+    if bluetooth:
+        from .ble_port import SCAN_S, BlePort
+        opened = BlePort(bluetooth, scan_s or SCAN_S)
+    else:
+        opened = codec.open_serial(port)
+    opened.timeout, opened.write_timeout = 0.05, 2
+    return opened
+
+
 class CheckedPort:
     """Complete short writes and turn disconnects into clean errors."""
 
@@ -50,6 +81,7 @@ class CheckedPort:
 class Display:
     def __init__(self, port, timeout=3):
         self.link = codec.LinkClient(CheckedPort(port))
+        self.ble = bool(getattr(port, "is_ble", False))  # lost bytes: an unanswered request is sent again once
         self.timeout = timeout
         self.max_payload = 6144
 
@@ -65,6 +97,8 @@ class Display:
         if reply.get("_timeout"):
             raise DisplayError(f"no reply for command 0x{cmd:02x} after two bounded attempts")
         if "err" in reply:
+            if refusal_error(reply):
+                raise refusal_error(reply)
             name = codec.ERR_NAMES.get(reply["err"], str(reply["err"]))
             raise DisplayError(f"device answered {name}: {reply}")
         if "_cbor_error" in reply:
@@ -72,7 +106,13 @@ class Display:
         return reply
 
     def hello(self):
-        return self.request(0x01, {"proto": 1, "app": "usb-show"})
+        self._display_last = None
+        self._display_area_last = None
+        self._display_known = None
+        reply = self.request(0x01, {"proto": 1, "app": "usb-show"})
+        self._display_connection = self.link
+        self._display_known = reply.get("fingerprint")
+        return reply
 
     def screen(self, hello=None):
         hello = hello or self.hello()

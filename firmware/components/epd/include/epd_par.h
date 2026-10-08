@@ -50,9 +50,11 @@ int epdp_partial(int y0, int y1);
 /* What the last partial handed to FastEPD (for the log, issue #203: the panel must prove what it was given):
  * a fingerprint (FNV-1a) of the previous and of the current 1 bpp frame at the drive call, the pixels that differ (white->black,
  * black->white), the rows that hold one (-1 -1 if none), and FastEPD's own state: mode, previous mode, rails on
- * before the first step and after the last. */
-typedef struct {
+ * before the first step and after the last. drv: per step (EPD_WAVE_KICK, _MAIN, _EXTRA; 0 0 = step skipped) the
+ * pixels driven and those of them that did not change (epd_parwave.h epd_wave_drive). */
+typedef struct epdp_given {
     uint32_t crc_prev, crc_cur, diff_px, wb_px, bw_px;
+    epd_wave_drive_t drv[3];
     int y0, y1;
     uint8_t mode, prev_mode, pwr_before, pwr_after;
 } epdp_given_t;
@@ -82,9 +84,11 @@ typedef struct {
     size_t stride;
 } epdp_gwin_t;
 int epdp_gray_partial(const epdp_gwin_t *win, int n, const uint8_t *matrix, int passes, int dark, int light);
-/* The last gray partial: FastEPD partials run and frames driven (neutral frames not counted). */
+/* The last gray partial: FastEPD partials run and frames driven (neutral frames not counted); the pixels whose
+ * gray changed and the most pixels any step drove (issue #203: never more than changed). */
 typedef struct {
     uint8_t steps, frames;
+    uint32_t changed_px, driven_px;
 } epdp_gpart_info_t;
 const epdp_gpart_info_t *epdp_last_gpart(void);
 /* The fresh bitmap (epd_parwave.h: redrives left per black made by a partial since the last full refresh,

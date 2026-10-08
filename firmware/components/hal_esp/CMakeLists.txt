@@ -11,7 +11,7 @@ if(TINY_BOARD STREQUAL "trmnl_x")
 endif()
 idf_component_register(SRCS ${c5_srcs} esp/sys.c esp/link.c esp/io.c esp/kv.c esp/fs.c esp/net.c   esp/panel.c esp/panel_bwry.c esp/panel_bwfast.c esp/board.c  esp/ota.c esp/ble_link.c esp/panel_par.c esp/panel_par_box.c esp/panel_par_log.c esp/x_board.c
                               esp/diag.c  esp/part_stats.c  esp/stacks.c  src/usb_detect.c src/touch_btn.c src/btn_queue.c   src/rtclock.c  src/reset_class.c src/btn_level.c
-                               src/busy_sleep.c src/reset_report.c
+                               src/busy_sleep.c src/reset_report.c 
                        INCLUDE_DIRS include ../../include
                        PRIV_INCLUDE_DIRS esp src ../../boards/${TINY_BOARD} ../../third_party/picpak
                        PRIV_REQUIRES epd timekeeper esp_driver_gpio esp_driver_i2c esp_driver_ledc esp_driver_uart esp_driver_usb_serial_jtag esp_adc

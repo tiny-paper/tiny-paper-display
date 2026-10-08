@@ -217,6 +217,26 @@ bool hal_panel_gray_partial(void);
  * it: false (weak default). */
 bool hal_panel_box_partial(void);
 
+/* Partial drive of the following 1 bpp partials (hal_panel_begin(1, PARTIAL)): false drives only the pixels that
+ * differ between prev and next, true every pixel of the written windows. Returns whether the board can choose
+ * (TRMNL X); the others ignore the call and return false (weak default). Display firmware (usb-display.md). */
+bool hal_panel_partial_all(bool all);
+
+/* Keep the redrive bitmap of the following partial refreshes in RAM only (TRMNL X: no /xfresh.bin write per partial,
+ * issue #214). For firmware that stays awake and never needs it across deep sleep (the display firmware); the app
+ * leaves it off. The other boards write no such file: weak default, no-op. */
+void hal_panel_fresh_ram(bool ram_only);
+
+/* The gate clock count the board measured over its last panel update (TRMNL X: CKV rising edges, issue #203):
+ * `edges` over `frames` drive frames of `rows` gate rows, `per` edges a frame; ok when per is rows plus the start
+ * pulses (a doubled or missing clock is not ok). False when the board does not count (weak default) or no frame ran. */
+typedef struct {
+    uint32_t edges, frames;
+    uint16_t rows, per;
+    bool ok;
+} hal_gate_clocks_t;
+bool hal_panel_gate_clocks(hal_gate_clocks_t *g);
+
 /* Refresh speed of the following refreshes (device config `refresh_speed`): HAL_SPEED_*. Only panels with faster
  * waveforms (PicPak: docs/spec/firmware.md "PicPak refresh speed") act on it; the others ignore it. */
 enum { HAL_SPEED_NATIVE = 0, HAL_SPEED_FAST = 1, HAL_SPEED_FASTEST = 2, HAL_SPEED_AUTO = 3 };

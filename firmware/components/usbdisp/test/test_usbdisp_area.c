@@ -1,0 +1,484 @@
+/* usbdisp: area updates and refresh modes (docs/spec/usb-display.md "Area and refresh mode") against the fake panel,
+ * whose glass changes only where the driver is told to drive: the frame the device keeps equals the glass after every
+ * mode, a partial without that frame becomes a full one and says so, a refused, cut or failed update is followed by a
+ * full one, every allocation fails once, the gate clock count is reported. SPDX-License-Identifier: GPL-3.0-or-later */
+#include "usbdisp_fake.h"
+
+#define W 48
+#define H 32
+static uint8_t s_want[MAXPIX]; /* what the glass must show, one byte a pixel */
+static uint8_t s_box[MAXPIX];
+
+static void random_px(uint8_t *px, size_t n, uint8_t bits)
+{
+    for (size_t i = 0; i < n; i++)
+        px[i] = (uint8_t)(rnd() % (1u << bits));
+}
+
+/* The frame the device keeps, against s_want: it must be what the glass shows. */
+static void expect_shown(uint8_t bits, const char *what)
+{
+    uint8_t depth = 0;
+    const uint8_t *prev = usbdisp_prev(&D, &depth);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY_MESSAGE(s_want, F.shown, W * H, what);
+    TEST_ASSERT_NOT_NULL_MESSAGE(prev, what);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(bits, depth, what);
+    size_t stride = (W * (size_t)bits + 7) / 8;
+    for (uint16_t y = 0; y < H; y++)
+        for (uint16_t x = 0; x < W; x++) {
+            unsigned bit = (unsigned)x * bits;
+            uint8_t v = (uint8_t)(prev[y * stride + bit / 8] >> (8 - bits - bit % 8) & ((1 << bits) - 1));
+            if (v != s_want[(size_t)y * W + x]) {
+                char msg[96];
+                snprintf(msg, sizeof msg, "%s: the frame kept has %u at %u,%u, the glass %u", what, v, x, y,
+                         s_want[(size_t)y * W + x]);
+                TEST_FAIL_MESSAGE(msg);
+            }
+        }
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, F.stale, what);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, F.order_errors, what);
+}
+
+/* A whole picture: s_want itself. */
+static int show_want(const char *mode, int passes)
+{
+    size_t n = make_png(s_png, W, H, 1, 0, s_want);
+    return show_at(s_png, n, 512, -1, 0, mode, passes);
+}
+
+/* A rectangle of random pixels at x, y; s_want follows when `into`. */
+static int show_box(int x, int y, uint16_t w, uint16_t h, const char *mode, int passes, bool into)
+{
+    random_px(s_box, (size_t)w * h, 1);
+    for (uint16_t j = 0; into && j < h; j++)
+        memcpy(s_want + (size_t)(y + j) * W + x, s_box + (size_t)j * w, w);
+    size_t n = make_png(s_png, w, h, 1, 0, s_box);
+    return show_at(s_png, n, 512, x, y, mode, passes);
+}
+
+/* Random updates in every mode: after each one the glass shows the picture and the device knows it. */
+static void test_frame_kept_is_the_glass(void)
+{
+    static const char *const MODES[] = {NULL, "partial", "partial_all", "inverse", "passes", "full"};
+    static const char *const NAMES[USBDISP_MODE_COUNT] = {"auto", "full", "partial", "partial_all", "inverse", "passes", "none"};
+    int ran[USBDISP_MODE_COUNT] = {0}, fulls_no_prev = 0;
+    device_partial(W, H, 3, 1, true, 0);
+    bool known = false; /* the device has a frame of what the panel shows */
+    for (int i = 0; i < 400; i++) {
+        unsigned op = rnd() % 16, m = rnd() % 6;
+        int passes = m == 4 ? 1 + (int)(rnd() % USBDISP_PASSES_MAX) : 0, refreshes = F.refreshes;
+        char what[64];
+        snprintf(what, sizeof what, "step %d op %u mode %s", i, op, MODES[m] ? MODES[m] : "none");
+        if (op == 0) { /* a refused transfer: the device no longer trusts its frame */
+            TEST_ASSERT_EQUAL_INT_MESSAGE(USBDISP_E_MODE, show_want("fast", 0), what);
+            TEST_ASSERT_NULL(usbdisp_prev(&D, NULL));
+            known = false;
+            continue;
+        }
+        if (op == 1) {
+            TEST_ASSERT_EQUAL_INT_MESSAGE(0, req_err(USBDISP_CMD_CLEAR, NULL, 0), what);
+            memset(s_want, 1, sizeof s_want);
+            expect_shown(1, what);
+            known = true;
+            continue;
+        }
+        bool area = op >= 6;
+        int e;
+        if (area) {
+            int x = 8 * (int)(rnd() % (W / 8)), y = (int)(rnd() % H);
+            uint16_t w = (uint16_t)(8 * (1 + rnd() % ((W - (unsigned)x) / 8))), h = (uint16_t)(1 + rnd() % (H - (unsigned)y));
+            if (!known)
+                memset(s_want, 1, sizeof s_want); /* the rest of the panel: white */
+            e = show_box(x, y, w, h, MODES[m], passes, true);
+        } else {
+            if (op == 2) {
+                /* the same picture again */
+            } else if (op < 5) { /* a few pixels, else a new picture */
+                for (int k = 0; k < 5; k++)
+                    s_want[rnd() % (W * H)] ^= 1;
+            } else
+                random_px(s_want, W * H, 1);
+            e = show_want(MODES[m], passes);
+        }
+        TEST_ASSERT_EQUAL_INT_MESSAGE(0, e, what);
+        expect_shown(1, what);
+        const char *mode = ans_str("mode"), *why = ans_str("why");
+        if (!known) { /* without the frame: a full refresh, whatever was asked, and the answer says why */
+            TEST_ASSERT_EQUAL_STRING_MESSAGE("full", mode, what);
+            TEST_ASSERT_TRUE_MESSAGE(!strcmp(why, m == 5 ? "asked" : "first") || !strcmp(why, m == 5 ? "asked" : "refused"), what);
+            fulls_no_prev++;
+        } else if (m == 0) {
+            TEST_ASSERT_TRUE_MESSAGE(!strcmp(mode, "partial") || !strcmp(mode, "none"), what);
+            TEST_ASSERT_EQUAL_STRING_MESSAGE(mode[0] == 'p' ? "changed" : "unchanged", why, what);
+        } else if (m == 1) {
+            TEST_ASSERT_TRUE_MESSAGE(!strcmp(mode, "partial") || !strcmp(mode, "none"), what);
+        } else {
+            TEST_ASSERT_EQUAL_STRING_MESSAGE(MODES[m], mode, what);
+            TEST_ASSERT_EQUAL_STRING_MESSAGE("asked", why, what);
+        }
+        int want_refreshes = !strcmp(mode, "none") ? 0 : !strcmp(mode, "inverse") ? 2 : !strcmp(mode, "passes") ? passes : 1;
+        TEST_ASSERT_EQUAL_INT_MESSAGE(refreshes + want_refreshes, F.refreshes, what);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(passes && known, map_int(s_ans, s_ans_len, "passes", 0) != 0, what);
+        for (int k = 0; k < USBDISP_MODE_COUNT; k++)
+            ran[k] += !strcmp(mode, NAMES[k]);
+        known = true;
+    }
+    for (int k = USBDISP_MODE_FULL; k < USBDISP_MODE_COUNT; k++)
+        TEST_ASSERT_TRUE_MESSAGE(ran[k] >= 5, NAMES[k]);
+    TEST_ASSERT_TRUE(fulls_no_prev >= 10);
+    TEST_ASSERT_EQUAL_INT(F.begins, F.sleeps);
+    usbdisp_reset(&D);
+    TEST_ASSERT_EQUAL_INT(0, F.live);
+}
+
+/* What each mode asks of the panel: partial drives the changed pixels only, partial_all every pixel of the rectangle,
+ * inverse shows the negative first, passes repeats the drive. */
+static void test_modes_drive_as_named(void)
+{
+    static uint8_t before[MAXPIX];
+    device_partial(W, H, 1, 1, true, 0);
+    random_px(s_want, W * H, 1);
+    TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+    TEST_ASSERT_EQUAL_STRING("full", ans_str("mode"));
+    TEST_ASSERT_EQUAL_STRING("first", ans_str("why"));
+    TEST_ASSERT_EQUAL_INT(1, F.fulls);
+
+    /* one pixel changed: the device finds the rectangle, one pixel is driven */
+    s_want[10 * W + 20] ^= 1;
+    TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+    TEST_ASSERT_EQUAL_STRING("partial", ans_str("mode"));
+    TEST_ASSERT_EQUAL_INT(16, map_int(s_ans, s_ans_len, "x", -1));
+    TEST_ASSERT_EQUAL_INT(10, map_int(s_ans, s_ans_len, "y", -1));
+    TEST_ASSERT_EQUAL_INT(8, map_int(s_ans, s_ans_len, "w", -1));
+    TEST_ASSERT_EQUAL_INT(1, map_int(s_ans, s_ans_len, "h", -1));
+    TEST_ASSERT_EQUAL_INT(USBDISP_DRIVE_PARTIAL, F.drive);
+    TEST_ASSERT_EQUAL_INT(1, F.driven);
+    TEST_ASSERT_EQUAL_INT(1, F.fulls);
+    expect_shown(1, "one pixel");
+
+    /* the same picture: nothing is driven at all */
+    int begins = F.begins;
+    TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+    TEST_ASSERT_EQUAL_STRING("none", ans_str("mode"));
+    TEST_ASSERT_EQUAL_STRING("unchanged", ans_str("why"));
+    TEST_ASSERT_EQUAL_INT(begins, F.begins);
+
+    /* partial_all: every pixel of the rectangle, changed or not */
+    TEST_ASSERT_EQUAL_INT(0, show_box(8, 4, 16, 6, "partial_all", 0, true));
+    TEST_ASSERT_EQUAL_INT(USBDISP_DRIVE_PARTIAL_ALL, F.drive);
+    TEST_ASSERT_EQUAL_INT(16 * 6, F.driven);
+    TEST_ASSERT_EQUAL_INT(8, F.rect.x);
+    TEST_ASSERT_EQUAL_INT(4, F.rect.y);
+    expect_shown(1, "partial_all");
+
+    /* inverse: after the first refresh the rectangle shows the negative of the new picture, the rest is untouched */
+    memcpy(before, F.shown, sizeof before);
+    TEST_ASSERT_EQUAL_INT(0, show_box(24, 8, 16, 10, "inverse", 0, true));
+    for (uint16_t y = 0; y < H; y++)
+        for (uint16_t x = 0; x < W; x++) {
+            bool in = x >= 24 && x < 40 && y >= 8 && y < 18;
+            uint8_t mid = F.hist[1][(size_t)y * W + x];
+            TEST_ASSERT_EQUAL_UINT8(in ? 1 - s_want[(size_t)y * W + x] : before[(size_t)y * W + x], mid);
+        }
+    TEST_ASSERT_EQUAL_INT(16 * 10, F.driven); /* the second refresh changes every pixel of it */
+    expect_shown(1, "inverse");
+
+    /* passes: the drive of every pixel, n times */
+    int partials = F.partials;
+    TEST_ASSERT_EQUAL_INT(0, show_box(0, 20, 8, 8, "passes", 3, true));
+    TEST_ASSERT_EQUAL_INT(partials + 3, F.partials);
+    TEST_ASSERT_EQUAL_INT(3, map_int(s_ans, s_ans_len, "passes", 0));
+    TEST_ASSERT_EQUAL_INT(64, F.driven);
+    expect_shown(1, "passes");
+    TEST_ASSERT_EQUAL_INT(1, F.fulls);
+}
+
+/* A board whose panel cannot drive every pixel of a window (the OG): partial and inverse run, partial_all and passes
+ * are refused with the reason; hello lists what it does. */
+static void test_board_without_partial_all(void)
+{
+    device_partial(W, H, 3, 1, false, 0);
+    size_t rn;
+    const uint8_t *r = request(USBDISP_CMD_HELLO, NULL, 0, &rn);
+    s_ans = r, s_ans_len = rn;
+    const uint8_t *v;
+    size_t vn;
+    TEST_ASSERT_TRUE(cbor_map_get(r, rn, "modes", 5, &v, &vn));
+    static const uint8_t modes[] = {0x83, 0x64, 'f', 'u', 'l', 'l', 0x67, 'p', 'a', 'r', 't', 'i', 'a', 'l',
+                                    0x67, 'i', 'n', 'v', 'e', 'r', 's', 'e'};
+    TEST_ASSERT_EQUAL_UINT(sizeof modes, vn);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(modes, v, vn);
+    random_px(s_want, W * H, 1);
+    TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+    TEST_ASSERT_EQUAL_INT(USBDISP_E_MODE, show_box(0, 0, 8, 8, "partial_all", 0, false));
+    TEST_ASSERT_EQUAL_STRING("this board cannot drive every pixel of an area: no partial_all", ans_str("msg"));
+    TEST_ASSERT_EQUAL_INT(USBDISP_E_MODE, show_box(0, 0, 8, 8, "passes", 2, false));
+    TEST_ASSERT_EQUAL_STRING("this board cannot drive every pixel of an area: no passes", ans_str("msg"));
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(s_want, F.shown, W * H); /* a refusal never changes the panel */
+    memset(s_want, 1, sizeof s_want); /* after a refusal: a full refresh, the rest white */
+    TEST_ASSERT_EQUAL_INT(0, show_box(0, 0, 8, 8, "inverse", 0, true));
+    TEST_ASSERT_EQUAL_STRING("full", ans_str("mode"));
+    TEST_ASSERT_EQUAL_STRING("refused", ans_str("why"));
+    TEST_ASSERT_EQUAL_INT(0, show_box(8, 8, 8, 8, "inverse", 0, true));
+    TEST_ASSERT_EQUAL_STRING("inverse", ans_str("mode"));
+    TEST_ASSERT_EQUAL_INT(0, show_box(16, 8, 8, 8, NULL, 0, true));
+    TEST_ASSERT_EQUAL_STRING("partial", ans_str("mode"));
+    expect_shown(1, "og");
+}
+
+/* Gray partials (a panel that takes them): the changed rectangle comes in whole groups of 8 pixels at 2 bit too, and
+ * the modes that need a 1 bit picture are refused. */
+static void test_gray_partial(void)
+{
+    device_partial(W, H, 3, 3, true, 0);
+    random_px(s_want, W * H, 2);
+    size_t n = make_png(s_png, W, H, 2, 0, s_want);
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    TEST_ASSERT_EQUAL_STRING("full", ans_str("mode"));
+    s_want[5 * W + 13] ^= 3;
+    s_want[7 * W + 30] ^= 1;
+    n = make_png(s_png, W, H, 2, 0, s_want);
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    TEST_ASSERT_EQUAL_STRING("partial", ans_str("mode"));
+    TEST_ASSERT_EQUAL_INT(8, map_int(s_ans, s_ans_len, "x", -1));
+    TEST_ASSERT_EQUAL_INT(24, map_int(s_ans, s_ans_len, "w", -1));
+    TEST_ASSERT_EQUAL_INT(5, map_int(s_ans, s_ans_len, "y", -1));
+    TEST_ASSERT_EQUAL_INT(3, map_int(s_ans, s_ans_len, "h", -1));
+    TEST_ASSERT_EQUAL_INT(2, F.driven);
+    expect_shown(2, "gray partial");
+    TEST_ASSERT_EQUAL_INT(USBDISP_E_MODE, show_at(s_png, n, 512, -1, 0, "partial_all", 0));
+    TEST_ASSERT_EQUAL_STRING("partial_all needs a 1 bit picture", ans_str("msg"));
+    /* a 1 bit area on a 2 bit picture: the rest of the panel cannot be told */
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    TEST_ASSERT_EQUAL_INT(USBDISP_E_DEPTH, show_box(0, 0, 8, 8, NULL, 0, false));
+    TEST_ASSERT_EQUAL_STRING("the picture shown has 2 bit: an area must have the same depth", ans_str("msg"));
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(s_want, F.shown, W * H);
+}
+
+/* A transfer that went quiet was cut: the device no longer trusts its frame, the next update is a full one. */
+static void test_cut_transfer_then_full(void)
+{
+    device_partial(W, H, 1, 1, true, 0);
+    random_px(s_want, W * H, 1);
+    TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+    uint8_t p[32];
+    cbor_w_t w;
+    cbor_w_init(&w, p, sizeof p);
+    cbor_put_map(&w, 1);
+    cbor_put_str(&w, "size");
+    cbor_put_uint(&w, 100);
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_SHOW_BEGIN, p, w.len));
+    TEST_ASSERT_NOT_NULL(usbdisp_prev(&D, NULL));
+    F.now += USBDISP_IDLE_US;
+    usbdisp_poll(&D, 0);
+    TEST_ASSERT_FALSE(usbdisp_transfer(&D));
+    TEST_ASSERT_NULL(usbdisp_prev(&D, NULL));
+    TEST_ASSERT_EQUAL_INT(0, F.live);
+    s_want[3] ^= 1;
+    TEST_ASSERT_EQUAL_INT(0, show_want("partial", 0));
+    TEST_ASSERT_EQUAL_STRING("full", ans_str("mode"));
+    TEST_ASSERT_EQUAL_STRING("cut", ans_str("why"));
+    TEST_ASSERT_EQUAL_INT(2, F.fulls);
+    expect_shown(1, "after the cut");
+}
+
+/* Every allocation of an update in every mode fails once: a clean NOMEM (the panel as it was, nothing leaked) or a
+ * full refresh that says "memory"; the update after it shows its picture. */
+static void test_alloc_fails_in_every_mode(void)
+{
+    static const char *const MODES[] = {NULL, "partial", "partial_all", "inverse", "passes", "full"};
+    static uint8_t before[MAXPIX];
+    int nomem = 0, fallback = 0;
+    for (int m = 0; m < 6; m++)
+        for (int area = 0; area < 2; area++)
+            for (int k = 0;; k++) {
+                char what[64];
+                snprintf(what, sizeof what, "mode %s area %d alloc %d", MODES[m] ? MODES[m] : "none", area, k);
+                device_partial(W, H, 1, 1, true, 0);
+                random_px(s_want, W * H, 1);
+                TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+                memcpy(before, F.shown, sizeof before);
+                int refreshes = F.refreshes;
+                if (!area)
+                    random_px(s_want, W * H, 1);
+                F.allocs = 0;
+                F.fail_at = k;
+                int e = area ? show_box(8, 8, 24, 12, MODES[m], m == 4 ? 2 : 0, true) : show_want(MODES[m], m == 4 ? 2 : 0);
+                bool hit = F.allocs > k;
+                F.fail_at = -1;
+                if (e) {
+                    TEST_ASSERT_EQUAL_INT_MESSAGE(USBDISP_E_NOMEM, e, what);
+                    TEST_ASSERT_TRUE_MESSAGE(hit, what);
+                    TEST_ASSERT_EQUAL_INT_MESSAGE(refreshes, F.refreshes, what);
+                    TEST_ASSERT_EQUAL_HEX8_ARRAY_MESSAGE(before, F.shown, sizeof before, what);
+                    TEST_ASSERT_EQUAL_INT_MESSAGE(0, F.live, what);
+                    TEST_ASSERT_FALSE(usbdisp_transfer(&D));
+                    nomem++;
+                } else {
+                    expect_shown(1, what);
+                    if (hit) { /* the frame kept was given up for the picture */
+                        TEST_ASSERT_EQUAL_STRING_MESSAGE("full", ans_str("mode"), what);
+                        if (m == 0)
+                            TEST_ASSERT_EQUAL_STRING_MESSAGE("memory", ans_str("why"), what);
+                        fallback++;
+                    }
+                    TEST_ASSERT_EQUAL_INT_MESSAGE(1, F.live, what);
+                }
+                random_px(s_want, W * H, 1);
+                TEST_ASSERT_EQUAL_INT_MESSAGE(0, show_want(NULL, 0), what);
+                if (e) {
+                    TEST_ASSERT_EQUAL_STRING_MESSAGE("full", ans_str("mode"), what);
+                    TEST_ASSERT_EQUAL_STRING_MESSAGE("refused", ans_str("why"), what);
+                }
+                expect_shown(1, what);
+                usbdisp_reset(&D);
+                TEST_ASSERT_EQUAL_INT_MESSAGE(0, F.live, what);
+                if (!hit)
+                    break;
+            }
+    TEST_ASSERT_TRUE_MESSAGE(nomem >= 40 && fallback >= 4, "fewer allocation points than the code has");
+}
+
+/* The panel driver fails in the middle of an update (the second refresh of an inverse): IO, and since the glass may
+ * show either picture the next update is a full one. */
+static void test_panel_fails_mid_update(void)
+{
+    for (int step = 0; step < 3; step++) {
+        device_partial(W, H, 1, 1, true, 0);
+        random_px(s_want, W * H, 1);
+        TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+        if (step == 0)
+            F.fail_begin = 2;
+        else if (step == 1)
+            F.fail_refresh = 2;
+        else
+            F.fail_write = 1;
+        TEST_ASSERT_EQUAL_INT(USBDISP_E_IO, show_box(8, 8, 16, 8, "inverse", 0, true));
+        F.fail_begin = F.fail_refresh = F.fail_write = 0;
+        TEST_ASSERT_NULL(usbdisp_prev(&D, NULL));
+        TEST_ASSERT_EQUAL_INT(0, F.live);
+        TEST_ASSERT_EQUAL_INT(F.begins, F.sleeps);
+        TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+        TEST_ASSERT_EQUAL_STRING("full", ans_str("mode"));
+        TEST_ASSERT_EQUAL_STRING("failed", ans_str("why"));
+        expect_shown(1, "after the failure");
+    }
+}
+
+/* The gate clock count the panel measured is in the answer and the log; a wrong count is marked. */
+static void test_gate_clocks_reported(void)
+{
+    device_partial(W, H, 1, 1, true, 0);
+    random_px(s_want, W * H, 1);
+    TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+    const uint8_t *v;
+    size_t vn;
+    TEST_ASSERT_FALSE(cbor_map_get(s_ans, s_ans_len, "ckv", 3, &v, &vn)); /* a board that does not count */
+    F.gates = true;
+    F.gate = (usbdisp_gates_t){11265, 8, 1404, 1408, true};
+    s_want[0] ^= 1;
+    TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+    TEST_ASSERT_TRUE(cbor_map_get(s_ans, s_ans_len, "ckv", 3, &v, &vn));
+    TEST_ASSERT_EQUAL_INT(11265, map_int(v, vn, "edges", 0));
+    TEST_ASSERT_EQUAL_INT(8, map_int(v, vn, "frames", 0));
+    TEST_ASSERT_EQUAL_INT(1408, map_int(v, vn, "per", 0));
+    TEST_ASSERT_EQUAL_INT(1404, map_int(v, vn, "rows", 0));
+    TEST_ASSERT_NOT_NULL(strstr(F.log, "show mode=partial why=changed area=0,0,8,1 depth=1"));
+    TEST_ASSERT_NOT_NULL(strstr(F.log, "ckv=11265/8 per=1408 rows=1404"));
+    TEST_ASSERT_NULL(strstr(F.log, "WRONG"));
+    /* issue #203: two gate clocks a row */
+    F.gate = (usbdisp_gates_t){22495, 8, 1404, 2811, false};
+    s_want[0] ^= 1;
+    TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+    TEST_ASSERT_TRUE(cbor_map_get(s_ans, s_ans_len, "ckv", 3, &v, &vn));
+    TEST_ASSERT_EQUAL_INT(2811, map_int(v, vn, "per", 0));
+    static const uint8_t ok_false[] = {0x62, 'o', 'k', 0xF4};
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(ok_false, v + vn - sizeof ok_false, sizeof ok_false);
+    TEST_ASSERT_EQUAL_CHAR('W', F.log[0]);
+    TEST_ASSERT_NOT_NULL(strstr(F.log, "per=2811 rows=1404 WRONG"));
+    /* nothing driven: no count of an older update */
+    TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+    TEST_ASSERT_EQUAL_STRING("none", ans_str("mode"));
+    TEST_ASSERT_FALSE(cbor_map_get(s_ans, s_ans_len, "ckv", 3, &v, &vn));
+}
+
+static int set_full_every(int v)
+{
+    uint8_t p[32];
+    cbor_w_t w;
+    cbor_w_init(&w, p, sizeof p);
+    cbor_put_map(&w, 1);
+    cbor_put_str(&w, "full_every");
+    cbor_put_uint(&w, (uint64_t)v);
+    return req_err(USBDISP_CMD_SET, p, w.len);
+}
+
+/* full_every: the board's default, the stored value over it, a clean-up full refresh after that many partial ones
+ * (only when the host leaves the mode to the device), and a store that fails. */
+static void test_full_every_setting(void)
+{
+    device_partial(W, H, 1, 1, true, 3);
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_SET, NULL, 0));
+    TEST_ASSERT_EQUAL_INT(3, map_int(s_ans, s_ans_len, "full_every", -1));
+    random_px(s_want, W * H, 1);
+    static const char *const want[] = {"full", "partial", "partial", "partial", "full", "partial"};
+    for (int i = 0; i < 6; i++) {
+        s_want[i] ^= 1;
+        TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+        TEST_ASSERT_EQUAL_STRING(want[i], ans_str("mode"));
+        TEST_ASSERT_EQUAL_STRING(i == 0 ? "first" : i == 4 ? "cleanup" : "changed", ans_str("why"));
+        expect_shown(1, "full_every");
+    }
+    /* a mode the host names is run as named, however many partial ones came before */
+    for (int i = 0; i < 6; i++) {
+        s_want[i] ^= 1;
+        TEST_ASSERT_EQUAL_INT(0, show_want("partial", 0));
+        TEST_ASSERT_EQUAL_STRING("partial", ans_str("mode"));
+    }
+    s_want[0] ^= 1;
+    TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+    TEST_ASSERT_EQUAL_STRING("cleanup", ans_str("why"));
+    /* stored, and read at the next start */
+    TEST_ASSERT_EQUAL_INT(0, set_full_every(0));
+    TEST_ASSERT_EQUAL_INT(0, F.kv);
+    for (int i = 0; i < 30; i++) {
+        s_want[i] ^= 1;
+        TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+        TEST_ASSERT_EQUAL_STRING("partial", ans_str("mode"));
+    }
+    TEST_ASSERT_EQUAL_INT(0, set_full_every(7));
+    usbdisp_reset(&D);
+    usbdisp_init(&D, &C);
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_SET, NULL, 0));
+    TEST_ASSERT_EQUAL_INT(7, map_int(s_ans, s_ans_len, "full_every", -1));
+    /* a store that fails: said so, the value in use stays */
+    F.fail_kv = 1;
+    TEST_ASSERT_EQUAL_INT(USBDISP_E_IO, set_full_every(9));
+    F.fail_kv = 0;
+    TEST_ASSERT_EQUAL_INT(USBDISP_E_BAD_REQUEST, set_full_every(USBDISP_FULL_EVERY_MAX + 1));
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_SET, NULL, 0));
+    TEST_ASSERT_EQUAL_INT(7, map_int(s_ans, s_ans_len, "full_every", -1));
+    /* a stored byte out of range is not taken */
+    F.kv = 251;
+    usbdisp_init(&D, &C);
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_SET, NULL, 0));
+    TEST_ASSERT_EQUAL_INT(3, map_int(s_ans, s_ans_len, "full_every", -1));
+}
+
+void setUp(void) {}
+void tearDown(void) {}
+
+int main(void)
+{
+    UNITY_BEGIN();
+    RUN_TEST(test_frame_kept_is_the_glass);
+    RUN_TEST(test_modes_drive_as_named);
+    RUN_TEST(test_board_without_partial_all);
+    RUN_TEST(test_gray_partial);
+    RUN_TEST(test_cut_transfer_then_full);
+    RUN_TEST(test_alloc_fails_in_every_mode);
+    RUN_TEST(test_panel_fails_mid_update);
+    RUN_TEST(test_gate_clocks_reported);
+    RUN_TEST(test_full_every_setting);
+    return UNITY_END();
+}

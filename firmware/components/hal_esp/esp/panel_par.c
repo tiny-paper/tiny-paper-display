@@ -77,6 +77,7 @@
 #include "esp_random.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "fresh_save.h"
 #include "hal_esp_priv.h"
 
 #if BOARD_PANEL_FASTEPD /* whole file */
@@ -122,9 +123,6 @@ static RTC_DATA_ATTR uint8_t s_fulls; /* full refreshes since power-on, for CLEA
 /* Fresh blacks across deep sleep (epd_parwave.h redrive): FRESH_PATH holds the bitmap, run-length coded,
  * tagged with s_fresh_tag. The tag is new at every full refresh and 0 after power-on or a reset (RTC data
  * is only kept over deep sleep), so a file from another panel state is never loaded. */
-#define FRESH_PATH "/xfresh.bin"
-#define FRESH_TMP  "/xfresh.tmp"
-#define FRESH_MAGIC 0x32524658u /* "XFR2": two planes of redrive counts (XFR1, one plane, is dropped) */
 static RTC_DATA_ATTR uint32_t s_fresh_tag;
 static bool s_fresh_ready; /* loaded (or known empty) this boot */
 static long s_fresh_saved;  /* bytes written after the last partial, -1 failed, 0 none */
@@ -302,34 +300,22 @@ static void fresh_load(void)
              (unsigned)((esp_timer_get_time() - t) / 1000));
 }
 
+static bool s_fresh_ram; /* hal_panel_fresh_ram: the display firmware keeps the bitmap in RAM only */
+
+void hal_panel_fresh_ram(bool ram_only) { s_fresh_ram = ram_only; }
+
 static void fresh_save(void)
 {
     s_fresh_saved = 0;
-    if (!epdp_fresh_take_dirty())
+    if (!s_fresh_ram && !epdp_fresh_take_dirty()) /* RAM only: dirty stays set, nothing to write */
         return;
     size_t n;
     const uint8_t *f = epdp_fresh(&n);
-    uint8_t *buf = f ? malloc(12 + epd_rle_bound(n)) : NULL;
-    size_t l = buf ? epd_rle_enc(f, n, buf + 12, epd_rle_bound(n)) : 0;
     if (!s_fresh_tag)
         s_fresh_tag = esp_random() | 1u;
-    uint32_t hdr[3] = {FRESH_MAGIC, s_fresh_tag, (uint32_t)n};
-    s_fresh_saved = -1;
-    if (l) {
-        memcpy(buf, hdr, sizeof hdr);
-        hal_file_t *fp = hal_fs_open(FRESH_TMP, "w");
-        long w = fp ? hal_fs_write(fp, buf, 12 + l) : -1;
-        int c = fp ? hal_fs_close(fp) : -1;
-        if (w == (long)(12 + l) && c == HAL_OK && hal_fs_rename(FRESH_TMP, FRESH_PATH) == HAL_OK)
-            s_fresh_saved = (long)(12 + l);
-        else
-            hal_fs_remove(FRESH_TMP);
-    }
-    free(buf);
-    if (s_fresh_saved < 0) {
-        hal_fs_remove(FRESH_PATH); /* no stale bitmap */
+    s_fresh_saved = fresh_save_file(f, n, s_fresh_tag, s_fresh_ram);
+    if (s_fresh_saved < 0)
         hal_logf("W panel fresh not saved");
-    }
 }
 
 static void stats_rect(const tiny_rect_t *r)
@@ -517,9 +503,10 @@ int hal_panel_refresh(void)
         fresh_save();
         const epdp_gpart_info_t *g = epdp_last_gpart();
         char rb[200];
-        hal_logf("panel gpart depth=%u rows=%d..%d ms=%u dark=%u light=%u gray=%s steps=%u frames=%u %s rc=%d", s_depth,
-                 s_y0, s_y1, (unsigned)hal_stats.refresh_ms, s_gp.dark, s_gp.light,
-                 s_gray == GRAY_STOCK ? "stock" : "fastepd", g->steps, g->frames, hal_esp_par_rows_str(rb, sizeof rb), rc);
+        hal_logf("panel gpart depth=%u rows=%d..%d ms=%u dark=%u light=%u gray=%s steps=%u frames=%u chg=%lu drv=%lu %s "
+                 "rc=%d", s_depth, s_y0, s_y1, (unsigned)hal_stats.refresh_ms, s_gp.dark, s_gp.light,
+                 s_gray == GRAY_STOCK ? "stock" : "fastepd", g->steps, g->frames, (unsigned long)g->changed_px,
+                 (unsigned long)g->driven_px, hal_esp_par_rows_str(rb, sizeof rb), rc);
         hal_esp_par_log_drive(s_mode == HAL_REFRESH_FULL);
     } else if (s_mode == HAL_REFRESH_PARTIAL) {
         rc = s_y1 >= s_y0 ? epdp_partial(s_y0, s_y1) : EPDP_OK;
@@ -543,10 +530,7 @@ int hal_panel_refresh(void)
                      w->ms[EPD_WAVE_EXTRA], (unsigned long)rd->px, rd->y0, rd->y1, s_rows.settle, s_rows.hold,
                      hal_esp_par_rows_str(rb, sizeof rb), s_fresh_saved, fms, (unsigned)s_since_full, rc);
             /* issue #203: the frames FastEPD was given at the drive call and its own state then */
-            hal_logf("panel given prev=%08lx cur=%08lx diff=%lu wb=%lu bw=%lu drows=%d..%d lib=mode%u/prev%u pwr=%u/%u",
-                     (unsigned long)g->crc_prev, (unsigned long)g->crc_cur, (unsigned long)g->diff_px,
-                     (unsigned long)g->wb_px, (unsigned long)g->bw_px, g->y0, g->y1, g->mode, g->prev_mode, g->pwr_before,
-                     g->pwr_after);
+            hal_esp_par_log_given(g);
             hal_esp_par_log_drive(s_mode == HAL_REFRESH_FULL);
         }
     } else {

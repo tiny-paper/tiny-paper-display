@@ -9,10 +9,11 @@ import zlib
 
 import pytest
 
-from tinypaper_display import display_fw as fw
-from tinypaper_display import show
+from tiny_paper_display import display_fw as fw
+from tiny_paper_display import show
 from conftest import FakePort, png
-from tinypaper_display.usb_display import ROOT, Display, DisplayError, codec
+from fake_display_fw import FakeDevice
+from tiny_paper_display.usb_display import ROOT, Display, DisplayError, codec
 
 V = json.loads((ROOT / "docs/spec/vectors/usb-display.json").read_text())
 
@@ -45,7 +46,7 @@ def pairs():
 
 def test_requests_and_answers_are_the_vector_bytes():
     n = 0
-    for st in pairs():
+    for st in list(pairs()) + V["refusals"]:
         assert codec.build_frame(st["seq"], st["cmd"], plain(st["req"])).hex() == st["tx"], st.get("name")
         items = [it for it in codec.LinkParser().feed(b"# a log line\n" + bytes.fromhex(st["rx"])) if it[0] != "text"]
         assert [(it[1], it[2], codec.cbor_decode(it[3])) for it in items] == [(st["seq"], st["cmd"] | 0x80, plain(st["resp"]))]
@@ -53,42 +54,46 @@ def test_requests_and_answers_are_the_vector_bytes():
     assert n > 50
 
 
+def device(name, **more):
+    """The fake firmware with the session's panel."""
+    p = session(name)["panel"]
+    return FakeDevice(p["w"], p["h"], p["depths"], p["partial_depths"], p["partial_all"], p["full_every"], p["board"],
+                      p["fw"], **more)
+
+
 def replay(name, busy_first=0, hello=None):
-    """A device that answers as the session's steps do, whatever seq the client uses."""
-    s = session(name)
-    steps = {(st["cmd"], json.dumps(st["req"], sort_keys=True)): st for st in s["steps"]}
-    # show_end has no payload: its answer is the one that followed the same PNG bytes in the session
-    ends, sent, state = {}, b"", {"data": b"", "busy": busy_first, "seen": []}
-    for st in s["steps"]:
-        if st["cmd"] == fw.SHOW_BEGIN:
-            sent = b""
-        elif st["cmd"] == fw.SHOW_CHUNK and "err" not in st:
-            sent += plain(st["req"])["data"]
-        elif st["cmd"] == fw.SHOW_END:
-            ends[sent] = plain(st["resp"])
+    """A device with the session's panel behind a port; busy_first: that many requests are answered BUSY."""
+    dev = device(name, hello=hello)
+    state = {"busy": busy_first, "seen": [], "device": dev}
 
     def respond(wire):
         seq, cmd = wire[4:6]
-        payload = codec.cbor_decode(wire[6:-2]) if len(wire) > 8 else {}
         state["seen"].append(cmd)
-        if cmd == fw.HELLO:
-            resp = hello or plain(s["steps"][0]["resp"])
-        elif state["busy"]:
+        if cmd != fw.HELLO and state["busy"]:
             state["busy"] -= 1
-            resp = {"err": 3, "msg": "refreshing", "detail": {"retry_ms": 1}}
-        elif cmd == fw.SHOW_END:
-            resp = ends[state["data"]]
-        else:
-            key = (cmd, json.dumps(readable(payload), sort_keys=True))
-            assert key in steps, f"a request the vectors do not have: {key}"
-            resp = plain(steps[key]["resp"])
-            if cmd == fw.SHOW_BEGIN:
-                state["data"] = b""
-            elif cmd == fw.SHOW_CHUNK and "err" not in resp:
-                state["data"] += payload["data"]
-        return codec.build_frame(seq, cmd | 0x80, resp)
+            return codec.build_frame(seq, cmd | 0x80, {"err": 3, "msg": "refreshing", "detail": {"retry_ms": 1}})
+        return dev.respond(wire)
 
     return FakePort(respond), state
+
+
+def test_fake_device_answers_as_the_vectors():
+    """The fake firmware of these tests against the gray session: every answer of a step that is not refused is the
+    vector's, a refused step is refused with the same code, and its glass is the vector's pixels."""
+    dev, shown, refused = device("gray"), 0, 0
+    for st in session("gray")["steps"]:
+        wire = bytes.fromhex(st["tx"])
+        items = [it for it in codec.LinkParser().feed(dev.respond(wire)) if it[0] == "frame"]
+        reply, want = codec.cbor_decode(items[0][3]), plain(st["resp"])
+        if "err" in want:
+            assert reply.get("err") == want["err"], st["name"]
+            refused += 1
+        else:
+            assert reply == want, st["name"]
+        if "pixels" in st:
+            assert dev.pixels().hex() == st["pixels"], st["name"]
+            shown += 1
+    assert shown >= 20 and refused >= 30
 
 
 def picture(name):
@@ -100,14 +105,85 @@ def test_hello_show_clear():
     d = Display(port)
     hello = d.hello()
     assert fw.is_display_firmware(hello) and (hello["w"], hello["h"], hello["depths"]) == (16, 8, [1, 2])
-    assert fw.show_png(d, picture("gray2"), hello) == {"depth": 2, "ms": 0}
-    assert fw.clear(d) == {"depth": 1, "ms": 0}
+    assert hello["partial_depths"] == [1] and hello["modes"] == list(fw.MODES) and hello["full_every"] == 20
+    whole = {"x": 0, "y": 0, "w": 16, "h": 8}
+    assert fw.show_png(d, picture("gray2"), hello) == {"depth": 2, "ms": 0, "mode": "full", "why": "depth", **whole}
+    assert fw.clear(d) == {"depth": 1, "ms": 0, "mode": "full", "why": "asked", **whole}
     assert state["seen"] == [fw.HELLO, fw.SHOW_BEGIN, fw.SHOW_CHUNK, fw.SHOW_END, fw.CLEAR]
+
+
+def test_partial_is_the_default_and_the_modes():
+    """A plain show updates what changed; show_area and each mode send the keys of the spec; the answer says what ran."""
+    port, state = replay("gray")
+    d, dev = Display(port), state["device"]
+    hello = d.hello()
+    rows = bytearray(b"\xff" * 16)
+    assert fw.show_png(d, fw.write_png(16, 8, 1, bytes(rows)), hello)["why"] == "first"
+    rows[5] = 0x0f  # the right byte of row 2
+    reply = fw.show_png(d, fw.write_png(16, 8, 1, bytes(rows)), hello)
+    assert (reply["mode"], reply["why"], reply["x"], reply["y"], reply["w"], reply["h"]) == ("partial", "changed", 8, 2, 8, 1)
+    assert fw.describe(reply) == "partial (changed) 8,2 8x1 depth 1 0 ms"
+    assert fw.show_png(d, fw.write_png(16, 8, 1, bytes(rows)), hello)["mode"] == "none"
+    box = fw.write_png(8, 4, 1, bytes(4))
+    assert fw.show_area(d, box, hello, 0, 4)["mode"] == "partial"
+    for mode, passes in (("partial_all", None), ("inverse", None), ("passes", 3), ("full", None), ("partial", None)):
+        reply = fw.show_area(d, box, hello, 8, 0, mode, passes, force=True)
+        assert reply["mode"] == ("none" if mode == "partial" else mode), mode
+        begin = [p for c, p in dev.requests if c == fw.SHOW_BEGIN][-1]
+        assert list(begin) == ["size", "x", "y", "mode"] + ["passes"] * bool(passes) and begin["mode"] == mode
+    assert dev.pixels()[:16] == b"\x01" * 8 + bytes(8) and dev.pixels()[16 * 4:16 * 4 + 16] == bytes(8) + b"\x01" * 8
+    assert fw.full_every(d) == 20 and fw.full_every(d, 3) == 3 and fw.full_every(d) == 3
+    with pytest.raises(fw.Refused) as e:
+        fw.full_every(d, 251)
+    assert e.value.err == 2
+
+
+def test_modes_the_board_cannot_do_are_not_sent():
+    """The library refuses before sending what hello says the board cannot do; the device refuses it too."""
+    dev = device("bwry")
+    dev.depths = [1]
+    d = Display(FakePort(dev.respond))
+    hello = d.hello()
+    png1 = fw.write_png(16, 8, 1, bytes(16))
+    before = len(dev.requests)
+    for kw in ({"mode": "partial"}, {"mode": "inverse"}, {"x": 0, "y": 0}, {"mode": "passes", "passes": 2}):
+        with pytest.raises(DisplayError, match="does not do|no partial refresh"):
+            fw.show_png(d, png1, hello, **kw)
+    for kw, text in (({"x": 0}, "come together"), ({"mode": "fast"}, "mode is one of"), ({"passes": 2}, "only with it"),
+                     ({"mode": "passes"}, "only with it")):
+        with pytest.raises(DisplayError, match=text):
+            fw.show_png(d, png1, hello, **kw)
+    assert len(dev.requests) == before
+    with pytest.raises(fw.Refused) as e:  # the device itself, asked behind the library's back
+        fw.request(d, fw.SHOW_BEGIN, {"size": len(png1), "mode": "partial"})
+    assert e.value.err == 36 and "MODE 36" in str(e.value)
+    assert fw.show_png(d, png1, hello)["why"] == "board"
+    # a firmware from before the modes: a plain show still works, anything else is refused here
+    old = {k: v for k, v in hello.items() if k not in ("modes", "partial_depths", "full_every")}
+    assert fw.target(old) == {} and fw.target(old, mode="full") == {}
+    with pytest.raises(DisplayError, match="update it"):
+        fw.target(old, mode="partial")
+
+
+def test_changed_rect_and_crop():
+    a = bytearray(b"\xff" * (4 * 6))  # 32 x 6 at 1 bit
+    b = bytearray(a)
+    assert fw.changed_rect(bytes(a), bytes(b), 32, 6, 1) is None
+    b[1 * 4 + 2] = 0xfe
+    b[3 * 4 + 3] = 0x7f
+    rect = fw.changed_rect(bytes(a), bytes(b), 32, 6, 1)
+    assert rect == (16, 1, 16, 3)
+    w, h, bits, rows = fw.png_rows(fw.crop_png(bytes(b), 32, 1, rect))
+    assert (w, h, bits, rows) == (16, 3, 1, b"\xfe\xff\xff\xff\xff\x7f")
+    # 4 bit: a byte is two pixels, the rectangle still starts and ends on a multiple of 8
+    a4, b4 = bytes(16 * 2), bytearray(16 * 2)
+    b4[16 + 5] = 0x10
+    assert fw.changed_rect(a4, bytes(b4), 32, 2, 4) == (8, 1, 8, 1)
 
 
 def test_busy_guard():
     port, state = replay("gray", busy_first=2)
-    assert fw.clear(Display(port)) == {"depth": 1, "ms": 0}
+    assert fw.clear(Display(port))["mode"] == "full"
     assert state["seen"] == [fw.CLEAR] * 3
     port, state = replay("gray", busy_first=5)
     with pytest.raises(fw.Refused) as e:
@@ -116,13 +192,12 @@ def test_busy_guard():
 
 
 def test_refusal_guard():
-    port, _ = replay("bwry")
+    port, _ = replay("gray")
     d = Display(port)
     hello = d.hello()
-    assert hello["colors"] == ["black", "white", "red", "yellow"]
     with pytest.raises(fw.Refused) as e:
-        fw.show_png(d, picture("gray2"), hello)
-    assert e.value.err == 34 and "indexed PNG" in e.value.msg and "DEPTH 34" in str(e.value)
+        fw.show_png(d, picture("gray4"), hello)
+    assert e.value.err == 34 and "DEPTH 34" in str(e.value)
     with pytest.raises(DisplayError, match="the device takes"):
         fw.show_png(d, bytes(hello["max_png"] + 1), hello)
 

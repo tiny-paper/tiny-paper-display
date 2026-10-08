@@ -346,6 +346,15 @@ typedef struct {
     /* Every link photo out, uploads kept (a new source, album.md "Fill"), a few per index write: the number deleted.
      * NULL: del one by one. */
     int (*del_links)(void *ctx);
+    /* A layout source's album (album.md "Layout sources"): album mode on any board; a picture is kept as it was served
+     * (kind file) and the layout's widget shows it from that file: no raster, no decode at a pick. */
+    bool files;
+    /* files: the bytes one more picture counts for in the window (a picture file at most); NULL: the screen's photo */
+    uint32_t (*photo)(void *ctx);
+    /* Before a task's run (and before asking whether it is in album mode): the album the calls above work on is task
+     * `task`'s (a layout source's own; the callee may set `files` for it); after it, task -1: the device's again.
+     * NULL: one album. */
+    void (*select)(void *ctx, int task);
 } tph_album_t;
 
 /* The image relay (docs/spec/image-fetch.md "Relay", config `image_relay`): image steps ask it for the part of the
@@ -372,6 +381,36 @@ typedef struct {
     uint16_t w, h;
     bool fill; /* fills the box (cropped) instead of fitting inside it */
 } tph_image_box_t;
+/* The largest file a box's picture becomes, with its header (the box's own gray BMP, image-fetch.md "Large
+ * pictures"), and the most this board keeps of one picture file (image-fetch.md "Fixed endpoints" File cap): what
+ * a share of the image area must hold (store.md "Image area" Shared). */
+static inline uint32_t tph_image_box_bytes(const tph_image_box_t *box)
+{
+    /* the 20-byte file header, a BMP's 118 (file header 14, info header 40, 16 palette entries), rows of 4 bits */
+    uint64_t n = (uint64_t)((((uint32_t)box->w * 4u + 31u) / 32u) * 4u) * box->h + 118u + 20u;
+    return n > UINT32_MAX ? UINT32_MAX : (uint32_t)n;
+}
+static inline uint32_t tph_image_file_max(const hal_board_t *board)
+{
+    return board && board->memory_kb_max <= 64 ? 256u * 1024u : 2048u * 1024u;
+}
+/* Most bytes for a progressive JPEG's coefficient store on this board (assets.md "JPEG", sdk limits.md): 4 MiB on the
+ * PSRAM boards (a 1536 x 1024 preview's luma at full size is 3 MiB; bigger ones take a smaller scale), 0 on the
+ * ESP32-C3 boards (the store needs more RAM than they have: the photo path decodes theirs in bands, a layout's
+ * picture widget draws none, widgets.md "Pictures"). The one rule for the photo path and the layouts; a build
+ * without the decoder (imgdec_progressive) decodes none whatever the bound. */
+#define TPH_IMG_PROG_MAX (4u << 20)
+static inline uint32_t tph_image_prog_max(const hal_board_t *board)
+{
+    return tph_image_file_max(board) > 256u * 1024u ? TPH_IMG_PROG_MAX : 0;
+}
+/* A box the board holds whole in every form its picture is stored in: that file (more than a relay's JPEG of the
+ * box) is within the file cap. */
+static inline bool tph_image_box_fits(const hal_board_t *board, uint16_t w, uint16_t h)
+{
+    tph_image_box_t box = {.w = w, .h = h};
+    return w && h && tph_image_box_bytes(&box) <= tph_image_file_max(board);
+}
 
 /* Inputs that stay fixed for one instance. Buffers must outlive the instance. */
 typedef struct {

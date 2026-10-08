@@ -42,18 +42,42 @@ static uint64_t h_now(void *ctx)
     return hal_rtc_us();
 }
 
-static int h_begin(void *ctx, uint8_t depth, bool bwry, bool image)
+static int h_begin(void *ctx, uint8_t depth, bool bwry, bool image, usbdisp_drive_t drive)
 {
     (void)ctx;
     hal_panel_palette(bwry ? GFX_PAL_BWRY : GFX_PAL_GRAY);
     hal_panel_new_image(image);
-    return hal_panel_begin(depth, HAL_REFRESH_FULL);
+    if (drive != USBDISP_DRIVE_FULL)
+        hal_panel_partial_all(drive == USBDISP_DRIVE_PARTIAL_ALL);
+    return hal_panel_begin(depth, drive == USBDISP_DRIVE_FULL ? HAL_REFRESH_FULL : HAL_REFRESH_PARTIAL);
 }
 
-static int h_write_rows(void *ctx, const tiny_rect_t *r, const uint8_t *rows, size_t stride)
+static int h_write_rows(void *ctx, const tiny_rect_t *r, const uint8_t *prev, const uint8_t *rows, size_t stride)
 {
     (void)ctx;
-    return hal_panel_write(r, NULL, rows, stride);
+    return hal_panel_write(r, prev, rows, stride);
+}
+
+static bool h_gates(void *ctx, usbdisp_gates_t *g)
+{
+    (void)ctx;
+    hal_gate_clocks_t c;
+    if (!hal_panel_gate_clocks(&c))
+        return false;
+    *g = (usbdisp_gates_t){c.edges, c.frames, c.rows, c.per, c.ok};
+    return true;
+}
+
+static int h_kv_get(void *ctx, const char *key, void *buf, size_t cap)
+{
+    (void)ctx;
+    return hal_kv_get(key, buf, cap);
+}
+
+static int h_kv_set(void *ctx, const char *key, const void *buf, size_t len)
+{
+    (void)ctx;
+    return hal_kv_set(key, buf, len);
 }
 
 static int h_refresh(void *ctx)
@@ -80,12 +104,18 @@ void usbdisp_hal_cfg(usbdisp_cfg_t *cfg, const char *fw)
 {
     const hal_board_t *b = hal_board();
     memset(cfg, 0, sizeof *cfg);
+    hal_panel_fresh_ram(true); /* awake, and a wake is a full refresh: no redrive bitmap file per partial (issue #214) */
     cfg->fw = fw;
     cfg->board = b->id;
     cfg->w = b->panel_w;
     cfg->h = b->panel_h;
     cfg->bwry = b->colors == TINY_COLORS_BWRY;
     cfg->depths = cfg->bwry ? 1 : b->depths & 7;
+    /* partial refresh: 1 bit where the board has one, the gray depths where its panel takes gray partials */
+    if (!cfg->bwry && b->partial_refresh)
+        cfg->partial_depths = (uint8_t)(1 | (hal_panel_gray_partial() ? cfg->depths & 6 : 0));
+    cfg->partial_all = cfg->partial_depths && hal_panel_partial_all(false);
+    cfg->full_every = USBDISP_FULL_EVERY;
     cfg->rows_bottom_up = b->rows_bottom_up;
     cfg->band_rows = (uint16_t)((b->panel_h + USBDISP_BANDS - 1) / USBDISP_BANDS);
     cfg->read = h_read;
@@ -97,5 +127,8 @@ void usbdisp_hal_cfg(usbdisp_cfg_t *cfg, const char *fw)
     cfg->panel_write = h_write_rows;
     cfg->panel_refresh = h_refresh;
     cfg->panel_sleep = h_sleep;
+    cfg->panel_gates = h_gates;
+    cfg->kv_get = h_kv_get;
+    cfg->kv_set = h_kv_set;
     cfg->log = h_log;
 }

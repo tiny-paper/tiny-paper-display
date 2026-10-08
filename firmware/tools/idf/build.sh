@@ -79,7 +79,8 @@ fi
 
 # Guard: the app must leave its board's headroom in the slot (boards/<board>/caps.json slot_headroom_bytes); the app only
 [ "$PROJ" != app ] || python3 "$FW/tools/check_slot.py" "$BOARD" "$B/tiny_paper.bin"
-# Guards of the display firmware (docs/usb-display.md): it fits the same slot, and no radio or network code is linked
+# Guards of the display firmware (docs/usb-display.md): it fits the same slot; no WiFi and no network code is linked,
+# and Bluetooth is linked only through hal_esp's ble_link.c (started behind the stored setting, off by default)
 if [ "$PROJ" = display ]; then
     python3 "$FW/tools/check_slot.py" "$BOARD" "$B/tiny_display.bin"
     python3 "$FW/tools/check_no_radio.py" "$B/tiny_display.map"

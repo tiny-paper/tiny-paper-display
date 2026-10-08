@@ -2,7 +2,7 @@
 import pytest
 
 from conftest import png
-from tinypaper_display.png_image import decode_png
+from tiny_paper_display.png_image import decode_png
 
 
 @pytest.mark.parametrize("filt,encoded", [(0, b"\x0a\x14"), (1, b"\x0a\x0a"),

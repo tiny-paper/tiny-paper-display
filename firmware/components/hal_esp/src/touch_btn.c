@@ -20,6 +20,10 @@ static void end(tbtn_t *b, const char *why)
     b->why = why;
 }
 
+/* The ends have no holds (design/responsiveness.md Slow steps): a press that never touched the middle zone and lasts
+ * this long is a resting object, so the app is not kept busy for the 8 s of the general rule (device 2026-10-08). */
+int64_t tbtn_rest_us(uint8_t zones) { return (zones & 2u) ? TBTN_REST_US : TBTN_SIDE_REST_US; }
+
 /* Rules that end a press by time (checked before every read and on every query). */
 static void check(tbtn_t *b, int64_t now)
 {
@@ -27,7 +31,8 @@ static void check(tbtn_t *b, int64_t now)
         return;
     if (now - b->last_us > TBTN_GAP_US)
         end(b, "gap");
-    else if (now - b->since_us > TBTN_REST_US) {
+    else if (now - b->since_us > tbtn_rest_us(b->zones) &&
+             (b->zones & 2u ? true : now - b->touched_us <= TBTN_LATE_US)) { /* an end press: a stale one is a late release */
         end(b, "rest"); /* a resting object, never a press: no input, the chip is re-baselined (tbtn_reseed_take) */
         b->rest = b->reseed = true;
     } else if (now - b->since_us > TBTN_MAX_US)

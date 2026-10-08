@@ -518,6 +518,7 @@ extern "C" int epdp_partial(int y0, int y1)
     for (int i = 0; i < ns && rc == BBEP_SUCCESS; i++) {
         int64_t t = esp_timer_get_time();
         epd_wave_masks(st[i].phase, s_p, s_c, s_fresh, s_wave.redrive, prev, cur, n);
+        epd_wave_drive(s_p, s_c, prev, cur, n, &s_given.drv[st[i].phase]);
         s_epd.setPasses(st[i].frames, s_full_passes);
         rc = on_panel_core([&] { return s_epd.partialUpdate(i + 1 < ns, first, last); });
         s_wave_ms.ms[st[i].phase] = (uint16_t)((esp_timer_get_time() - t) / 1000);
@@ -600,14 +601,17 @@ extern "C" int epdp_gray_partial(const epdp_gwin_t *win, int nw, const uint8_t *
     for (int i = 0; i < ns && rc == BBEP_SUCCESS; i++) {
         memset(prev, 0xff, n);
         memset(cur, 0xff, n);
+        uint32_t drv = 0;
         for (int k = 0; k < nw; k++) {
             const epdp_gwin_t &g = win[k];
             for (int r = 0; r < g.h; r++) {
                 size_t o = (size_t)(g.y + r) * ds + (size_t)g.x / 8;
                 epd_gpart_row(st[i].kind, st[i].j, matrix, passes, g.old4 + (size_t)r * g.stride,
                               g.new4 + (size_t)r * g.stride, g.w, prev + o, cur + o, nullptr);
+                drv += epd_gpart_driven(prev + o, cur + o, g.w);
             }
         }
+        if (drv > s_gpart.driven_px) s_gpart.driven_px = drv;
         s_epd.setPasses(st[i].frames, s_full_passes);
         rc = on_panel_core([&] { return s_epd.partialUpdate(i + 1 < ns, 0, H - 1); });
         s_gpart.steps++;
@@ -626,6 +630,7 @@ extern "C" int epdp_gray_partial(const epdp_gwin_t *win, int nw, const uint8_t *
                           g.w, tp, tc, chg);
             uint8_t *f = s_fresh + (size_t)(g.y + r) * ds + (size_t)g.x / 8, *fh = f + n;
             for (int x = 0; x < g.w / 8; x++) {
+                s_gpart.changed_px += (uint32_t)__builtin_popcount(chg[x]);
                 if ((f[x] | fh[x]) & chg[x]) s_fresh_dirty = true;
                 f[x] = (uint8_t)(f[x] & ~chg[x]);
                 fh[x] = (uint8_t)(fh[x] & ~chg[x]);

@@ -1,0 +1,71 @@
+<!doctype html>
+<!-- tiny-paper display: draw on the panel from the browser (Web Serial). Static: this page, sketch-page.js and
+     sketch.js (the main repository's display modules as one file, made by the export) are all it loads; nothing is
+     sent anywhere but to the device on the cable. SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<title>tiny-paper display: sketch</title>
+<style>
+  :root { --bg: #fff; --fg: #111; --mut: #666; --line: #ccc; --bad: #b00020; --ok: #0a7a2f; --sel: #1463d8; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #141414; --fg: #eee; --mut: #999; --line: #444; --bad: #ff6b81; --ok: #5fd38a; --sel: #7fb0ff; } }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; margin: 0 auto; max-width: 960px; padding: 16px; }
+  h1 { font-size: 22px; }
+  nav a { margin-right: 16px; } nav a[aria-current] { font-weight: 600; text-decoration: none; }
+  section { border: 1px solid var(--line); border-radius: 6px; padding: 12px; margin: 12px 0; }
+  button, input { font: inherit; padding: 6px 12px; margin: 4px 8px 4px 0; }
+  button:disabled { opacity: .5; }
+  button[aria-pressed='true'] { outline: 3px solid var(--sel); outline-offset: 1px; }
+  .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+  .swatch { width: 30px; height: 30px; padding: 0; border: 1px solid #777; border-radius: 50%; }
+  canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; border: 1px solid var(--line); margin: 12px 0; touch-action: none; cursor: crosshair; background: #fff; }
+  input[type='number'] { width: 5em; }
+  .warn { color: var(--bad); font-weight: 600; } .ok { color: var(--ok); font-weight: 600; } .mut { color: var(--mut); }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+<nav><a href="index.html">Flash</a><a href="sketch.html" aria-current="page">Sketch</a><a href="api.html">API</a></nav>
+<h1>tiny-paper display: sketch</h1>
+<p>Draw with the mouse, a pen or a finger. Each stroke goes to the panel as a partial update of the area that
+changed; the drawing here is what the panel is brought to.</p>
+<p id="nosupport" class="warn" hidden>This browser cannot reach a USB device (no Web Serial). Use Chrome or Edge on a
+computer. <a href="sketch.html?mock=x">See the page work without a device.</a></p>
+<p id="preview" class="warn" hidden></p>
+
+<section>
+  <button id="connect">Connect</button>
+  <span id="device" class="mut">Plug the display in with a USB data cable, press Connect and pick its port
+  ("USB JTAG/serial debug unit").</span>
+  <p id="install" class="warn" hidden><span id="installwhy"></span> This page needs the display firmware on the
+  device: <a href="index.html">install it on the Flash page</a>, then come back.</p>
+</section>
+
+<section id="pad" hidden>
+  <p id="note" class="mut" hidden></p>
+  <div class="tools">
+    <span id="brushes" role="group" aria-label="Brush size"></span>
+    <span id="swatches" role="group" aria-label="Colour"></span>
+    <button id="eraser" aria-pressed="false">Eraser</button>
+    <button id="undo" disabled>Undo</button>
+    <button id="clear">Clear</button>
+  </div>
+  <canvas id="canvas" aria-label="Sketch, the panel's pixels"></canvas>
+  <div class="tools">
+    <button id="full">Full refresh</button>
+    <label id="fullafterrow">Full refresh by itself after <input id="fullafter" type="number" min="0" max="250">
+    partial updates (0: never)</label>
+  </div>
+  <p id="status" role="status"></p>
+</section>
+
+<p class="mut">No device at hand: the page with a pretend
+<a href="sketch.html?mock=x">TRMNL X</a>, <a href="sketch.html?mock=og">TRMNL OG</a> or
+<a href="sketch.html?mock=picpak">PicPak</a>. What a real panel shows for a stroke is in <a href="api.html">the API</a>
+("Area and refresh mode").</p>
+
+<script type="module" src="sketch-page.js"></script>
+</body>
+</html>

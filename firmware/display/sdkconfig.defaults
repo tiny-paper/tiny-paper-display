@@ -1,9 +1,44 @@
 # tiny-paper display firmware, on top of boards/<board>/sdkconfig.defaults
 
-# No radio, ever: hal_esp builds its network calls as stubs (Kconfig TINY_NO_WIFI) and nothing references the WiFi
-# stack, so the linker leaves it out. tools/check_no_radio.py reads the link map after every build (tools/idf/build.sh).
+# No WiFi and no network, ever: hal_esp builds its network calls as stubs (Kconfig TINY_NO_WIFI) and nothing references
+# the WiFi stack, so the linker leaves it out. tools/check_no_radio.py reads the link map after every build
+# (tools/idf/build.sh): no WiFi, no network stack, and Bluetooth reached only through hal_esp's ble_link.c.
 CONFIG_TINY_NO_WIFI=y
-CONFIG_BT_ENABLED=n
+
+# Bluetooth Low Energy behind the stored setting, off by default (docs/spec/usb-display.md "Bluetooth"): the NimBLE
+# peripheral of hal_esp esp/ble_link.c, started only by main/bt.c when the setting is on. Gated: bonded hosts only,
+# pairing only in the window. Sizes as the app's optional config mode (app/sdkconfig.ble).
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_TINY_BLE=y
+CONFIG_TINY_BLE_GATED=y
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_INTERNAL=y
+CONFIG_BT_NIMBLE_LOG_LEVEL_NONE=y
+CONFIG_BT_NIMBLE_PRINT_ERR_NAME=n
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
+CONFIG_BT_NIMBLE_GATT_CLIENT=n
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+CONFIG_BT_NIMBLE_MAX_BONDS=3
+CONFIG_BT_NIMBLE_MAX_CCCDS=4
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+CONFIG_BT_NIMBLE_SM_LEGACY=n
+CONFIG_BT_NIMBLE_SM_SC=y
+CONFIG_BT_NIMBLE_SM_SC_ONLY=1
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=247
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=4096
+CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=12
+CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=12
+CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=12
+CONFIG_BT_NIMBLE_TRANSPORT_EVT_COUNT=16
+CONFIG_BT_NIMBLE_ENABLE_CONN_REATTEMPT=n
+CONFIG_BT_NIMBLE_50_FEATURE_SUPPORT=n
+CONFIG_BT_CTRL_BLE_MAX_ACT=2
+CONFIG_BT_CTRL_BLE_SCAN=n
+CONFIG_BT_CTRL_DTM_ENABLE=n
+# No WiFi to share the radio with: without this the startup code would set up coexistence at every boot, Bluetooth
+# on or off (check_no_radio.py: coexistence code linked for libesp_system's startup, not for the gate)
+CONFIG_ESP_COEX_SW_COEXIST_ENABLE=n
 
 CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
 # unplugged it wakes every few seconds to look for a USB host (main/main.c): no image check on those wakes
