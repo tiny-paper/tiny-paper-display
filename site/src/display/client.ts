@@ -9,6 +9,8 @@ export interface DisplayHello {
   partial_depths: number[]; modes: string[]; full_every: number;
   /** The panel tuning now (usb-display.md "Tuning"), only where the board has knobs. */
   tuning?: Record<string, number | string>;
+  /** The picture the device keeps (and its depth is in the hash), absent when it keeps none or does not know it. */
+  fingerprint?: string;
 }
 export const DISPLAY_ERRORS: Record<number, string> = {
   1: 'UNKNOWN_CMD', 2: 'BAD_REQUEST', 3: 'BUSY', 10: 'IO', 11: 'SEQUENCE', 13: 'TOO_LARGE',

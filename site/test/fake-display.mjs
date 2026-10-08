@@ -36,7 +36,7 @@ const tuningOf = (vals) => Object.fromEntries(KNOBS.map(([n, , , , w], i) => [n,
  */
 export function fakeDisplay(over = {}) {
   const knobs = KNOBS.map((k) => k[3]);
-  const dev = { hello: over === null ? null : { ...HELLO, ...over }, shows: [], pngs: [], refuse: null, port: null, sets: [], knobs, log: {} };
+  const dev = { hello: over === null ? null : { ...HELLO, ...over }, shows: [], pngs: [], refusals: [], refuse: null, port: null, sets: [], knobs, log: {} };
   if (dev.hello && dev.hello.tuning === true) dev.hello.tuning = tuningOf(knobs); // `tuning: true`: a board with the knobs
   let begin = {};
   let png = new Uint8Array();
@@ -72,9 +72,22 @@ export function fakeDisplay(over = {}) {
     else if (cmd === 10) {
       const v = new DataView(png.buffer);
       const show = { mode: begin.mode, ...(begin.passes === undefined ? {} : { passes: begin.passes }), x: begin.x, y: begin.y, w: v.getUint32(16), h: v.getUint32(20), bits: png[24], signature: toHex(png.subarray(0, 8)) };
+      // `dev.keeps` (a depth, or null for none) models the frame the firmware keeps (usbdisp_area.c): a rectangle at another depth
+      // is refused DEPTH, and the frame is forgotten; a rectangle without a frame is a full refresh; a whole picture is kept
+      const area = begin.x !== undefined;
+      let forced = null;
+      if (dev.keeps !== undefined && area) {
+        if (dev.keeps !== null && dev.keeps !== show.bits) {
+          res = { err: 34, msg: `the picture shown has ${dev.keeps} bit and the rectangle ${show.bits} bit: an area must have the same depth` };
+          dev.keeps = null; dev.refusals.push(res.msg);
+          return [frameHex(seq, cmd | 0x80, toHex(Uint8Array.from(cbor(res))))];
+        }
+        if (dev.keeps === null) forced = 'first';
+      }
+      if (dev.keeps !== undefined && (!area || forced)) dev.keeps = show.bits;
       dev.shows.push(show);
       dev.pngs.push(Uint8Array.from(png));
-      res = begin.mode && begin.mode !== 'full'
+      res = forced ? { mode: 'full', why: forced, depth: show.bits, ms: 9, x: 0, y: 0, w: dev.hello.w, h: dev.hello.h } : begin.mode && begin.mode !== 'full'
         ? { mode: begin.mode, why: begin.mode === 'partial' ? 'changed' : 'asked', depth: show.bits, ms: 7, x: begin.x ?? 0, y: begin.y ?? 0, w: show.w, h: show.h }
         : { mode: 'full', why: 'asked', depth: show.bits, ms: 9, x: 0, y: 0, w: dev.hello.w, h: dev.hello.h };
     } else res = { err: 1, msg: 'not a display command' };

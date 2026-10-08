@@ -1,4 +1,4 @@
-// esbuild 0.28.2, 13 source files of site/src (MIT): do not edit, run `npm run build` in site/.
+// esbuild 0.28.2, 14 source files of site/src (MIT): do not edit, run `npm run build` in site/.
 // src/display/client.ts
 var DISPLAY_MODES = ["full", "partial", "partial_all", "inverse", "passes"];
 var DISPLAY_ERRORS = {
@@ -448,6 +448,35 @@ function packRows(px, w, h, depth) {
   return out;
 }
 
+// src/display/fingerprint.ts
+var OFFSET = [2216829733, 3421674724];
+function fingerprintOf(levels, w, h, depth, color = false) {
+  let lo = OFFSET[0], hi = OFFSET[1];
+  const feed = (b) => {
+    lo = (lo ^ b) >>> 0;
+    const m = lo * 435;
+    const carry = Math.floor(m / 4294967296);
+    const nlo = m % 4294967296;
+    hi = (hi * 435 + carry + lo * 256) % 4294967296;
+    lo = nlo;
+  };
+  for (const b of [w >> 8 & 255, w & 255, h >> 8 & 255, h & 255, depth, color ? 1 : 0]) feed(b);
+  for (let y = 0; y < h; y++) {
+    let acc = 0, n = 0;
+    for (let x = 0; x < w; x++) {
+      acc = acc << depth | levels[y * w + x];
+      n += depth;
+      if (n === 8) {
+        feed(acc);
+        acc = 0;
+        n = 0;
+      }
+    }
+    if (n) feed(acc << 8 - n & 255);
+  }
+  return `${hi.toString(16).padStart(8, "0")}${lo.toString(16).padStart(8, "0")}`;
+}
+
 // src/display/sketchSender.ts
 var SKETCH_TIMING = { liftMs: 150, everyMs: 700, busyMs: 5e3 };
 var FULL_AFTER = 30;
@@ -494,17 +523,23 @@ var SketchSender = class {
   // why the next full refresh was asked, said in its status line
   strokeAt = 0;
   sentAt = 0;
-  /** A device (again): it shows something else, so the whole drawing goes out once. null: no device. */
+  /**
+   * A device (again): it shows something else, so the whole drawing goes out once, unless hello says it keeps exactly this
+   * drawing at this depth (its fingerprint is ours): then rectangles are enough. A rectangle is never sent to a device that
+   * may keep another picture or another depth. null: no device.
+   */
   attach(client, hello = null) {
     this.client = client;
     this.hello = hello;
     this.link++;
-    this.whole = true;
+    const m = this.model, kept2 = !!(hello && client && hello.fingerprint && this.ink.partial && !this.ink.color && hello.fingerprint === fingerprintOf(m.values(m.whole), m.w, m.h, this.ink.depth));
+    this.whole = !kept2;
     this.partials = 0;
     this.lightened = 0;
     this.drawing = false;
     this.cancel();
-    if (client && this.ink.partial) this.schedule(Date.now(), true);
+    if (client && this.ink.partial && !kept2) this.schedule(Date.now(), true);
+    else if (client && kept2) this.say("idle", "The device already keeps this drawing: nothing to send until you draw.");
     else if (!client) this.say("idle", "No device connected: the drawing is kept and sent when one connects.");
   }
   /** The pen went down. */
@@ -605,7 +640,7 @@ var SketchSender = class {
       const weak = lighter && !clean && this.erase === "auto" && r.mode === "partial";
       if (weak) this.lightened++;
       const trace = weak && this.lightened < LIGHTEN_AFTER ? ` Erasing by a partial update can leave faint traces at ${this.ink.depth} bit: a full refresh follows after ${LIGHTEN_AFTER} such sends (${this.lightened} so far).` : "";
-      this.say("ok", `Asked for ${what}. ${displayAnswer(r)} ${Date.now() - this.sentAt} ms in all.${lost && !all ? " The device had lost its picture: sending the whole drawing." : ""}${note}${trace}`);
+      this.say("ok", `Asked for ${what}. ${displayAnswer(r)} ${Date.now() - this.sentAt} ms in all.${lost && !all ? ` The device kept another picture (reason: ${String(r.why)}): sending the whole drawing once.` : ""}${note}${trace}`);
     } catch (e) {
       if (link !== this.link) return;
       if (dirty) m.markDirty(dirty, lighter);
@@ -614,7 +649,7 @@ var SketchSender = class {
         this.note = note;
       }
       this.whole = true;
-      this.say("error", `Asked for ${what}. Not shown: ${e.message}. ${this.client === client ? "Draw on or press Full refresh to send the whole drawing again." : ""}`.trim());
+      this.say("error", `Asked for ${what}. Not shown: ${e.message}. ${this.client === client ? "The device may show something else now: the next update is the whole drawing (draw on, or press Full refresh)." : ""}`.trim());
       return;
     } finally {
       this.sending = false;
@@ -1370,6 +1405,7 @@ export {
   cleanMode,
   displayAnswer,
   displayHello,
+  fingerprintOf,
   packedPng,
   parseDebug,
   pickLines,

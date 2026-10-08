@@ -10,6 +10,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { startSketchPage } from '../sketch-page.js';
+import { fingerprintOf } from '../sketch.js';
 import { inflateSync } from 'node:zlib';
 import { FakeImageData, fakeDocument, pointer } from './fake-dom.mjs';
 import { fakeDisplay } from './fake-display.mjs';
@@ -139,7 +140,7 @@ test('a refusal is said in plain words and the drawing is not lost', async () =>
   dev.refuse = { err: 37, msg: 'rect' };
   stroke([[40, 40], [60, 40]]);
   await until('the refusal', () => el('status').dataset.state === 'error');
-  assert.match(el('status').textContent, /Not shown: The rectangle is outside the panel or misaligned: rect\. Draw on or press Full refresh/);
+  assert.match(el('status').textContent, /Not shown: The rectangle is outside the panel or misaligned: rect\. The device may show something else now: the next update is the whole drawing/);
   assert.equal(el('status').className, 'warn');
   el('full').onclick();
   await until('the whole drawing again', () => dev.shows.at(-1).mode === 'full' && dev.shows.length === 2 && el('status').dataset.state === 'ok');
@@ -669,4 +670,70 @@ test('Grays: the page starts at 1 bit with two swatches on a gray capable device
   assert.equal(bw.el('graysrow').hidden, true);
   await apply({ el }, { sketch: { depth: 2 } });
   await until('depth 2', () => el('swatches').children.length === 4);
+});
+
+// ---- a device that keeps another picture or depth: the page never sends it a rectangle first
+test('Connect to a device that keeps another frame or depth: the first send is the whole canvas, the second a rectangle, no refusal', async () => {
+  for (const [h, keeps, fingerprint] of [[490, 4, '0123456789abcdef'], [491, 1, 'fedcba9876543210'], [492, null, undefined]]) {
+    const dev = fakeDisplay({ h, ...XDEV, ...(fingerprint ? { fingerprint } : {}) });
+    dev.keeps = keeps; // the frame the device kept from before (a 4 bit test pattern, another 1 bit picture, none)
+    const p = open({ dev });
+    await p.page.connect();
+    await until('the first send', () => dev.shows.length === 1 && p.el('status').dataset.state === 'ok');
+    assert.deepEqual([dev.shows[0].mode, dev.shows[0].x, dev.shows[0].w, dev.shows[0].h, dev.shows[0].bits], ['full', undefined, 1872, h, 1], `kept ${keeps}: the whole canvas first`);
+    p.stroke([[300, 200], [340, 240]]);
+    await shown(dev, 2);
+    assert.deepEqual([dev.shows[1].mode, dev.shows[1].x !== undefined, dev.shows[1].bits], ['partial', true, 1], 'then a rectangle');
+    await said(p.el, /partial update of/);
+    assert.deepEqual(dev.refusals, [], 'the device refused nothing');
+  }
+});
+
+test('Connect to a device that keeps this very drawing: nothing is sent, the first stroke is a rectangle', async () => {
+  const h = 493;
+  const blank = fingerprintOf(new Uint8Array(1872 * h).fill(1), 1872, h, 1);
+  const dev = fakeDisplay({ h, ...XDEV, fingerprint: blank });
+  dev.keeps = 1;
+  const p = open({ dev });
+  await p.page.connect();
+  await until('connected', () => /already keeps this drawing/.test(p.el('status').textContent));
+  await sleep(300);
+  assert.equal(dev.shows.length, 0, 'the device keeps the same frame: no whole-canvas send');
+  p.stroke([[300, 200], [340, 240]]);
+  await shown(dev, 1);
+  assert.equal(dev.shows[0].mode, 'partial');
+  assert.deepEqual(dev.refusals, []);
+});
+
+test('A rectangle the device refuses for its depth is said in words, the frame is forgotten and the whole canvas goes out once', async () => {
+  const dev = fakeDisplay({ h: 494, ...XDEV });
+  const p = open({ dev });
+  await p.page.connect();
+  await until('first send', () => dev.shows.length === 1 && p.el('status').dataset.state === 'ok');
+  dev.keeps = 4; // another picture appears on the device behind the page's back
+  p.stroke([[300, 200], [340, 240]]);
+  await until('the refusal', () => /Not shown/.test(p.el('status').textContent));
+  assert.match(p.el('status').textContent, /the picture shown has 4 bit and the rectangle 1 bit/);
+  assert.match(p.el('status').textContent, /the next update is the whole drawing/);
+  p.stroke([[500, 300], [540, 340]]); // the next update: the whole drawing, once, then rectangles again
+  await shown(dev, 2);
+  assert.deepEqual([dev.shows[1].mode, dev.shows[1].x, dev.shows[1].w], ['full', undefined, 1872]);
+  await said(p.el, /Asked for a full refresh/);
+  p.stroke([[600, 200], [640, 240]]);
+  await shown(dev, 3);
+  assert.equal(dev.shows[2].mode, 'partial');
+  assert.equal(dev.refusals.length, 1, 'one refusal, then none');
+});
+
+test('The fingerprint of the page is the one of the spec: the vectors', async () => {
+  const vectors = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'docs/spec/vectors/usb-display.json'), 'utf8')).fingerprints;
+  let n = 0;
+  for (const v of vectors) {
+    if (v.color) continue;
+    const png = Uint8Array.from(Buffer.from(v.png, 'hex'));
+    const w = new DataView(png.buffer).getUint32(16), h = new DataView(png.buffer).getUint32(20);
+    assert.equal(fingerprintOf(Uint8Array.from(levels(png)), w, h, v.bits), v.fingerprint, `${v.bits} bit`);
+    n++;
+  }
+  assert.ok(n >= 6);
 });

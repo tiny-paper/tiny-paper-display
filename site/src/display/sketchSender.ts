@@ -4,6 +4,7 @@
 import { packRows } from '../protocol/album.ts';
 import type { CborMap } from '../protocol/cbor.ts';
 import { DisplayError, displayAnswer, type DisplayHello, type DisplayMode } from './client.ts';
+import { fingerprintOf } from './fingerprint.ts';
 import { packedPng } from './png.ts';
 import { SketchModel, sketchInk, type SketchInk } from './sketchModel.ts';
 
@@ -56,12 +57,19 @@ export class SketchSender {
 
   constructor(readonly model: SketchModel, readonly ink: SketchInk, private readonly timing: SketchTiming = SKETCH_TIMING) {}
 
-  /** A device (again): it shows something else, so the whole drawing goes out once. null: no device. */
+  /**
+   * A device (again): it shows something else, so the whole drawing goes out once, unless hello says it keeps exactly this
+   * drawing at this depth (its fingerprint is ours): then rectangles are enough. A rectangle is never sent to a device that
+   * may keep another picture or another depth. null: no device.
+   */
   attach(client: SketchShow | null, hello: DisplayHello | null = null): void {
     this.client = client; this.hello = hello; this.link++;
-    this.whole = true; this.partials = 0; this.lightened = 0; this.drawing = false;
+    const m = this.model, kept = !!(hello && client && hello.fingerprint && this.ink.partial && !this.ink.color &&
+      hello.fingerprint === fingerprintOf(m.values(m.whole), m.w, m.h, this.ink.depth));
+    this.whole = !kept; this.partials = 0; this.lightened = 0; this.drawing = false;
     this.cancel();
-    if (client && this.ink.partial) this.schedule(Date.now(), true);
+    if (client && this.ink.partial && !kept) this.schedule(Date.now(), true);
+    else if (client && kept) this.say('idle', 'The device already keeps this drawing: nothing to send until you draw.');
     else if (!client) this.say('idle', 'No device connected: the drawing is kept and sent when one connects.');
   }
   /** The pen went down. */
@@ -131,13 +139,13 @@ export class SketchSender {
       const weak = lighter && !clean && this.erase === 'auto' && r.mode === 'partial';
       if (weak) this.lightened++;
       const trace = weak && this.lightened < LIGHTEN_AFTER ? ` Erasing by a partial update can leave faint traces at ${this.ink.depth} bit: a full refresh follows after ${LIGHTEN_AFTER} such sends (${this.lightened} so far).` : '';
-      this.say('ok', `Asked for ${what}. ${displayAnswer(r)} ${Date.now() - this.sentAt} ms in all.${lost && !all ? ' The device had lost its picture: sending the whole drawing.' : ''}${note}${trace}`);
+      this.say('ok', `Asked for ${what}. ${displayAnswer(r)} ${Date.now() - this.sentAt} ms in all.${lost && !all ? ` The device kept another picture (reason: ${String(r.why)}): sending the whole drawing once.` : ''}${note}${trace}`);
     } catch (e) {
       if (link !== this.link) return;
       if (dirty) m.markDirty(dirty, lighter);
       if (full) { this.asked = true; this.note = note; } // not sent: the next send is the whole drawing again
       this.whole = true; // a refused or cut show makes the device forget the frame it kept
-      this.say('error', `Asked for ${what}. Not shown: ${(e as Error).message}. ${this.client === client ? 'Draw on or press Full refresh to send the whole drawing again.' : ''}`.trim());
+      this.say('error', `Asked for ${what}. Not shown: ${(e as Error).message}. ${this.client === client ? 'The device may show something else now: the next update is the whole drawing (draw on, or press Full refresh).' : ''}`.trim());
       return;
     } finally {
       this.sending = false;
