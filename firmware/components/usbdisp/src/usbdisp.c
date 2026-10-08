@@ -138,12 +138,34 @@ void usbdisp_refuse(usbdisp_t *d, const link_frame_t *f, int err, const char *ms
     usbdisp_send(d, f, &w);
 }
 
+static size_t tune_n(const usbdisp_t *d)
+{
+    return d->c.tune_count && d->c.tune_info && d->c.tune_get && d->c.tune_set && d->c.tune_defaults ? d->c.tune_count(d->c.ctx) : 0;
+}
+
+/* tuning: { name: number | word, ... } the knobs now (docs/spec/usb-display.md "Tuning") */
+static void put_tuning(const usbdisp_t *d, cbor_w_t *w)
+{
+    size_t n = tune_n(d);
+    cbor_put_str(w, "tuning");
+    cbor_put_map(w, n);
+    for (size_t i = 0; i < n; i++) {
+        const hal_tune_t *t = d->c.tune_info(d->c.ctx, i);
+        int v = d->c.tune_get(d->c.ctx, i);
+        cbor_put_str(w, t->name);
+        if (t->words)
+            cbor_put_str(w, t->words[v - t->min]);
+        else
+            cbor_put_uint(w, (uint64_t)v);
+    }
+}
+
 static void hello(usbdisp_t *d, const link_frame_t *f)
 {
     static const char *const bwry[] = {"black", "white", "red", "yellow"};
     cbor_w_t w;
     cbor_w_init(&w, d->tx, sizeof d->tx);
-    cbor_put_map(&w, (size_t)(13 + (d->c.bwry ? 1 : 0) + (d->c.bt_open ? 1 : 0)) + 1 + (d->fingerprint[0] != 0));
+    cbor_put_map(&w, (size_t)(13 + (d->c.bwry ? 1 : 0) + (d->c.bt_open ? 1 : 0)) + 1 + (d->fingerprint[0] != 0) + (tune_n(d) > 0));
     cbor_put_str(&w, "proto");
     cbor_put_uint(&w, LINK_PROTO);
     cbor_put_str(&w, "project");
@@ -207,6 +229,8 @@ static void hello(usbdisp_t *d, const link_frame_t *f)
         cbor_put_str(&w, "bt");
         cbor_put_str(&w, d->bt_on ? "on" : "off");
     }
+    if (tune_n(d))
+        put_tuning(d, &w);
     usbdisp_send(d, f, &w);
 }
 
@@ -333,7 +357,99 @@ static void show_end(usbdisp_t *d, const link_frame_t *f)
         usbdisp_show_end(d, f);
 }
 
-/* { full_every?: 0..250 }: the setting is stored and answered; without the key it is only answered. */
+/* Why a tuning value is refused, and what is allowed, in words (<= 120 bytes). */
+static void tune_range(char *out, size_t cap, const hal_tune_t *t)
+{
+    if (!t->words) {
+        snprintf(out, cap, "allowed %d to %d", t->min, t->max);
+        return;
+    }
+    size_t o = (size_t)snprintf(out, cap, "allowed");
+    for (int v = t->min; v <= t->max && o < cap; v++)
+        o += (size_t)snprintf(out + o, cap - o, "%s %s", v == t->min ? "" : ",", t->words[v - t->min]);
+}
+
+#define TUNE_REFUSED_MAX 8
+
+/* set { tuning: { key: value, ... } | "defaults" }: every key is checked on its own; the good ones are applied (from the
+ * next refresh, not stored), each refused one is answered under `refused` with why and the allowed range. */
+static void set_tuning(usbdisp_t *d, const link_frame_t *f, char refused[][LINK_MSG_CAP + 24], char names[][24], int *nref)
+{
+    const uint8_t *p;
+    size_t n;
+    *nref = 0;
+    if (!cbor_map_get(f->payload, f->len, "tuning", 6, &p, &n))
+        return;
+    cbor_r_t r;
+    cbor_item_t it;
+    cbor_r_init(&r, p, n);
+    if (!cbor_read(&r, &it))
+        return;
+    const size_t count = tune_n(d);
+    if (it.type != CBOR_MAP) {
+        if (it.type == CBOR_TSTR && it.len == 8 && !memcmp(it.ptr, "defaults", 8) && count) {
+            d->c.tune_defaults(d->c.ctx);
+            return;
+        }
+        snprintf(names[0], sizeof names[0], "tuning");
+        snprintf(refused[0], sizeof refused[0], count ? "tuning is a map of keys, or \"defaults\"" : "this board has no panel tuning");
+        *nref = 1;
+        return;
+    }
+    for (uint64_t k = 0; k < it.u; k++) {
+        cbor_item_t key, val;
+        if (!cbor_read(&r, &key) || key.type != CBOR_TSTR || !cbor_read(&r, &val))
+            return;
+        if (val.type == CBOR_MAP || val.type == CBOR_ARRAY) { /* the children are not read: the request ends here */
+            if (*nref < TUNE_REFUSED_MAX) {
+                snprintf(names[*nref], sizeof names[0], "%.*s", (int)(key.len < 23 ? key.len : 23), (const char *)key.ptr);
+                snprintf(refused[(*nref)++], sizeof refused[0], "the value is a number or a word");
+            }
+            return;
+        }
+        char name[24];
+        snprintf(name, sizeof name, "%.*s", (int)(key.len < 23 ? key.len : 23), (const char *)key.ptr);
+        char why[LINK_MSG_CAP + 24], range[96];
+        why[0] = 0;
+        size_t idx = count;
+        for (size_t i = 0; i < count; i++)
+            if (!strcmp(d->c.tune_info(d->c.ctx, i)->name, name) && key.len < 24)
+                idx = i;
+        if (!count) {
+            snprintf(why, sizeof why, "this board has no panel tuning");
+        } else if (idx == count) {
+            size_t o = (size_t)snprintf(why, sizeof why, "no such key; known:");
+            for (size_t i = 0; i < count && o < 100; i++)
+                o += (size_t)snprintf(why + o, sizeof why - o, " %s", d->c.tune_info(d->c.ctx, i)->name);
+        } else {
+            const hal_tune_t *t = d->c.tune_info(d->c.ctx, idx);
+            int64_t v = -1;
+            bool have = false;
+            if (val.type == CBOR_UINT && val.u <= 1000) {
+                v = (int64_t)val.u, have = true;
+            } else if (val.type == CBOR_TRUE || val.type == CBOR_FALSE) {
+                v = val.type == CBOR_TRUE, have = t->words && t->max == 1;
+            } else if (val.type == CBOR_TSTR && t->words) {
+                for (int w = t->min; w <= t->max; w++)
+                    if (strlen(t->words[w - t->min]) == val.len && !memcmp(t->words[w - t->min], val.ptr, val.len))
+                        v = w, have = true;
+            }
+            tune_range(range, sizeof range, t);
+            if (!have || v < t->min || v > t->max)
+                snprintf(why, sizeof why, "%s; %s", have ? "out of range" : t->words ? "not one of the words" : "not a whole number", range);
+            else
+                d->c.tune_set(d->c.ctx, idx, (int)v);
+        }
+        if (why[0] && *nref < TUNE_REFUSED_MAX) {
+            snprintf(names[*nref], sizeof names[0], "%s", name);
+            snprintf(refused[(*nref)++], sizeof refused[0], "%s", why);
+        }
+    }
+}
+
+/* { full_every?: 0..250, tuning?: { ... } | "defaults" }: full_every is stored and answered, without the key it is only
+ * answered; tuning (TRMNL X) applies from the next refresh and is not stored. The answer carries `tuning` (the knobs now)
+ * where the board has them, and `refused` { key: why } for the keys not applied. */
 static void set(usbdisp_t *d, const link_frame_t *f)
 {
     uint64_t v;
@@ -351,11 +467,24 @@ static void set(usbdisp_t *d, const link_frame_t *f)
         }
         d->full_every = b;
     }
+    static char refused[TUNE_REFUSED_MAX][LINK_MSG_CAP + 24], names[TUNE_REFUSED_MAX][24];
+    int nref;
+    set_tuning(d, f, refused, names, &nref);
     cbor_w_t w;
     cbor_w_init(&w, d->tx, sizeof d->tx);
-    cbor_put_map(&w, 1);
+    cbor_put_map(&w, 1 + (tune_n(d) > 0) + (nref > 0));
     cbor_put_str(&w, "full_every");
     cbor_put_uint(&w, d->full_every);
+    if (tune_n(d))
+        put_tuning(d, &w);
+    if (nref) {
+        cbor_put_str(&w, "refused");
+        cbor_put_map(&w, (size_t)nref);
+        for (int i = 0; i < nref; i++) {
+            cbor_put_str(&w, names[i]);
+            cbor_put_str(&w, refused[i]);
+        }
+    }
     usbdisp_send(d, f, &w);
 }
 

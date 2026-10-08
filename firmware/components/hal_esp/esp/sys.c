@@ -741,6 +741,11 @@ __attribute__((weak)) void hal_log_hook(const char *line, size_t len) { (void)li
 
 #if !BOARD_PANEL_FASTEPD
 bool hal_live_seconds(void) { return false; } /* TRMNL X only: panel_par.c */
+size_t hal_panel_tune_count(void) { return 0; } /* TRMNL X only: panel_par.c */
+const hal_tune_t *hal_panel_tune_info(size_t i) { (void)i; return NULL; }
+int hal_panel_tune_get(size_t i) { (void)i; return 0; }
+bool hal_panel_tune_set(size_t i, int v) { (void)i; (void)v; return false; }
+void hal_panel_tune_defaults(void) {}
 #if !BOARD_PANEL_BWRY
 bool hal_panel_gray_partial(void) { return false; } /* TRMNL X (panel_par.c), PicPak partial (panel_bwry.c) */
 #endif

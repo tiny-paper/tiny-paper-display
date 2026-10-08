@@ -209,6 +209,21 @@ uint32_t hal_panel_rev(void);
  * sends gray changes as a full refresh. */
 bool hal_panel_gray_partial(void);
 
+/* Panel tuning for experiments from a host (TRMNL X; usbdisp `set { tuning }`): the driver's knobs of the `!tp` console
+ * commands as named integers, each with its range and default. A value applies from the next refresh and is NOT stored
+ * (it lasts until the next restart). `words`: NULL for a number, else the names of min..max (words[v - min]).
+ * Boards without tuning: count 0. */
+typedef struct {
+    const char *name;
+    int16_t min, max, def;
+    const char *const *words;
+} hal_tune_t;
+size_t hal_panel_tune_count(void);
+const hal_tune_t *hal_panel_tune_info(size_t i);
+int hal_panel_tune_get(size_t i);
+bool hal_panel_tune_set(size_t i, int v); /* false: outside min..max, nothing changed */
+void hal_panel_tune_defaults(void);
+
 /* Box partial (the press mark on a panel without a quick partial: PicPak, firmware.md "Press mark"): while
  * true, hal_panel_begin(depth, PARTIAL) is taken also when partial_refresh is false. The areas written must form one
  * window (the same x range, every row of it once); every pixel of it is driven from `next` alone (prev ignored), at

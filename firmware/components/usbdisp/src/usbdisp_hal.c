@@ -68,6 +68,12 @@ static bool h_gates(void *ctx, usbdisp_gates_t *g)
     return true;
 }
 
+static size_t h_tune_count(void *ctx) { (void)ctx; return hal_panel_tune_count(); }
+static const hal_tune_t *h_tune_info(void *ctx, size_t i) { (void)ctx; return hal_panel_tune_info(i); }
+static int h_tune_get(void *ctx, size_t i) { (void)ctx; return hal_panel_tune_get(i); }
+static bool h_tune_set(void *ctx, size_t i, int v) { (void)ctx; return hal_panel_tune_set(i, v); }
+static void h_tune_defaults(void *ctx) { (void)ctx; hal_panel_tune_defaults(); }
+
 static int h_kv_get(void *ctx, const char *key, void *buf, size_t cap)
 {
     (void)ctx;
@@ -128,6 +134,11 @@ void usbdisp_hal_cfg(usbdisp_cfg_t *cfg, const char *fw)
     cfg->panel_refresh = h_refresh;
     cfg->panel_sleep = h_sleep;
     cfg->panel_gates = h_gates;
+    cfg->tune_count = h_tune_count;
+    cfg->tune_info = h_tune_info;
+    cfg->tune_get = h_tune_get;
+    cfg->tune_set = h_tune_set;
+    cfg->tune_defaults = h_tune_defaults;
     cfg->kv_get = h_kv_get;
     cfg->kv_set = h_kv_set;
     cfg->log = h_log;

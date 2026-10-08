@@ -22,6 +22,7 @@
 #ifndef TINY_USBDISP_H
 #define TINY_USBDISP_H
 
+#include "tiny/hal.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -128,6 +129,14 @@ typedef struct {
     int (*panel_refresh)(void *ctx);
     void (*panel_sleep)(void *ctx);
     bool (*panel_gates)(void *ctx, usbdisp_gates_t *g); /* optional: the gate clocks of the last update */
+    /* optional, all or none: the panel's tuning knobs (TRMNL X), set from a host with `set { tuning }` and reported in hello
+     * and every `set` answer as `tuning`: count, info (name, range, default, words), get, set (false: out of range), defaults.
+     * Nothing is stored. tune_count NULL or 0: the board has none and every key is refused. */
+    size_t (*tune_count)(void *ctx);
+    const hal_tune_t *(*tune_info)(void *ctx, size_t i);
+    int (*tune_get)(void *ctx, size_t i);
+    bool (*tune_set)(void *ctx, size_t i, int v);
+    void (*tune_defaults)(void *ctx);
     /* optional: the device's settings store, as hal_kv_get / hal_kv_set */
     int (*kv_get)(void *ctx, const char *key, void *buf, size_t cap);
     int (*kv_set)(void *ctx, const char *key, const void *buf, size_t len);
@@ -162,7 +171,7 @@ typedef struct {
 typedef struct {
     usbdisp_cfg_t c;
     usbdisp_rx_t usb;
-    uint8_t tx[384];
+    uint8_t tx[2048]; /* the largest answer: hello with the tuning, a set that refuses keys */
     /* Bluetooth */
     usbdisp_rx_t *bt;           /* the Bluetooth link's receiving side: allocated while the stack runs, else NULL */
     bool via_bt;                /* the request being answered came over Bluetooth */

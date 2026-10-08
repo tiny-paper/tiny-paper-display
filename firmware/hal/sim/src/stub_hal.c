@@ -55,6 +55,11 @@ long hal_link_write(hal_link_t t, const uint8_t *buf, size_t len) { (void)t; (vo
 
 int hal_panel_begin(uint8_t depth, hal_refresh_t mode) { (void)depth; (void)mode; return 0; }
 bool hal_panel_gray_partial(void) { return false; }
+size_t hal_panel_tune_count(void) { return 0; }
+const hal_tune_t *hal_panel_tune_info(size_t i) { (void)i; return NULL; }
+int hal_panel_tune_get(size_t i) { (void)i; return 0; }
+bool hal_panel_tune_set(size_t i, int v) { (void)i; (void)v; return false; }
+void hal_panel_tune_defaults(void) {}
 void hal_panel_new_image(bool image) { (void)image; }
 void hal_panel_palette(uint8_t palette) { (void)palette; }
 int hal_panel_refresh(void) { return 0; }

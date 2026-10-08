@@ -102,8 +102,8 @@ cache: after a lost answer send <code>hello</code> and start the picture again.<
 <tr>
 <td>0x0C</td>
 <td>set</td>
-<td><code>{ full_every?: uint }</code> 0 (never) .. 250; without the key nothing changes</td>
-<td><code>{ full_every: uint }</code> the value in use; stored on the device, kept over power-off</td>
+<td><code>{ full_every?: uint, tuning?: map or &quot;defaults&quot; }</code> <code>full_every</code> 0 (never) .. 250; &quot;Tuning&quot;; without a key nothing changes</td>
+<td><code>{ full_every: uint, tuning?: map, refused?: map }</code> <code>full_every</code> as in use, stored on the device, kept over power-off; the others under &quot;Tuning&quot;</td>
 </tr>
 <tr>
 <td>0x0D</td>
@@ -298,6 +298,104 @@ frame. A whole picture without a mode gives up the frame kept when memory is sho
 </tbody></table>
 <p><code>full_every</code> (default 20, <code>set</code>): the count of partial updates since the last full refresh; a named mode is run as
 named and counts, except an unchanged <code>partial</code> which uses no count.</p>
+<h2 id="tuning">Tuning</h2>
+<p>For comparing how the panel is driven without reflashing. Only the TRMNL X has knobs: <code>hello.tuning</code> is a map of every
+key to its value now (a number, or a word where the key has words); other boards have no <code>tuning</code> in hello and refuse every
+key. <code>set { tuning: { key: value, ... } }</code> applies each valid key from the next refresh; it is <strong>not stored</strong> (the values
+last until the device restarts). A value is a whole number or one of the words (<code>true</code> and <code>false</code> for the on/off keys).
+Each key is checked on its own: the ones that are fine apply, every other one is answered under <code>refused</code> as <code>{ key: why; allowed range }</code> (an unknown key lists the known ones; at most 8 are listed). <code>set { tuning: &quot;defaults&quot; }</code> restores every key
+to its default. The answer of every <code>set</code> carries <code>tuning</code> (the values now) on a board that has it. The knobs are those of
+the driver&#39;s <code>!tp</code> console commands, with the bounds those commands check.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Allowed</th>
+<th>Default</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>gray_table</code></td>
+<td><code>fastepd</code>, <code>stock</code></td>
+<td><code>stock</code></td>
+<td>the 16 gray waveform of a gray partial: FastEPD&#39;s 8 passes, or the stock firmware&#39;s 9</td>
+</tr>
+<tr>
+<td><code>gray_partial</code></td>
+<td><code>off</code>, <code>on</code></td>
+<td><code>on</code></td>
+<td>gray partial updates; <code>off</code> refuses a partial update at 2 and 4 bit (hello&#39;s <code>partial_depths</code> is read at start and does not change)</td>
+</tr>
+<tr>
+<td><code>gray_dark</code></td>
+<td>0 to 14</td>
+<td>0</td>
+<td>frames that push the changed pixels dark before the table runs</td>
+</tr>
+<tr>
+<td><code>gray_light</code></td>
+<td>0 to 14</td>
+<td>3</td>
+<td>frames that push the changed pixels light before the table runs (after <code>gray_dark</code>)</td>
+</tr>
+<tr>
+<td><code>passes_partial</code></td>
+<td>1 to 14</td>
+<td>4</td>
+<td>FastEPD passes of a 1 bit partial update: more is darker, less ghosting of the old picture, slower</td>
+</tr>
+<tr>
+<td><code>passes_full</code></td>
+<td>1 to 14</td>
+<td>3</td>
+<td>FastEPD passes of a full refresh</td>
+</tr>
+<tr>
+<td><code>wave_kick</code></td>
+<td>0 to 14</td>
+<td>2</td>
+<td>frames of the 1 bit partial waveform that run before the passes</td>
+</tr>
+<tr>
+<td><code>wave_extra</code></td>
+<td>0 to 14</td>
+<td>0</td>
+<td>black-only frames after the passes of a 1 bit partial</td>
+</tr>
+<tr>
+<td><code>wave_redrive</code></td>
+<td>0 to 3</td>
+<td>2</td>
+<td>how often a later partial pushes a black pixel black again (0 off)</td>
+</tr>
+<tr>
+<td><code>row_settle</code></td>
+<td>0 to 20</td>
+<td>2</td>
+<td>microseconds each row waits before its clock</td>
+</tr>
+<tr>
+<td><code>row_hold</code></td>
+<td>0 to 20</td>
+<td>2</td>
+<td>microseconds each row holds after</td>
+</tr>
+<tr>
+<td><code>row_drive</code></td>
+<td>0 to 200</td>
+<td>32</td>
+<td>microseconds of each partial row&#39;s drive (0: free running)</td>
+</tr>
+<tr>
+<td><code>clear</code></td>
+<td><code>auto</code>, <code>none</code>, <code>fast</code>, <code>slow</code></td>
+<td><code>auto</code></td>
+<td>the clearing passes before a full refresh (auto: slow every 8th, else fast)</td>
+</tr>
+</tbody></table>
+<p>There is no key to skip a 1 bit black step for gray targets: a 4 bit rectangle goes straight to the gray partial, which
+drives only the pixels that changed, so there is no such step.</p>
 <h2 id="refusals">Refusals</h2>
 <p><code>{ err: uint, msg: tstr (&lt;= 120 bytes), detail?: map }</code>. A refusal never changes the panel.</p>
 <table>

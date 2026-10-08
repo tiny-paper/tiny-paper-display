@@ -34,7 +34,7 @@ cache: after a lost answer send `hello` and start the picture again.
 | 0x09 | show_chunk | `{ off: uint, data: bstr }` | `{ next: uint }`. `off` must be `next`; the first chunk holds at least the PNG's first 29 bytes and is checked at once (size, depth) |
 | 0x0A | show_end | `{}` | `{ depth: uint, ms: uint, mode: tstr, why: tstr, x: uint, y: uint, w: uint, h: uint, passes?: uint, ckv?: map, warn?: tstr, same?: true }` after the refresh ("The answer") |
 | 0x0B | clear | `{}` | as show_end: the panel white, `mode: "full"`, `why: "asked"` |
-| 0x0C | set | `{ full_every?: uint }` 0 (never) .. 250; without the key nothing changes | `{ full_every: uint }` the value in use; stored on the device, kept over power-off |
+| 0x0C | set | `{ full_every?: uint, tuning?: map or "defaults" }` `full_every` 0 (never) .. 250; "Tuning"; without a key nothing changes | `{ full_every: uint, tuning?: map, refused?: map }` `full_every` as in use, stored on the device, kept over power-off; the others under "Tuning" |
 | 0x0D | bt | `{ on?: bool, pair?: bool, forget?: bool }`, over the USB cable only ("Bluetooth") | `{ on: bool, pairing: uint, name: tstr }`: the setting, the seconds the pairing window stays open (0: closed), the advertised name |
 | 0x0E | have | `{ fingerprint: tstr }` | `{ same: true }` when known and equal, else `{ send: true }`; no PNG bytes, refresh or counter change |
 
@@ -137,6 +137,36 @@ frame. A whole picture without a mode gives up the frame kept when memory is sho
 
 `full_every` (default 20, `set`): the count of partial updates since the last full refresh; a named mode is run as
 named and counts, except an unchanged `partial` which uses no count.
+
+## Tuning
+
+For comparing how the panel is driven without reflashing. Only the TRMNL X has knobs: `hello.tuning` is a map of every
+key to its value now (a number, or a word where the key has words); other boards have no `tuning` in hello and refuse every
+key. `set { tuning: { key: value, ... } }` applies each valid key from the next refresh; it is **not stored** (the values
+last until the device restarts). A value is a whole number or one of the words (`true` and `false` for the on/off keys).
+Each key is checked on its own: the ones that are fine apply, every other one is answered under `refused` as `{ key: why;
+allowed range }` (an unknown key lists the known ones; at most 8 are listed). `set { tuning: "defaults" }` restores every key
+to its default. The answer of every `set` carries `tuning` (the values now) on a board that has it. The knobs are those of
+the driver's `!tp` console commands, with the bounds those commands check.
+
+| Key | Allowed | Default | What it does |
+|---|---|---|---|
+| `gray_table` | `fastepd`, `stock` | `stock` | the 16 gray waveform of a gray partial: FastEPD's 8 passes, or the stock firmware's 9 |
+| `gray_partial` | `off`, `on` | `on` | gray partial updates; `off` refuses a partial update at 2 and 4 bit (hello's `partial_depths` is read at start and does not change) |
+| `gray_dark` | 0 to 14 | 0 | frames that push the changed pixels dark before the table runs |
+| `gray_light` | 0 to 14 | 3 | frames that push the changed pixels light before the table runs (after `gray_dark`) |
+| `passes_partial` | 1 to 14 | 4 | FastEPD passes of a 1 bit partial update: more is darker, less ghosting of the old picture, slower |
+| `passes_full` | 1 to 14 | 3 | FastEPD passes of a full refresh |
+| `wave_kick` | 0 to 14 | 2 | frames of the 1 bit partial waveform that run before the passes |
+| `wave_extra` | 0 to 14 | 0 | black-only frames after the passes of a 1 bit partial |
+| `wave_redrive` | 0 to 3 | 2 | how often a later partial pushes a black pixel black again (0 off) |
+| `row_settle` | 0 to 20 | 2 | microseconds each row waits before its clock |
+| `row_hold` | 0 to 20 | 2 | microseconds each row holds after |
+| `row_drive` | 0 to 200 | 32 | microseconds of each partial row's drive (0: free running) |
+| `clear` | `auto`, `none`, `fast`, `slow` | `auto` | the clearing passes before a full refresh (auto: slow every 8th, else fast) |
+
+There is no key to skip a 1 bit black step for gray targets: a 4 bit rectangle goes straight to the gray partial, which
+drives only the pixels that changed, so there is no such step.
 
 ## Refusals
 

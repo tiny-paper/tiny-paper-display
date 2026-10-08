@@ -170,6 +170,61 @@ bool hal_live_seconds(void) { return s_live && hal_esp_stay_awake(); }
 
 bool hal_panel_gray_partial(void) { return s_gp.on; }
 
+/* Tuning for experiments (usbdisp `set { tuning }`, docs/spec/usb-display.md "Tuning"): the knobs of the console commands
+ * above under one name each, with the bounds those commands check (EPD_* limits, 1..14 passes, 0..14 frames). Applied from
+ * the next refresh, never stored. The 1 bit black step before a gray one does not exist in a gray partial (the 4 bit
+ * rectangle goes straight to epdp_gray_partial), so there is no knob to skip it. */
+static const char *const W_GRAY[] = {"fastepd", "stock"};
+static const char *const W_ONOFF[] = {"off", "on"};
+static const char *const W_CLEAR[] = {"auto", "none", "fast", "slow"};
+static const struct {
+    hal_tune_t t;
+    uint8_t *v;
+} KNOBS[] = {
+    {{"gray_table", GRAY_FASTEPD, GRAY_STOCK, GRAY_STOCK, W_GRAY}, &s_gray},
+    {{"gray_partial", 0, 1, 1, W_ONOFF}, &s_gp.on},
+    {{"gray_dark", 0, 14, 0, NULL}, &s_gp.dark},
+    {{"gray_light", 0, 14, 3, NULL}, &s_gp.light},
+    {{"passes_partial", 1, 14, BOARD_EPD_PARTIAL_PASSES, NULL}, &s_pass.partial},
+    {{"passes_full", 1, 14, BOARD_EPD_FULL_PASSES, NULL}, &s_pass.full},
+    {{"wave_kick", 0, 14, BOARD_EPD_WAVE_KICK, NULL}, &s_wave.kick},
+    {{"wave_extra", 0, 14, BOARD_EPD_WAVE_EXTRA, NULL}, &s_wave.extra},
+    {{"wave_redrive", 0, EPD_WAVE_REDRIVE_MAX, BOARD_EPD_WAVE_REDRIVE, NULL}, &s_wave.redrive},
+    {{"row_settle", 0, EPD_ROW_DELAY_MAX, BOARD_EPD_ROW_SETTLE, NULL}, &s_rows.settle},
+    {{"row_hold", 0, EPD_ROW_DELAY_MAX, BOARD_EPD_ROW_HOLD, NULL}, &s_rows.hold},
+    {{"row_drive", 0, EPD_ROW_DRIVE_MAX, EPD_ROW_DRIVE_DEFAULT, NULL}, &s_drive},
+    {{"clear", CLEAR_AUTO, CLEAR_SLOW_, CLEAR_AUTO, W_CLEAR}, &s_clear},
+};
+#define NKNOBS (sizeof KNOBS / sizeof KNOBS[0])
+
+static void tune_apply(void)
+{
+    epdp_set_passes(s_pass.partial, s_pass.full);
+    epdp_set_wave(s_wave.kick, s_wave.extra, s_wave.redrive);
+    epdp_set_rows(s_rows.settle, s_rows.hold);
+    epdp_set_drive(s_drive);
+}
+
+size_t hal_panel_tune_count(void) { return NKNOBS; }
+const hal_tune_t *hal_panel_tune_info(size_t i) { return i < NKNOBS ? &KNOBS[i].t : NULL; }
+int hal_panel_tune_get(size_t i) { return i < NKNOBS ? *KNOBS[i].v : 0; }
+
+bool hal_panel_tune_set(size_t i, int v)
+{
+    if (i >= NKNOBS || v < KNOBS[i].t.min || v > KNOBS[i].t.max)
+        return false;
+    *KNOBS[i].v = (uint8_t)v;
+    tune_apply();
+    return true;
+}
+
+void hal_panel_tune_defaults(void)
+{
+    for (size_t i = 0; i < NKNOBS; i++)
+        *KNOBS[i].v = (uint8_t)KNOBS[i].t.def;
+    tune_apply();
+}
+
 /* "!tp ramp" keeps its test card up for RAMP_HOLD_S (across deep sleep): the app's refreshes are skipped until then,
  * and the first one after it is full (the app's previous frame is not what the panel shows) */
 #define RAMP_HOLD_S 120
