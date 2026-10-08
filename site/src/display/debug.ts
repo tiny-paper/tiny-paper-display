@@ -148,6 +148,18 @@ export function pickLines(lines: readonly string[], max = REPORT_LOG_LINES): { k
   return { kept: chosen.map((i) => lines[i]!), cut: lines.length - chosen.length };
 }
 
+/** The device log lines of one update as the reports show them: indented, the `panel` ones first, a note when some are cut. */
+export function indentedLog(all: readonly string[]): string[] {
+  const { kept, cut } = pickLines(all);
+  const out = kept.map((k) => `    | ${k}`);
+  if (cut) out.push(`    | (${cut} more device log line${cut === 1 ? '' : 's'} cut; at most ${REPORT_LOG_LINES} are kept)`);
+  return out;
+}
+/** The tuning line of a report. */
+export function tuningLine(h: DisplayHello): string {
+  return h.tuning ? `tuning: ${Object.entries(h.tuning).map(([k, v]) => `${k}=${v}`).join(' ')}` : 'tuning: none (this device has no panel tuning)';
+}
+
 /** The report: compact text to copy into a chat (device, tuning, page settings, what was seen, the last status lines). */
 export function reportText(o: { hello: DisplayHello | null; sketch: DebugSketch; depthUsed: number | null; saw: string; history: readonly HistoryLine[]; test?: string | null; withLog?: boolean; logSeen?: boolean }): string {
   const h = o.hello;
@@ -155,7 +167,7 @@ export function reportText(o: { hello: DisplayHello | null; sketch: DebugSketch;
   if (!h) return `${lines[0]}\nno device connected`;
   lines.push(`device: ${h.board} ${h.w}x${h.h}, display firmware ${h.fw}`);
   lines.push(`device partial depths: ${h.partial_depths.length ? h.partial_depths.join(',') : 'none'}; modes: ${h.modes.join(',')}`);
-  lines.push(h.tuning ? `tuning: ${Object.entries(h.tuning).map(([k, v]) => `${k}=${v}`).join(' ')}` : 'tuning: none (this device has no panel tuning)');
+  lines.push(tuningLine(h));
   lines.push(`sketch: depth=${o.sketch.depth ?? 'auto'}${o.depthUsed ? ` (${o.depthUsed} bit in use)` : ''} mode=${o.sketch.mode} full_after=${o.sketch.full_after} erase=${o.sketch.erase}${o.test ? ` test=${o.test}` : ''}`);
   lines.push(`what I saw: ${o.saw.trim() || '(nothing written)'}`);
   const note = o.withLog === false ? '' : !o.logSeen && o.history.length ? ' (this firmware wrote no device log lines)' : ' with the device log lines of each update, indented';
@@ -163,9 +175,7 @@ export function reportText(o: { hello: DisplayHello | null; sketch: DebugSketch;
   for (const l of o.history.slice(-REPORT_UPDATES)) {
     lines.push(`${l.at} ${l.text}`);
     if (o.withLog === false) continue;
-    const { kept, cut } = pickLines(l.lines ?? []);
-    for (const k of kept) lines.push(`    | ${k}`);
-    if (cut) lines.push(`    | (${cut} more device log line${cut === 1 ? '' : 's'} cut; at most ${REPORT_LOG_LINES} are kept)`);
+    lines.push(...indentedLog(l.lines ?? []));
   }
   return lines.join('\n');
 }

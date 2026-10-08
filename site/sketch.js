@@ -1396,6 +1396,15 @@ function pickLines(lines, max = REPORT_LOG_LINES) {
   const chosen = [...idx.filter(([l]) => /^(W |I )?panel\b/.test(l)), ...idx.filter(([l]) => !/^(W |I )?panel\b/.test(l))].slice(0, max).map(([, i]) => i).sort((a, b) => a - b);
   return { kept: chosen.map((i) => lines[i]), cut: lines.length - chosen.length };
 }
+function indentedLog(all) {
+  const { kept: kept2, cut } = pickLines(all);
+  const out = kept2.map((k) => `    | ${k}`);
+  if (cut) out.push(`    | (${cut} more device log line${cut === 1 ? "" : "s"} cut; at most ${REPORT_LOG_LINES} are kept)`);
+  return out;
+}
+function tuningLine(h) {
+  return h.tuning ? `tuning: ${Object.entries(h.tuning).map(([k, v]) => `${k}=${v}`).join(" ")}` : "tuning: none (this device has no panel tuning)";
+}
 function reportText(o) {
   const h = o.hello;
   const lines = ["tiny-paper display report"];
@@ -1403,7 +1412,7 @@ function reportText(o) {
 no device connected`;
   lines.push(`device: ${h.board} ${h.w}x${h.h}, display firmware ${h.fw}`);
   lines.push(`device partial depths: ${h.partial_depths.length ? h.partial_depths.join(",") : "none"}; modes: ${h.modes.join(",")}`);
-  lines.push(h.tuning ? `tuning: ${Object.entries(h.tuning).map(([k, v]) => `${k}=${v}`).join(" ")}` : "tuning: none (this device has no panel tuning)");
+  lines.push(tuningLine(h));
   lines.push(`sketch: depth=${o.sketch.depth ?? "auto"}${o.depthUsed ? ` (${o.depthUsed} bit in use)` : ""} mode=${o.sketch.mode} full_after=${o.sketch.full_after} erase=${o.sketch.erase}${o.test ? ` test=${o.test}` : ""}`);
   lines.push(`what I saw: ${o.saw.trim() || "(nothing written)"}`);
   const note = o.withLog === false ? "" : !o.logSeen && o.history.length ? " (this firmware wrote no device log lines)" : " with the device log lines of each update, indented";
@@ -1411,9 +1420,7 @@ no device connected`;
   for (const l of o.history.slice(-REPORT_UPDATES)) {
     lines.push(`${l.at} ${l.text}`);
     if (o.withLog === false) continue;
-    const { kept: kept2, cut } = pickLines(l.lines ?? []);
-    for (const k of kept2) lines.push(`    | ${k}`);
-    if (cut) lines.push(`    | (${cut} more device log line${cut === 1 ? "" : "s"} cut; at most ${REPORT_LOG_LINES} are kept)`);
+    lines.push(...indentedLog(l.lines ?? []));
   }
   return lines.join("\n");
 }
@@ -1445,6 +1452,7 @@ export {
   displayAnswer,
   displayHello,
   fingerprintOf,
+  indentedLog,
   knobStart,
   packedPng,
   parseDebug,
@@ -1455,6 +1463,7 @@ export {
   sketchSession,
   testOf,
   testPlan,
+  tuningLine,
   tuningMap,
   tuningRequest,
   tuningResults

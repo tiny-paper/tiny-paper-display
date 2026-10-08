@@ -133,18 +133,19 @@ export function startPicturePage(env) {
   async function sendOne(prepared, ref, label) {
     const what = `${label ? `${label}: ` : ''}${describeSettings(prepared.settings, prepared.rotation, ref)}`;
     say(`Asked for ${what}; waiting for the panel...`);
-    const t0 = Date.now();
+    const t0 = Date.now(), mark = state.link ? state.link.logCount : 0;
+    const logged = () => (state.link ? state.link.log.filter((l) => l.n > mark).map((l) => l.text) : []);
     let record;
     try {
       const png = await preparedPng(prepared);
       const r = await state.client.show(png, state.hello, refreshOptions(ref));
       const total = Date.now() - t0;
       const answer = `${displayAnswer(r)} Area ${r.w} x ${r.h} at ${r.x}, ${r.y}.`;
-      record = { label, settings: describeSettings(prepared.settings, prepared.rotation, ref), ok: true, answer, totalMs: total };
+      record = { label, settings: describeSettings(prepared.settings, prepared.rotation, ref), ok: true, answer, totalMs: total, lines: logged() };
       say(`Asked for ${what}. ${answer} Panel ${r.ms} ms, ${total} ms in all.`);
     } catch (e) {
       const total = Date.now() - t0;
-      record = { label, settings: describeSettings(prepared.settings, prepared.rotation, ref), ok: false, answer: `${message(e)}.`, totalMs: total };
+      record = { label, settings: describeSettings(prepared.settings, prepared.rotation, ref), ok: false, answer: `${message(e)}.`, totalMs: total, lines: logged() };
       say(`Asked for ${what}. Not shown: ${message(e)}. ${total} ms.`, true);
     }
     state.sends.push(record);
@@ -161,15 +162,16 @@ export function startPicturePage(env) {
   async function clear() {
     if (state.busy || !state.client) return;
     lock(true);
-    const t0 = Date.now();
+    const t0 = Date.now(), mark = state.link ? state.link.logCount : 0;
+    const logged = () => (state.link ? state.link.log.filter((l) => l.n > mark).map((l) => l.text) : []);
     say('Asked for a full refresh to white; waiting for the panel...');
     try {
       const r = await state.client.clear();
       const total = Date.now() - t0, answer = displayAnswer(r);
-      state.sends.push({ label: 'Clear', settings: 'full refresh to white', ok: true, answer, totalMs: total });
+      state.sends.push({ label: 'Clear', settings: 'full refresh to white', ok: true, answer, totalMs: total, lines: logged() });
       say(`Asked for a full refresh to white. ${answer} Panel ${r.ms} ms, ${total} ms in all.`);
     } catch (e) {
-      state.sends.push({ label: 'Clear', settings: 'full refresh to white', ok: false, answer: `${message(e)}.`, totalMs: Date.now() - t0 });
+      state.sends.push({ label: 'Clear', settings: 'full refresh to white', ok: false, answer: `${message(e)}.`, totalMs: Date.now() - t0, lines: logged() });
       say(`Asked for a full refresh to white. Not shown: ${message(e)}.`, true);
     } finally { lock(false); }
     report();

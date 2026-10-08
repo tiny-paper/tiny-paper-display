@@ -124,5 +124,16 @@ test('depth, refresh and Compare choices follow the hello', () => {
 
 test('the report holds the device line, each send and the free line', () => {
   const t = reportText({ hello: HELLO, picture: 'p, 4 x 4 pixels', saw: 'smooth', sends: [{ label: 'Compare 1 of 4, 1 bit nearest level', settings: '1 bit', ok: true, answer: 'Full refresh: as requested (9 ms).', totalMs: 40 }] });
-  assert.match(t, /^tiny-paper display, picture report\nDevice: TRMNL OG, 800 x 480, display firmware t\. Partial updates at: 1 bit\nPicture: p, 4 x 4 pixels\n1\. Compare 1 of 4, 1 bit nearest level: 1 bit\. Full refresh: as requested \(9 ms\)\. Total 40 ms\.\nWhat I saw: smooth$/);
+  assert.match(t, /^tiny-paper display, picture report\nDevice: TRMNL OG, 800 x 480, display firmware t\. Partial updates at: 1 bit\nPicture: p, 4 x 4 pixels\ntuning: none \(this device has no panel tuning\)\n1\. Compare 1 of 4, 1 bit nearest level: 1 bit\. Full refresh: as requested \(9 ms\)\. Total 40 ms\.\nWhat I saw: smooth$/);
+});
+
+test('the report holds the tuning from hello and the device log lines of each send, as the Sketch report does', () => {
+  const hello = { ...HELLO, tuning: { gray_table: 'stock', gray_row: '' } };
+  const logs = Array.from({ length: 10 }, (_, i) => `line ${i}`);
+  const t = reportText({ hello, picture: 'p', saw: 'x', sends: [
+    { label: '', settings: 'a', ok: true, answer: 'ok.', totalMs: 1, lines: ['panel full depth=4 ms=9', 'other'] },
+    { label: '', settings: 'b', ok: true, answer: 'ok.', totalMs: 1, lines: logs }] });
+  assert.match(t, /\nPicture: p\ntuning: gray_table=stock gray_row=\n1\. a\. ok\. Total 1 ms\.\n    \| panel full depth=4 ms=9\n    \| other\n2\. b\./);
+  assert.match(t, /\| \(2 more device log lines cut; at most 8 are kept\)/);
+  assert.match(reportText({ hello: HELLO, picture: 'p', saw: '', sends: [] }), /\ntuning: none \(this device has no panel tuning\)\n/);
 });

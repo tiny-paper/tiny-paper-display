@@ -178,3 +178,20 @@ test('a file the browser cannot open is said in words; a file that opens is prep
   assert.equal(mock.el('refresh').children[1].disabled, true, 'the PicPak has no partial refresh');
   assert.equal(mock.el('preview').hidden, false);
 });
+
+test('Copy report: the tuning of hello and the device log lines of each send are in the report', async () => {
+  const { dev, el } = await connected({ tuning: true });
+  dev.log[10] = { before: ['panel full depth=2 ms=9 rc=0', 'panel rows drive=0us'] };
+  el('b-scene').onclick();
+  await el('send').onclick();
+  await until('sent', () => dev.shows.length === 1 && el('send').disabled === false);
+  const r = el('report').value;
+  assert.match(r, /\ntuning: gray_table=stock .*gray_row= step_neutral=each/);
+  assert.match(r, /Total \d+ ms\.\n    \| panel full depth=2 ms=9 rc=0\n    \| panel rows drive=0us$/m);
+  // a send that is refused still carries what the device wrote before the refusal
+  dev.refuse = { err: 14, msg: 'no memory' };
+  dev.log[10] = { before: ['E alloc failed'] };
+  await el('send').onclick();
+  await until('refused', () => /Not shown: The device ran out of memory/.test(el('report').value));
+  assert.match(el('report').value, /Not shown: .*\n    \| E alloc failed/);
+});

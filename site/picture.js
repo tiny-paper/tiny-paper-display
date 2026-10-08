@@ -1,4 +1,4 @@
-// esbuild 0.28.2, 15 source files of site/src (MIT): do not edit, run `npm run build` in site/.
+// esbuild 0.28.2, 19 source files of site/src (MIT): do not edit, run `npm run build` in site/.
 // src/display/client.ts
 var DISPLAY_MODES = ["full", "partial", "partial_all", "inverse", "passes"];
 var DISPLAY_ERRORS = {
@@ -1167,6 +1167,23 @@ function builtinPicture(kind, w, h, levels) {
   return kind === "gradient" ? gradient(w, h, levels) : kind === "scene" ? scene(w, h) : lines(w, h);
 }
 
+// src/display/debug.ts
+var REPORT_LOG_LINES = 8;
+function pickLines(lines2, max = REPORT_LOG_LINES) {
+  const idx = lines2.map((l, i) => [l, i]);
+  const chosen = [...idx.filter(([l]) => /^(W |I )?panel\b/.test(l)), ...idx.filter(([l]) => !/^(W |I )?panel\b/.test(l))].slice(0, max).map(([, i]) => i).sort((a, b) => a - b);
+  return { kept: chosen.map((i) => lines2[i]), cut: lines2.length - chosen.length };
+}
+function indentedLog(all) {
+  const { kept, cut } = pickLines(all);
+  const out = kept.map((k) => `    | ${k}`);
+  if (cut) out.push(`    | (${cut} more device log line${cut === 1 ? "" : "s"} cut; at most ${REPORT_LOG_LINES} are kept)`);
+  return out;
+}
+function tuningLine(h) {
+  return h.tuning ? `tuning: ${Object.entries(h.tuning).map(([k, v]) => `${k}=${v}`).join(" ")}` : "tuning: none (this device has no panel tuning)";
+}
+
 // src/picture/plan.ts
 var BOARD_TITLES = { trmnl_x: "TRMNL X", trmnl_og: "TRMNL OG", picpak: "PicPak" };
 var DITHER_NAMES = { none: "nearest level", floyd: "Floyd-Steinberg", ordered: "ordered 4x4" };
@@ -1226,7 +1243,10 @@ function comparePlan(hello) {
 }
 function reportText(r) {
   const lines2 = ["tiny-paper display, picture report", `Device: ${r.hello ? `${deviceLine(r.hello)} ${partialLine(r.hello)}` : "none connected"}`, `Picture: ${r.picture || "none chosen"}`];
-  r.sends.forEach((s, i) => lines2.push(`${i + 1}. ${s.label ? `${s.label}: ` : ""}${s.settings}. ${s.ok ? "" : "Not shown: "}${s.answer} Total ${s.totalMs} ms.`));
+  if (r.hello) lines2.push(tuningLine(r.hello));
+  r.sends.forEach((s, i) => {
+    lines2.push(`${i + 1}. ${s.label ? `${s.label}: ` : ""}${s.settings}. ${s.ok ? "" : "Not shown: "}${s.answer} Total ${s.totalMs} ms.`, ...indentedLog(s.lines ?? []));
+  });
   if (!r.sends.length) lines2.push("Nothing sent yet.");
   lines2.push(`What I saw: ${r.saw}`);
   return lines2.join("\n");

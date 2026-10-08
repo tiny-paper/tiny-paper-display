@@ -1,6 +1,7 @@
 // What the Picture page offers for a device and what it says about a send: the depths, the refresh choices with the
 // reason one is unavailable, the Compare sequence, the report. Pure functions of the device's hello.
 import type { DisplayHello, DisplayMode } from '../display/client.ts';
+import { indentedLog, tuningLine } from '../display/debug.ts';
 import type { Dither, Settings } from './prepare.ts';
 
 export const BOARD_TITLES: Record<string, string> = { trmnl_x: 'TRMNL X', trmnl_og: 'TRMNL OG', picpak: 'PicPak' };
@@ -65,11 +66,14 @@ export function comparePlan(hello: DisplayHello): CompareStep[] {
   return steps;
 }
 
-export interface SendRecord { label: string; settings: string; ok: boolean; answer: string; totalMs: number }
+export interface SendRecord { label: string; settings: string; ok: boolean; answer: string; totalMs: number; /** the device's log lines of this send */ lines?: string[] }
 /** The text a person copies into a chat. */
 export function reportText(r: { hello: DisplayHello | null; picture: string; sends: SendRecord[]; saw: string }): string {
   const lines = ['tiny-paper display, picture report', `Device: ${r.hello ? `${deviceLine(r.hello)} ${partialLine(r.hello)}` : 'none connected'}`, `Picture: ${r.picture || 'none chosen'}`];
-  r.sends.forEach((s, i) => lines.push(`${i + 1}. ${s.label ? `${s.label}: ` : ''}${s.settings}. ${s.ok ? '' : 'Not shown: '}${s.answer} Total ${s.totalMs} ms.`));
+  if (r.hello) lines.push(tuningLine(r.hello));
+  r.sends.forEach((s, i) => {
+    lines.push(`${i + 1}. ${s.label ? `${s.label}: ` : ''}${s.settings}. ${s.ok ? '' : 'Not shown: '}${s.answer} Total ${s.totalMs} ms.`, ...indentedLog(s.lines ?? []));
+  });
   if (!r.sends.length) lines.push('Nothing sent yet.');
   lines.push(`What I saw: ${r.saw}`);
   return lines.join('\n');
