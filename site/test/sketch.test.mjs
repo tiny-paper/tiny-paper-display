@@ -10,6 +10,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { startSketchPage } from '../sketch-page.js';
+import { inflateSync } from 'node:zlib';
 import { FakeImageData, fakeDocument, pointer } from './fake-dom.mjs';
 import { fakeDisplay } from './fake-display.mjs';
 
@@ -41,10 +42,29 @@ function open({ dev = null, search = '', serial = true, storage = null, clipboar
   };
   return { page, el, stroke, listeners, resize: () => resizers.forEach((f) => f()) };
 }
+/** The pixel levels of a grayscale panel PNG made by the page (filter 0, no interlace). */
+function levels(png) {
+  const v = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  const w = v.getUint32(16), h = v.getUint32(20), depth = png[24];
+  const idat = [];
+  for (let off = 8; off < png.length;) {
+    const len = v.getUint32(off), name = String.fromCharCode(...png.subarray(off + 4, off + 8));
+    if (name === 'IDAT') idat.push(png.subarray(off + 8, off + 8 + len));
+    off += len + 12;
+  }
+  const raw = inflateSync(Buffer.concat(idat)), stride = Math.ceil(w * depth / 8);
+  const out = [];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) out.push((raw[y * (stride + 1) + 1 + Math.floor(x * depth / 8)] >> (8 - depth - (x * depth) % 8)) & ((1 << depth) - 1));
+  return out;
+}
+
+/** A browser that remembers the Grays switch as on for this board. */
+const graysOn = (board) => { const m = new Map([[`tp-sketch-grays-${board}`, '1']]); return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, v) }; };
 // each test its own panel height: the page keeps one drawing per panel shape while it is loaded
 async function connected(h, over = {}) {
   const dev = fakeDisplay({ h, ...over });
-  const p = open({ dev });
+  // a device that does gray partial updates is tried with the Grays switch on (1 bit is the default: see the test of that)
+  const p = open({ dev, storage: over.partial_depths && over.partial_depths.includes(4) ? graysOn(over.board ?? 'trmnl_og') : null });
   await p.page.connect();
   await until('the whole drawing on connect', () => dev.shows.length === 1 && p.el('status').dataset.state === 'ok');
   return { dev, ...p };
@@ -181,7 +201,7 @@ test('preview (?mock=): a pretend device answers with no Web Serial at all, per 
   og.stroke([[300, 200], [340, 240]]);
   await until('the stroke', () => /^Asked for a partial update of \d+ x \d+ pixels at \d+, \d+\. Changed area refreshed/.test(og.el('status').textContent));
 
-  const x = open({ search: '?mock=x', serial: false });
+  const x = open({ search: '?mock=x', serial: false, storage: graysOn('trmnl_x') });
   await x.page.ready;
   assert.deepEqual([x.el('canvas').width, x.el('canvas').height], [1872, 1404]);
   assert.equal(x.el('swatches').children.length, 16, 'the X answers gray partial depths: all 16 grays');
@@ -326,7 +346,7 @@ test('Debug: valid JSON is applied, the device part as one set, the page part in
   // depth 1 with a named mode: strokes go out in that mode
   await apply({ el }, { sketch: { depth: 1, mode: 'passes' } });
   await until('the whole drawing at 1 bit', () => dev.shows.length === 4);
-  stroke([[300, 200], [340, 240]]);
+  stroke([[600, 300], [640, 340]]); // the drawing came along: the same place would change nothing
   await shown(dev, 5);
   assert.deepEqual([dev.shows[4].mode, dev.shows[4].passes, dev.shows[4].bits], ['passes', 2, 1]);
   assert.equal(dev.sets.length, 1, 'a page-only configuration sends no set');
@@ -392,7 +412,7 @@ test('Debug: Reset puts both sides back to their defaults', async () => {
 test('Debug: the report holds the device, the tuning, the page settings, what was seen and the last 12 status lines with their times', async () => {
   let copied = '';
   const dev = fakeDisplay({ h: 455, ...XDEV });
-  const { el, stroke, page } = open({ dev, clipboard: { writeText: async (t) => { copied = t; } } });
+  const { el, stroke, page } = open({ dev, storage: graysOn('trmnl_x'), clipboard: { writeText: async (t) => { copied = t; } } });
   await page.connect();
   await until('connected', () => dev.shows.length === 1 && el('status').dataset.state === 'ok');
   for (let i = 0; i < 14; i++) { stroke([[100 + i * 20, 100], [110 + i * 20, 110]]); await shown(dev, 2 + i); await said(el, /partial update/); }
@@ -401,7 +421,7 @@ test('Debug: the report holds the device, the tuning, the page settings, what wa
   const r = el('report').value;
   assert.match(r, /^tiny-paper display report\ndevice: trmnl_x 1872x455, display firmware 0\.0\.0\+test/);
   assert.match(r, /device partial depths: 1,2,4; modes: full,partial,partial_all,inverse,passes/);
-  assert.match(r, /tuning: gray_table=stock gray_partial=on gray_dark=0 gray_light=3 /);
+  assert.match(r, /tuning: gray_table=stock gray_partial=on gray_dark=0 gray_light=0 /);
   assert.match(r, /sketch: depth=auto \(4 bit in use\) mode=auto full_after=30 erase=auto/);
   assert.match(r, /what I saw: grays look even/);
   const status = r.split(/status lines[^\n]*:\n/)[1].split('\n');
@@ -594,4 +614,59 @@ test('Device log: a firmware that writes nothing says so in the box and in the r
   await shown(dev, 2); await until('done', () => page.state.history.length >= 2);
   assert.equal(el('devicelogwhy').textContent, 'This firmware writes no log lines.');
   assert.match(el('report').value, /\(this firmware wrote no device log lines\)/);
+});
+
+test('Grays: the page starts at 1 bit with two swatches on a gray capable device; the switch gives 16 swatches and 4 bit sends; switching back is one full refresh at 1 bit', async () => {
+  const store = new Map();
+  const storage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) };
+  const dev = fakeDisplay({ h: 480 + 1, ...XDEV });
+  const p = open({ dev, storage });
+  const { el, stroke } = p;
+  await p.page.connect();
+  await until('the whole drawing', () => dev.shows.length === 1 && el('status').dataset.state === 'ok');
+  assert.equal(dev.shows[0].bits, 1, 'the default is 1 bit');
+  assert.deepEqual(el('swatches').children.map((b) => b.title), ['black', 'white']);
+  assert.equal(el('note').hidden, true, 'no "cannot show grays" note: the switch is there');
+  assert.equal(el('graysrow').hidden, false);
+  assert.equal(el('grays').checked, false);
+  stroke([[300, 200], [340, 240]]);
+  await shown(dev, 2);
+  assert.equal(dev.shows[1].bits, 1);
+  // grays on: 16 swatches, one full refresh at 4 bit, then strokes at 4 bit
+  el('grays').checked = true;
+  el('grays').onchange();
+  await shown(dev, 3);
+  assert.deepEqual([dev.shows[2].mode, dev.shows[2].bits], ['full', 4]);
+  await said(el, /Switched to grays: the canvas is sent with one full refresh/);
+  assert.equal(el('swatches').children.length, 16);
+  assert.equal(store.get('tp-sketch-grays-trmnl_x'), '1', 'remembered for this board');
+  p.page.state.pen.color = 6;
+  stroke([[500, 300], [540, 340]]);
+  await shown(dev, 4);
+  assert.deepEqual([dev.shows[3].mode, dev.shows[3].bits], ['partial', 4]);
+  // back: the canvas thresholded, one full refresh at 1 bit, nothing else
+  el('grays').checked = false;
+  el('grays').onchange();
+  await shown(dev, 5);
+  assert.deepEqual([dev.shows[4].mode, dev.shows[4].bits], ['full', 1]);
+  await said(el, /Switched to black and white: the canvas was thresholded and is sent with one full refresh/);
+  assert.equal(el('swatches').children.length, 2);
+  assert.equal(store.get('tp-sketch-grays-trmnl_x'), '0');
+  await sleep(500);
+  assert.equal(dev.shows.length, 5, 'one full refresh, no error, nothing more');
+  assert.ok(new Set(levels(dev.pngs[4])).size <= 2 && [...levels(dev.pngs[4])].every((v) => v === 0 || v === 1), 'only black and white went out');
+  assert.ok(levels(dev.pngs[4]).includes(0), 'the black strokes are still there');
+  // a reload remembers the choice
+  store.set('tp-sketch-grays-trmnl_x', '1');
+  const dev2 = fakeDisplay({ h: 480 + 2, ...XDEV });
+  const again = open({ dev: dev2, storage });
+  await again.page.connect();
+  await until('connected', () => dev2.shows.length === 1 && again.el('status').dataset.state === 'ok');
+  assert.equal(dev2.shows[0].bits, 4);
+  assert.equal(again.el('grays').checked, true);
+  // a black and white device has no switch; the Debug depth still overrides
+  const bw = await connected(480 + 3, { board: 'trmnl_og' });
+  assert.equal(bw.el('graysrow').hidden, true);
+  await apply({ el }, { sketch: { depth: 2 } });
+  await until('depth 2', () => el('swatches').children.length === 4);
 });

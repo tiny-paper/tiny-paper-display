@@ -31,7 +31,7 @@ Work lands on `testing` first; `main` moves by promoting a state that was tried 
 | 1 Flash, backup, restore | a flash page | backup and restore; one page with the tabs Flash and Test, switching to Test after an install; a plain warning that installing erases the firmware on the device |
 | 2 USB and Bluetooth | the firmware and its protocol; Bluetooth off by default with a setup step | the first run on a real device, on each board, cable and Bluetooth |
 | 3 Packages | a Python package that installs from the git URL; a guide page ("Use it") | the JavaScript package; first releases, version 0.1.0 |
-| 4 Sketch in the browser | a sketch page with 16 grays on the TRMNL X (seen on a device); Clear is a full refresh and leaves the panel clean (seen) | erasing in grays judged; the painting by a drawing library; into the Test tab |
+| 4 Sketch in the browser | a sketch page, black and white at 1 bit by default (looked best on the X), optional 16 grays (seen on a device, slower); Clear is a full refresh and leaves the panel clean (seen) | erasing in grays judged; the painting by a drawing library; into the Test tab |
 | 5 Sketch in Python | a first version exists | later |
 | 6 Partial refresh | in the firmware | seen on a device per board and depth before it is offered there (table below) |
 
@@ -57,16 +57,23 @@ the same shade on a computer screen; accepted as the panel's character, not bein
 
 ### Known limits (TRMNL X, seen on a device, 2026-10-08)
 
+Compared on the device with the Debug section: the 1 bit partial update looked best (crisp, and the fastest). It is the
+Sketch page's default on every board; grays are an option that is slower (each stroke is drawn black first, then fades to
+its shade).
+
 | What | Seen |
 |---|---|
-| A black partial update (1 bit) | 1465 ms on the panel, 1673 ms in all, the same for any size of area |
-| A mid gray partial update | 3219 ms on the panel, 3573 ms in all |
+| 1 bit partial update | about 1.45 s on the panel (1.67 s in all) whatever the area |
+| 1 bit full refresh | 1.93 s |
+| Gray partial update (a bar, no pre-push) | 2.57 s |
+| Gray full refresh | 2.59 s |
+| Gray pre-push (light frames) | no effect on pixels that start white, about 0.7 s: the default is now none |
 
 Ideas, not started: skip quickly over the rows outside the changed area (the time does not depend on the area today);
 drive light grays directly from white instead of through black.
 
 The drive options of the X (gray table, pre-push frames, passes, waveform, row timing, clear) are reachable from the Sketch
-page's Debug section for comparison, without reflashing; which setting looked best on glass is still to be recorded.
+page's Debug section for comparison, without reflashing; 1 bit looked best, which of the gray settings looks best is still to be recorded.
 
 ## Clean-up
 

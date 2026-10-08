@@ -76,6 +76,8 @@ export class SketchSender {
     this.drawing = false; this.note = ' Clear refreshes the whole panel: a partial update would leave faint traces of what was removed.';
     this.fullRefresh();
   }
+  /** Send the whole drawing in full mode, and say `note` after the answer (why a full refresh was asked). */
+  fullWith(note: string): void { this.note = ` ${note}`; this.fullRefresh(); }
   /** Send the whole drawing in full mode. */
   fullRefresh(): void { this.asked = true; this.schedule(Date.now(), true); }
   stop(): void { this.cancel(); }

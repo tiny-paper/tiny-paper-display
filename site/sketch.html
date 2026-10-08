@@ -61,6 +61,9 @@ computer. <a href="sketch.html?mock=x">See the page work without a device.</a></
   </div>
   <div id="canvaswrap"><canvas id="canvas" aria-label="Sketch, the panel's pixels"></canvas><div id="cursor" hidden aria-hidden="true"></div></div>
   <div class="tools">
+    <label id="graysrow" hidden><input id="grays" type="checkbox"> Grays (slower: each stroke is drawn black first, then fades to its shade)</label>
+  </div>
+  <div class="tools">
     <button id="full">Full refresh</button>
     <label id="fullafterrow">Full refresh by itself after <input id="fullafter" type="number" min="0" max="250">
     partial updates (0: never)</label>

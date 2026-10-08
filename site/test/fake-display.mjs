@@ -24,7 +24,7 @@ export const HELLO = {
 
 // The TRMNL X's knobs as docs/spec/usb-display.md "Tuning" lists them: [name, min, max, default, words?]
 const KNOBS = [
-  ['gray_table', 0, 1, 1, ['fastepd', 'stock']], ['gray_partial', 0, 1, 1, ['off', 'on']], ['gray_dark', 0, 14, 0], ['gray_light', 0, 14, 3],
+  ['gray_table', 0, 1, 1, ['fastepd', 'stock']], ['gray_partial', 0, 1, 1, ['off', 'on']], ['gray_dark', 0, 14, 0], ['gray_light', 0, 14, 0],
   ['passes_partial', 1, 14, 4], ['passes_full', 1, 14, 3], ['wave_kick', 0, 14, 2], ['wave_extra', 0, 14, 0], ['wave_redrive', 0, 3, 2],
   ['row_settle', 0, 20, 2], ['row_hold', 0, 20, 2], ['row_drive', 0, 200, 32], ['clear', 0, 3, 0, ['auto', 'none', 'fast', 'slow']],
 ];
@@ -36,7 +36,7 @@ const tuningOf = (vals) => Object.fromEntries(KNOBS.map(([n, , , , w], i) => [n,
  */
 export function fakeDisplay(over = {}) {
   const knobs = KNOBS.map((k) => k[3]);
-  const dev = { hello: over === null ? null : { ...HELLO, ...over }, shows: [], refuse: null, port: null, sets: [], knobs, log: {} };
+  const dev = { hello: over === null ? null : { ...HELLO, ...over }, shows: [], pngs: [], refuse: null, port: null, sets: [], knobs, log: {} };
   if (dev.hello && dev.hello.tuning === true) dev.hello.tuning = tuningOf(knobs); // `tuning: true`: a board with the knobs
   let begin = {};
   let png = new Uint8Array();
@@ -73,6 +73,7 @@ export function fakeDisplay(over = {}) {
       const v = new DataView(png.buffer);
       const show = { mode: begin.mode, ...(begin.passes === undefined ? {} : { passes: begin.passes }), x: begin.x, y: begin.y, w: v.getUint32(16), h: v.getUint32(20), bits: png[24], signature: toHex(png.subarray(0, 8)) };
       dev.shows.push(show);
+      dev.pngs.push(Uint8Array.from(png));
       res = begin.mode && begin.mode !== 'full'
         ? { mode: begin.mode, why: begin.mode === 'partial' ? 'changed' : 'asked', depth: show.bits, ms: 7, x: begin.x ?? 0, y: begin.y ?? 0, w: show.w, h: show.h }
         : { mode: 'full', why: 'asked', depth: show.bits, ms: 9, x: 0, y: 0, w: dev.hello.w, h: dev.hello.h };

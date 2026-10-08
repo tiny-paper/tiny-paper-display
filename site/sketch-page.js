@@ -6,7 +6,7 @@
 import { DisplayLink } from './bt-setup.js';
 import {
   BRUSH_NAMES, DEBUG_DEFAULTS, DisplayClient, FULL_AFTER, MOCK_PANELS, MockDisplayDevice, SketchPen, checkSketch, displayHello, parseDebug,
-  reportText, sketchSession, testOf, testPlan, tuningRequest, tuningResults,
+  reportText, sketchInk, sketchSession, testOf, testPlan, tuningRequest, tuningResults,
 } from './sketch.js';
 
 const HELLO_MS = 3000;
@@ -53,7 +53,7 @@ export function startSketchPage(env) {
   };
   const serial = env.navigator && 'serial' in env.navigator ? env.navigator.serial : null;
   const state = { link: null, port: null, hello: null, sender: null, pen: null, preview: null, client: null,
-    dbg: { ...DEBUG_DEFAULTS }, history: [], busy: false, test: null, mark: null };
+    dbg: { ...DEBUG_DEFAULTS }, history: [], busy: false, test: null, mark: null, grays: false };
   const store = {
     get: (k) => { try { return env.localStorage?.getItem(k) ?? null; } catch { return null; } },
     set: (k, v) => { try { env.localStorage?.setItem(k, v); } catch { /* not remembered */ } },
@@ -148,8 +148,19 @@ export function startSketchPage(env) {
   };
 
   /** The tools and the canvas for this device's panel; its drawing is kept while the page is open. */
-  function show(hello, client) {
-    const sender = sketchSession(hello, state.dbg.depth ?? undefined);
+  /** The depth strokes go out at: the Debug depth, else 1 bit where the device does partial updates at it (the best looking and fastest on the X), grays when asked for. */
+  const depthFor = (hello) => {
+    if (state.dbg.depth !== null) return state.dbg.depth;
+    const d = hello.partial_depths || [];
+    return state.grays && d.some((x) => x > 1) ? Math.max(...d) : d.includes(1) ? 1 : undefined;
+  };
+  function show(hello, client, note = '') {
+    const prev = state.sender;
+    const sender = sketchSession(hello, depthFor(hello));
+    if (prev && prev !== sender && prev.model.w === sender.model.w && prev.model.h === sender.model.h) sender.model.adopt(prev.model); // another depth: the same drawing
+    const gray = (hello.partial_depths || []).some((x) => x > 1) && !hello.colors;
+    $('graysrow').hidden = !gray;
+    $('grays').checked = state.grays;
     const pen = new SketchPen(sender);
     state.hello = hello; state.sender = sender; state.pen = pen; state.client = client;
     sender.strokeMode = state.dbg.mode; sender.erase = state.dbg.erase;
@@ -193,6 +204,7 @@ export function startSketchPage(env) {
     $('full').disabled = false;
     pressed();
     sender.attach(client, hello);
+    if (note && sender.ink.partial) sender.fullWith(note);
   }
 
   /** The device is gone (or another one comes): the drawing stays on the page. */
@@ -209,6 +221,7 @@ export function startSketchPage(env) {
 
   /** Open the port, ask hello and start. A device that is not the display firmware: say how to install it. */
   async function attach(port, preview) {
+    state.grays = false;
     await disconnect('');
     $('install').hidden = true;
     const link = new DisplayLink(port, { timeoutMs: HELLO_MS });
@@ -223,6 +236,7 @@ export function startSketchPage(env) {
       throw e;
     }
     state.link = link; state.port = port; state.preview = preview;
+    state.grays = store.get(`tp-sketch-grays-${hello.board}`) === '1';
     link.onRequest = (n) => { if (state.mark && !state.mark.anchored) { state.mark.n = n; state.mark.anchored = true; } };
     link.onLog = () => { logBox(); report(); };
     const title = BOARD_TITLES[hello.board] ?? hello.board;
@@ -305,8 +319,7 @@ export function startSketchPage(env) {
   function takeSketch(next) {
     const before = state.sender.ink.depth;
     state.dbg = next;
-    const want = sketchSession(state.hello, next.depth ?? undefined);
-    if (want.ink.depth !== before) show(state.hello, state.client); // another depth: another drawing
+    if (sketchInk(state.hello, depthFor(state.hello)).depth !== before) show(state.hello, state.client); // another depth: the same drawing, sent whole
     else { state.sender.strokeMode = next.mode; state.sender.erase = next.erase; state.sender.fullAfter = next.full_after; $('fullafter').value = String(next.full_after); }
   }
   async function applyDebug() {
@@ -358,6 +371,14 @@ export function startSketchPage(env) {
     out.push({ key: 'sketch', text: 'defaults restored' });
     state.test = null;
     lines(out);
+  };
+  $('grays').onchange = () => {
+    if (!state.hello || !state.client || state.busy) return;
+    state.grays = $('grays').checked;
+    store.set(`tp-sketch-grays-${state.hello.board}`, state.grays ? '1' : '0');
+    show(state.hello, state.client, state.grays
+      ? 'Switched to grays: the canvas is sent with one full refresh, because the device keeps one depth at a time.'
+      : 'Switched to black and white: the canvas was thresholded and is sent with one full refresh, because the device keeps one depth at a time.');
   };
   $('debugsaw').oninput = report;
   $('reportlog').onchange = report;

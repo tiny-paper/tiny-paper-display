@@ -23,7 +23,7 @@ export function sketchInk(hello: DisplayHello, forceDepth?: number): SketchInk {
     const g = Math.round(v * 255 / max);
     swatches.push({ value: v, name: v === 0 ? 'black' : v === max ? 'white' : `gray ${v} of ${max}`, rgb: [g, g, g] });
   }
-  const more = hello.colors ? 'colours' : Math.max(...hello.depths) > depth ? 'grays' : '';
+  const more = hello.colors ? 'colours' : Math.max(...hello.depths) > depth && !(partial && Math.max(...hello.partial_depths) > depth) ? 'grays' : '';
   const note = !partial ? 'This panel has no partial refresh: the drawing goes out only with the Full refresh button.'
     : more ? `Partial updates on this panel cannot show ${depth === 1 ? more : 'more grays'}, so the sketch is ${depth === 1 ? 'black and white' : `${max + 1} grays`}.` : '';
   return { depth, color, partial, paper: max, swatches, note };
@@ -127,6 +127,18 @@ export class SketchModel {
     const d = this.dirty;
     this.dirty = null;
     return d ? alignRect(rectOf(d), this.w, this.h) : null;
+  }
+  /**
+   * Take over the drawing of a model at another depth (the Grays switch): each level keeps its share of white; at 1 bit the
+   * halves round to black and white (a level of at least half is white). Marks nothing to send: the caller sends the whole.
+   */
+  adopt(from: SketchModel): void {
+    if (from.w !== this.w || from.h !== this.h) return;
+    const fromMax = from.paper, toMax = this.paper;
+    for (let i = 0; i < this.px.length; i++) {
+      const t = from.px[i]! / fromMax;
+      this.px[i] = toMax === 1 ? (t >= 0.5 ? 1 : 0) : Math.round(t * toMax);
+    }
   }
   /** Whether a pixel got lighter since the last send (not cleared). */
   get lighterPending(): boolean { return this.light; }

@@ -7,7 +7,7 @@ import { FrameParser, decodePayload, encodeFrame } from '../protocol/link-frame.
 export const X_KNOBS: readonly { name: string; min: number; max: number; def: number; words?: readonly string[] }[] = [
   { name: 'gray_table', min: 0, max: 1, def: 1, words: ['fastepd', 'stock'] },
   { name: 'gray_partial', min: 0, max: 1, def: 1, words: ['off', 'on'] },
-  { name: 'gray_dark', min: 0, max: 14, def: 0 }, { name: 'gray_light', min: 0, max: 14, def: 3 },
+  { name: 'gray_dark', min: 0, max: 14, def: 0 }, { name: 'gray_light', min: 0, max: 14, def: 0 },
   { name: 'passes_partial', min: 1, max: 14, def: 4 }, { name: 'passes_full', min: 1, max: 14, def: 3 },
   { name: 'wave_kick', min: 0, max: 14, def: 2 }, { name: 'wave_extra', min: 0, max: 14, def: 0 }, { name: 'wave_redrive', min: 0, max: 3, def: 2 },
   { name: 'row_settle', min: 0, max: 20, def: 2 }, { name: 'row_hold', min: 0, max: 20, def: 2 }, { name: 'row_drive', min: 0, max: 200, def: 32 },
