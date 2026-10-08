@@ -7,7 +7,7 @@
 <style>body{font:16px/1.5 system-ui,sans-serif;max-width:60rem;margin:0 auto;padding:1rem;color:#111;background:#fff}table{border-collapse:collapse;margin:1rem 0;display:block;overflow-x:auto}td,th{border:1px solid #bbb;padding:.3rem .6rem;text-align:left;vertical-align:top}nav a{margin-right:1rem}nav a[aria-current]{font-weight:600;text-decoration:none}code,pre{font:13px/1.4 ui-monospace,monospace;background:#f2f2f2}code{padding:0 .2rem}pre{padding:.6rem;overflow-x:auto;max-width:100%}pre code{padding:0}h2{margin-top:2rem}h3{margin-top:1.5rem}@media(prefers-color-scheme:dark){body{color:#eee;background:#141414}code,pre{background:#2a2a2a}td,th{border-color:#555}a{color:#8ab4f8}}</style>
 </head>
 <body>
-<nav><a href="index.html">Flash</a><a href="sketch.html">Sketch</a><a href="api.html" aria-current="page">Use it</a></nav>
+<nav><a href="index.html">Flash</a><a href="sketch.html">Sketch</a><a href="picture.html">Picture</a><a href="api.html" aria-current="page">Use it</a></nav>
 <h1 id="use-it">Use it</h1>
 <p>tiny-paper display turns a TRMNL X, a TRMNL OG or a PicPak into a plain e-paper display. A computer sends it a PNG
 over the USB cable and it shows the picture. No WiFi, no account, no app. Bluetooth is there too, off until you switch it on.</p>
@@ -34,10 +34,48 @@ else has been tried on a device. Where a section below depends on that, it says 
 <td>Plug the device in, press Connect, pick its port. Draw: each stroke goes to the panel as a partial update of the area that changed</td>
 </tr>
 <tr>
+<td><a href="picture.html">Picture page</a></td>
+<td>Connect, then drop, pick or paste a picture, or use a test picture. The preview shows the exact pixels that will be sent. Choose fit, rotation, depth and dithering, then Send. The picture stays in the browser</td>
+</tr>
+<tr>
 <td>Without a device</td>
-<td><a href="sketch.html?mock=x">TRMNL X</a>, <a href="sketch.html?mock=og">TRMNL OG</a> or <a href="sketch.html?mock=picpak">PicPak</a>: a pretend device answers, nothing reaches a panel</td>
+<td><a href="sketch.html?mock=x">TRMNL X</a>, <a href="sketch.html?mock=og">TRMNL OG</a> or <a href="sketch.html?mock=picpak">PicPak</a>: a pretend device answers, nothing reaches a panel. The same on the <a href="picture.html?mock=x">Picture page</a></td>
 </tr>
 </tbody></table>
+<h3 id="picture-page">Picture page</h3>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Choices</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Fit</td>
+<td>whole picture with a border, fill and crop, stretch</td>
+</tr>
+<tr>
+<td>Rotate</td>
+<td>0, 90, 180, 270, auto (turns it when that fills more of the panel)</td>
+</tr>
+<tr>
+<td>Depth</td>
+<td>each depth the device takes (1, 2, 4 bit gray), on the PicPak its four colours</td>
+</tr>
+<tr>
+<td>Dithering</td>
+<td>none (nearest level; at 1 bit a threshold), Floyd-Steinberg, ordered 4x4</td>
+</tr>
+<tr>
+<td>Refresh</td>
+<td>auto, partial (only what changed; the device compares with the frame it keeps), full</td>
+</tr>
+</tbody></table>
+<p>Scaling averages the pixels a new pixel covers when shrinking and is bilinear when enlarging. Gray is luminance
+<code>0.299 R + 0.587 G + 0.114 B</code> on the stored values, not linear light. Dithering comes after scaling. The status line
+says what was asked, what the device did and why, the panel time and the total time. Compare sends the picture four ways
+(1 bit and the deepest depth, each nearest and Floyd-Steinberg, all full refreshes) with a pause you set, and Copy report
+gives a text to paste with a line for what you saw.</p>
 <h2 id="python">Python</h2>
 <h3 id="install">Install</h3>
 <p>The package is not on PyPI yet. Today it installs from this repository. This command was run in a fresh virtual

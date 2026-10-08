@@ -1,0 +1,118 @@
+<!doctype html>
+<!-- tiny-paper display: show a picture on the panel from the browser (Web Serial). Static: this page, picture-page.js and
+     picture.js (the picture modules as one file) are all it loads; the picture never leaves the browser except to the
+     device on the cable. SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<title>tiny-paper display: picture</title>
+<style>
+  :root { --bg: #fff; --fg: #111; --mut: #666; --line: #ccc; --bad: #b00020; --ok: #0a7a2f; --sel: #1463d8; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #141414; --fg: #eee; --mut: #999; --line: #444; --bad: #ff6b81; --ok: #5fd38a; --sel: #7fb0ff; } }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; margin: 0 auto; max-width: 960px; padding: 16px; }
+  h1 { font-size: 22px; } h2 { font-size: 17px; margin: 0 0 8px; }
+  nav a { margin-right: 16px; } nav a[aria-current] { font-weight: 600; text-decoration: none; }
+  section { border: 1px solid var(--line); border-radius: 6px; padding: 12px; margin: 12px 0; }
+  button, input, select { font: inherit; padding: 6px 12px; margin: 4px 8px 4px 0; max-width: 100%; }
+  select { padding: 6px 4px; }
+  button:disabled { opacity: .5; }
+  button[aria-pressed='true'] { outline: 3px solid var(--sel); outline-offset: 1px; }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+  .row label { display: inline-flex; align-items: center; gap: 6px; }
+  #drop { border: 2px dashed var(--line); border-radius: 6px; padding: 14px; text-align: center; margin: 8px 0; }
+  #drop.over { border-color: var(--sel); }
+  #canvaswrap { margin: 12px 0; overflow: auto; max-width: 100%; }
+  canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; border: 1px solid var(--line); background: #fff; }
+  input[type='number'] { width: 5em; } input[type='range'] { padding: 0; width: 12em; }
+  textarea { width: 100%; box-sizing: border-box; font: 13px/1.4 ui-monospace, monospace; }
+  .warn { color: var(--bad); font-weight: 600; } .ok { color: var(--ok); font-weight: 600; } .mut { color: var(--mut); }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+<nav><a href="index.html">Flash</a><a href="sketch.html">Sketch</a><a href="picture.html" aria-current="page">Picture</a><a href="api.html">Use it</a></nav>
+<h1>tiny-paper display: picture</h1>
+<p>Choose a picture, see exactly the pixels the panel will get, send them. The picture stays in this browser: it goes
+nowhere but to the device on the cable, and there is no account or upload.</p>
+<p id="nosupport" class="warn" hidden>This browser cannot reach a USB device (no Web Serial). Use Chrome or Edge on a
+computer. <a href="picture.html?mock=x">See the page work without a device.</a></p>
+<p id="preview" class="warn" hidden></p>
+
+<section>
+  <button id="connect">Connect</button>
+  <span id="device" class="mut">Plug the display in with a USB data cable, press Connect and pick its port
+  ("USB JTAG/serial debug unit").</span>
+  <p id="partial" class="mut" hidden></p>
+  <p id="install" class="warn" hidden><span id="installwhy"></span> This page needs the display firmware on the
+  device: <a href="index.html">install it on the Flash page</a>, then come back.</p>
+</section>
+
+<div id="pad" hidden>
+<section>
+  <h2>1. Choose a picture</h2>
+  <div id="drop" tabindex="0">Drop a picture here, or
+    <input id="file" type="file" accept="image/*" aria-label="Pick a picture file">
+    <button id="pastebtn">Paste from the clipboard</button></div>
+  <div class="row"><span>Test pictures:</span>
+    <button id="b-gradient">Gray gradient and step wedge</button>
+    <button id="b-scene">Photo-like scene</button>
+    <button id="b-lines">Line drawing</button></div>
+  <p id="source" class="mut" role="status">No picture yet.</p>
+</section>
+
+<section>
+  <h2>2. Prepare</h2>
+  <div class="row">
+    <label>Fit <select id="fit"><option value="fit">Whole picture, with a border</option><option value="fill">Fill and crop</option><option value="stretch">Stretch</option></select></label>
+    <label>Border <select id="border"><option value="white">White</option><option value="black">Black</option></select></label>
+    <label>Rotate <select id="rotate"><option value="auto">Auto</option><option value="0">0</option><option value="90">90</option><option value="180">180</option><option value="270">270</option></select></label>
+  </div>
+  <div class="row">
+    <label>Depth <select id="depth"></select></label>
+    <label>Dithering <select id="dither"><option value="none">None (nearest level)</option><option value="floyd" selected>Floyd-Steinberg</option><option value="ordered">Ordered 4x4</option></select></label>
+    <label id="thresholdrow">Threshold <input id="threshold" type="range" min="1" max="255" value="128"> <output id="thresholdvalue">128</output></label>
+  </div>
+  <p id="prepnote" class="mut" role="status"></p>
+  <div class="row"><button id="zoom" aria-pressed="false">Show 1:1</button><span class="mut" id="zoomnote">Shown to fit the page width.</span></div>
+  <div id="canvaswrap"><canvas id="canvas" aria-label="The pixels that will be sent to the panel"></canvas></div>
+</section>
+
+<section>
+  <h2>3. Send</h2>
+  <div class="row">
+    <label>Refresh <select id="refresh"></select></label>
+    <button id="send" disabled>Send</button>
+    <button id="clear" disabled>Clear (full refresh to white)</button>
+  </div>
+  <p id="refreshwhy" class="mut"></p>
+  <p class="mut">Partial: the device compares the whole picture with the frame it keeps and refreshes only the changed area; the
+  first picture, or one at another depth, is a full refresh whatever is asked. A picture that is already shown needs no refresh.</p>
+  <p id="status" role="status">Nothing sent yet.</p>
+</section>
+
+<section>
+  <h2>Compare on the glass</h2>
+  <p class="mut">Sends the current picture four ways in a row, each as a full refresh: 1 bit nearest, 1 bit Floyd-Steinberg,
+  then the deepest depth nearest and Floyd-Steinberg. Look at the panel after each one.</p>
+  <div class="row">
+    <label>Pause between <input id="pause" type="number" min="0" max="120" value="6"> s</label>
+    <button id="compare" disabled>Compare</button>
+    <button id="stop" disabled>Stop</button>
+  </div>
+  <p id="comparestatus" role="status" class="mut"></p>
+  <h3>Report</h3>
+  <label>What I saw <input id="saw" type="text" style="width:70%" placeholder="for example: Floyd-Steinberg 4 bit best"></label>
+  <textarea id="report" rows="10" readonly aria-label="Report to copy"></textarea>
+  <div class="row"><button id="reportcopy">Copy report</button><span id="reportnote" class="mut" role="status"></span></div>
+</section>
+</div>
+
+<p class="mut">No device at hand: the page with a pretend
+<a href="picture.html?mock=x">TRMNL X</a>, <a href="picture.html?mock=og">TRMNL OG</a> or
+<a href="picture.html?mock=picpak">PicPak</a>. What the device answers is explained in <a href="api.html#what-the-answer-tells-you">the guide</a>.</p>
+
+<script type="module" src="picture-page.js"></script>
+</body>
+</html>

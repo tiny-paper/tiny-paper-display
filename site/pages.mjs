@@ -13,7 +13,7 @@ import { Marked } from 'marked';
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
 
-export const NAV = [['index.html', 'Flash'], ['sketch.html', 'Sketch'], ['api.html', 'Use it']];
+export const NAV = [['index.html', 'Flash'], ['sketch.html', 'Sketch'], ['picture.html', 'Picture'], ['api.html', 'Use it']];
 export const PAGES = [
   { src: 'docs/use.md', out: 'api.html', title: 'Use it', current: 'api.html' },
   { src: 'docs/spec/usb-display.md', out: 'protocol.html', title: 'USB display protocol', current: null },

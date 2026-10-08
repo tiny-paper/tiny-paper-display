@@ -10,10 +10,10 @@ import { fileURLToPath } from 'node:url';
 
 const SITE = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (name) => readFileSync(join(SITE, name), 'utf8');
-const PAGES = ['index.html', 'sketch.html', 'api.html'];
-const NAV = [['index.html', 'Flash'], ['sketch.html', 'Sketch'], ['api.html', 'Use it']];
+const PAGES = ['index.html', 'sketch.html', 'picture.html', 'api.html'];
+const NAV = [['index.html', 'Flash'], ['sketch.html', 'Sketch'], ['picture.html', 'Picture'], ['api.html', 'Use it']];
 
-test('navigation: Flash, Sketch, Use it on every page, the page itself marked', () => {
+test('navigation: Flash, Sketch, Picture, Use it on every page, the page itself marked', () => {
   for (const page of PAGES) {
     const nav = read(page).match(/<nav>(.*?)<\/nav>/s);
     assert.ok(nav, `${page}: no <nav>`);
@@ -48,7 +48,7 @@ test('every file a page loads is there and is copied to the published site', () 
       if (!seen.has(f)) { seen.add(f); queue.push(f); }
     }
   }
-  for (const f of ['sketch.js', 'sketch-page.js', 'bt-setup.js', 'frame.js', 'flash.js']) assert.ok(seen.has(f), `${f} is not reached from a page`);
+  for (const f of ['sketch.js', 'sketch-page.js', 'picture.js', 'picture-page.js', 'bt-setup.js', 'frame.js', 'flash.js']) assert.ok(seen.has(f), `${f} is not reached from a page`);
   // pages.yml publishes with publish.mjs, which copies every .html and .js file of site/
   const workflow = readFileSync(join(SITE, '..', '.github/workflows/pages.yml'), 'utf8');
   assert.match(workflow, /node site\/publish\.mjs/);
