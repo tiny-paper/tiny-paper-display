@@ -1,5 +1,5 @@
-// esbuild 0.28.2, 16 source files of the tiny-paper main repository (MIT): do not edit.
-// packages/display/src/client.ts
+// esbuild 0.28.2, 12 source files of site/src (MIT): do not edit, run `npm run build` in site/.
+// src/display/client.ts
 var DISPLAY_MODES = ["full", "partial", "partial_all", "inverse", "passes"];
 var DISPLAY_ERRORS = {
   1: "UNKNOWN_CMD",
@@ -111,7 +111,7 @@ function displayAnswer(r) {
   return `${modes[String(r.mode)] ?? String(r.mode)}: ${reasons[String(r.why)] ?? String(r.why)} (${r.ms} ms).${r.warn ? ` Check the panel: ${r.warn}.` : ""}${r.ckv && typeof r.ckv === "object" && "ok" in r.ckv && r.ckv.ok === false ? " The panel clock check failed; inspect the panel." : ""}`;
 }
 
-// packages/protocol/src/bytes.ts
+// src/protocol/bytes.ts
 var CRC32_TABLE = (() => {
   const t = new Uint32Array(256);
   for (let n = 0; n < 256; n++) {
@@ -135,7 +135,7 @@ function crc16(data, crc = 65535) {
   return c;
 }
 
-// packages/display/src/png.ts
+// src/display/png.ts
 function chunk(name, data) {
   const b = new Uint8Array(data.length + 12);
   const v = new DataView(b.buffer);
@@ -169,7 +169,7 @@ async function packedPng(rows, w, h, depth, color) {
   return png;
 }
 
-// packages/display/src/sketchModel.ts
+// src/display/sketchModel.ts
 var UNDO_STEPS = 10;
 function sketchInk(hello) {
   const partial = hello.modes.includes("partial") && hello.partial_depths.length > 0;
@@ -317,7 +317,7 @@ var SketchModel = class {
   }
 };
 
-// packages/display/src/sketchPen.ts
+// src/display/sketchPen.ts
 var BRUSH_NAMES = ["Small", "Medium", "Large"];
 var SketchPen = class {
   constructor(sender) {
@@ -377,7 +377,7 @@ var SketchPen = class {
   }
 };
 
-// packages/protocol/src/album.ts
+// src/protocol/album.ts
 var te = new TextEncoder();
 var td = new TextDecoder("utf-8", { fatal: false });
 var rasterStride = (w, depth) => Math.ceil(w * depth / 8);
@@ -391,7 +391,7 @@ function packRows(px, w, h, depth) {
   return out;
 }
 
-// packages/display/src/sketchSender.ts
+// src/display/sketchSender.ts
 var SKETCH_TIMING = { liftMs: 150, everyMs: 700, busyMs: 5e3 };
 var FULL_AFTER = 30;
 var LOST = ["first", "refused", "cut", "failed", "memory", "depth", "board"];
@@ -534,7 +534,7 @@ function sketchSession(hello) {
   return kept.sender;
 }
 
-// packages/protocol/src/cbor.ts
+// src/protocol/cbor.ts
 var CborError = class extends Error {
   name = "CborError";
 };
@@ -843,7 +843,7 @@ function cborDecodeMap(b) {
   return v;
 }
 
-// packages/protocol/src/link-frame.ts
+// src/protocol/link-frame.ts
 var SYNC0 = 165;
 var SYNC1 = 90;
 var MAX_PAYLOAD = 6144;
@@ -913,7 +913,7 @@ function decodePayload(p) {
   return p.length === 0 ? {} : cborDecodeMap(p);
 }
 
-// packages/display/src/mockDevice.ts
+// src/display/mockDevice.ts
 var MOCK_PANELS = { x: "TRMNL X", og: "TRMNL OG", picpak: "PicPak" };
 var MockDisplayDevice = class {
   hello = {

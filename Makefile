@@ -12,6 +12,7 @@ test-python: $(VENV)/bin/pytest
 	$(VENV)/bin/python -m pytest -q python/tests
 
 test-site:
+	npm ci --prefix site --no-audit --no-fund
 	node --test site/test/*.test.mjs
 
 .PHONY: test test-firmware test-python test-site

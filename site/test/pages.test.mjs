@@ -80,7 +80,7 @@ test('the whole site loads one thing from elsewhere: esptool-js from jsDelivr, o
 });
 
 test('the bundle names the tool that made it', () => {
-  assert.match(read('sketch.js').split('\n')[0], /^\/\/ esbuild \d+\.\d+\.\d+, \d+ source files of the tiny-paper main repository \(MIT\): do not edit\.$/);
+  assert.match(read('sketch.js').split('\n')[0], /^\/\/ esbuild \d+\.\d+\.\d+, \d+ source files of site\/src \(MIT\): do not edit, run `npm run build` in site\/\.$/);
 });
 
 test('after an install the flash page says "Installed: now draw on it" with the link, and not before', () => {

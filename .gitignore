@@ -7,3 +7,4 @@ sdkconfig
 sdkconfig.old
 managed_components/
 _site/
+node_modules/

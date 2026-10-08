@@ -43,6 +43,7 @@ jobs:
           [ "${{ matrix.board }}" = trmnl_og ] && dist=firmware/build/esp/display/dist
           mkdir out
           for f in "$dist"/*; do cp "$f" "out/${{ matrix.board }}__$(basename "$f")"; done
+          npm ci --prefix site --no-audit --no-fund
           TINY_DIST="$dist" node --test site/test/*.test.mjs
       - uses: actions/upload-artifact@v4
         with:
