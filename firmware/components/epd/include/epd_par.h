@@ -19,6 +19,7 @@
 #include "epd_parwave.h"
 #include "epd_rowtime.h"
 #include "epd_scan.h"
+#include "epd_split.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -132,6 +133,8 @@ uint8_t *epdp_prev_buffer(void);
 /* Panel rails off, IO lines to high impedance. */
 void epdp_close(void);
 uint32_t epdp_last_ms(void);       /* duration of the last update */
+/* Where the time of the last update went (epd_split.h): the driver's parts, up to after. */
+const epd_split_t *epdp_last_split(void);
 
 #ifdef __cplusplus
 }

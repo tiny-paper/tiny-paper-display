@@ -667,12 +667,24 @@ var MockDisplayDevice = class {
   onOutput(cb) {
     this.output = cb;
   }
-  /** The log lines the X writes after a refresh (panel_par.c, formats copied): the page's Device log shows what they look like. */
+  /** The log lines the X writes after a refresh (panel_par.c, formats copied; the numbers are made up): the page's Device log shows what they look like. */
   logFor(r) {
     const y0 = Number(r.y), y1 = y0 + Number(r.h) - 1;
-    if (r.mode === "full") return [`panel full depth=${r.depth} ms=2591 clear=fast gray=stock rowmax=61@12 rc=0`, "panel rows drive=0us high=29/37/55 n=3 waited=0 absorbed=0 over=0 ckv=8424/6"];
-    if (Number(r.depth) > 1) return [`panel gpart depth=${r.depth} rows=${y0}..${y1} ms=2567 dark=${this.knobs[2]} light=${this.knobs[3]} gray=${this.knobs[0] ? "stock" : "fastepd"} steps=4 frames=9 chg=2400 drv=2400 rowmax=88@${y0} rc=0`, "panel rows drive=32us high=30/37/52 n=281 waited=0 absorbed=0 over=0 ckv=12636/9"];
-    return [`panel partial rows=${y0}..${y1} ms=1465 passes=4 kick=2/90ms main=4/180ms extra=0/0ms redrive=0@0..0 rowdly=2,2 rowmax=61@${y0} fresh=0/0ms since_full=1 rc=0`, "panel rows drive=32us high=30/37/52 n=281 waited=0 absorbed=0 over=0 ckv=11236/8"];
+    if (r.mode === "full") return [
+      `panel full depth=${r.depth} ms=2591 clear=fast gray=stock rowmax=61@12 rc=0`,
+      "panel rows drive=0us high=29/37/55 n=3 waited=0 absorbed=0 over=0 ckv=8424/6",
+      "panel time total=2612 begin=9 write=11 up=0 prep=3 masks=0 lib=61 scans=2520 down=4 after=0 save=0 log=4 other=0 calls=1"
+    ];
+    if (Number(r.depth) > 1) return [
+      `panel gpart depth=${r.depth} rows=${y0}..${y1} ms=2567 dark=${this.knobs[2]} light=${this.knobs[3]} gray=${this.knobs[0] ? "stock" : "fastepd"} steps=4 frames=9 chg=2400 drv=2400 rowmax=88@${y0} rc=0`,
+      "panel rows drive=32us high=30/37/52 n=281 waited=0 absorbed=0 over=0 ckv=12636/9",
+      "panel time total=2590 begin=9 write=2 up=42 prep=1 masks=96 lib=148 scans=2270 down=4 after=6 save=0 log=12 other=0 calls=4"
+    ];
+    return [
+      `panel partial rows=${y0}..${y1} ms=1465 passes=4 kick=2/90ms main=4/180ms extra=0/0ms redrive=0@0..0 rowdly=2,2 rowmax=61@${y0} fresh=0/0ms since_full=1 rc=0`,
+      "panel rows drive=32us high=30/37/52 n=281 waited=0 absorbed=0 over=0 ckv=11236/8",
+      "panel time total=1490 begin=9 write=1 up=42 prep=58 masks=74 lib=52 scans=1196 down=4 after=31 save=0 log=23 other=0 calls=2"
+    ];
   }
   write(bytes) {
     for (const ev of this.parser.push(bytes)) {

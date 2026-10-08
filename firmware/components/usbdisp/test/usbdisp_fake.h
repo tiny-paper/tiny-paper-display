@@ -36,6 +36,7 @@ static struct {
     uint16_t next_row; /* the row the next band must start at (top first) or end at (bottom first) */
     int fail_begin, fail_write, fail_refresh;
     uint32_t refresh_us;
+    uint32_t alloc_us; /* the clock moves this much at every allocation */
     const uint8_t *during;
     size_t during_len;
     char log[256];
@@ -66,6 +67,7 @@ static inline void *f_alloc(void *ctx, size_t n)
     (void)ctx;
     if (F.fail_at >= 0 && F.allocs++ == F.fail_at)
         return NULL;
+    F.now += F.alloc_us; /* the work before the panel takes time too */
     F.live++;
     return malloc(n ? n : 1);
 }

@@ -436,6 +436,51 @@ clock per row in every scan whatever the keys say; the device counts the clock e
 drives them, and logs both after each partial update: <code>panel scan neutral=&lt;each|end&gt; skip=&lt;off|on/&lt;us&gt;us&gt; frames=&lt;scans&gt; careful=&lt;rows written&gt; skipped=&lt;rows clocked through&gt; left=&lt;neutral scans left out&gt; gap=&lt;longest pause between steps&gt; &lt;ok|BAD&gt; per=&lt;clock edges a scan, 1408&gt;</code>; <code>careful + skipped</code> is <code>frames</code> times 1404, else <code>BAD</code> and a <code>W</code> line.
 With <code>row_skip</code> an update starts with one more scan that writes three neutral rows and skips the rest, so the source
 drivers hold neutral before any row is skipped.</p>
+<p>The time of every update on the TRMNL X, split, is the last of its log lines: <code>panel time total=&lt;ms&gt; begin=&lt;ms&gt; write=&lt;ms&gt; up=&lt;ms&gt; prep=&lt;ms&gt; masks=&lt;ms&gt; lib=&lt;ms&gt; scans=&lt;ms&gt; down=&lt;ms&gt; after=&lt;ms&gt; save=&lt;ms&gt; log=&lt;ms&gt; other=&lt;ms&gt; calls=&lt;n&gt;</code>. The update&#39;s own line (<code>show ...</code>) has <code>ms</code>, the time on the panel, and <code>pre</code>, the time before it.</p>
+<table>
+<thead>
+<tr>
+<th>Part</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>pre</code></td>
+<td>before the panel: the frame, the picture decoded into it, its fingerprint, the changed rectangle</td>
+</tr>
+<tr>
+<td><code>begin</code>, <code>write</code></td>
+<td>the driver&#39;s start (frames set white) and the rows copied in</td>
+</tr>
+<tr>
+<td><code>up</code>, <code>down</code></td>
+<td>panel rails up, until the supply reports good, and down; a full refresh powers up inside <code>lib</code></td>
+</tr>
+<tr>
+<td><code>prep</code></td>
+<td>once an update, before the first scan: frame copies, the search for new blacks, fingerprints</td>
+</tr>
+<tr>
+<td><code>masks</code></td>
+<td>per step: the codes of the step for every pixel</td>
+</tr>
+<tr>
+<td><code>lib</code></td>
+<td>inside the library before the first scan of each call (<code>calls</code>): its codes per row, its task</td>
+</tr>
+<tr>
+<td><code>scans</code></td>
+<td>the scans themselves; the only part the scan keys shorten</td>
+</tr>
+<tr>
+<td><code>after</code>, <code>save</code></td>
+<td>redrive counts and the frames kept; the redrive file (0: kept in memory)</td>
+</tr>
+<tr>
+<td><code>log</code>, <code>other</code></td>
+<td>writing the update&#39;s other log lines; what no part covers</td>
+</tr>
+</tbody></table>
 <p>The two gray tables, one row a level, one character a pass in the order driven (<code>.</code> no drive, <code>D</code> dark, <code>L</code> light). A
 full refresh runs a level&#39;s row on every pixel of that level after the clearing passes have left the panel white; a gray
 partial update runs it on the changed pixels from whatever they show. The rows are tuned by hand. A refresh drawn with

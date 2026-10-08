@@ -186,6 +186,22 @@ careful=<rows written> skipped=<rows clocked through> left=<neutral scans left o
 With `row_skip` an update starts with one more scan that writes three neutral rows and skips the rest, so the source
 drivers hold neutral before any row is skipped.
 
+The time of every update on the TRMNL X, split, is the last of its log lines: `panel time total=<ms> begin=<ms>
+write=<ms> up=<ms> prep=<ms> masks=<ms> lib=<ms> scans=<ms> down=<ms> after=<ms> save=<ms> log=<ms> other=<ms>
+calls=<n>`. The update's own line (`show ...`) has `ms`, the time on the panel, and `pre`, the time before it.
+
+| Part | What |
+|---|---|
+| `pre` | before the panel: the frame, the picture decoded into it, its fingerprint, the changed rectangle |
+| `begin`, `write` | the driver's start (frames set white) and the rows copied in |
+| `up`, `down` | panel rails up, until the supply reports good, and down; a full refresh powers up inside `lib` |
+| `prep` | once an update, before the first scan: frame copies, the search for new blacks, fingerprints |
+| `masks` | per step: the codes of the step for every pixel |
+| `lib` | inside the library before the first scan of each call (`calls`): its codes per row, its task |
+| `scans` | the scans themselves; the only part the scan keys shorten |
+| `after`, `save` | redrive counts and the frames kept; the redrive file (0: kept in memory) |
+| `log`, `other` | writing the update's other log lines; what no part covers |
+
 The two gray tables, one row a level, one character a pass in the order driven (`.` no drive, `D` dark, `L` light). A
 full refresh runs a level's row on every pixel of that level after the clearing passes have left the panel white; a gray
 partial update runs it on the changed pixels from whatever they show. The rows are tuned by hand. A refresh drawn with

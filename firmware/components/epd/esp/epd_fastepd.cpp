@@ -6,6 +6,7 @@
 #include "epd_parwin.h"
 #include "epd_parwave.h"
 #include "epd_scan.h"
+#include "epd_split.h"
 #include "esp_heap_caps.h"
 #include "epd_pins.h"
 #include "FastEPD.h"
@@ -253,8 +254,15 @@ static void io_resume(void *, int row)
 }
 static const epd_scan_io_t SCAN_IO = {io_frame_start, io_row_step, io_data_wait, io_ckv, io_delay, io_now, io_resume};
 
+/* Where the time of the update went (epd_split.h). s_first_us: when the library call in progress began its first
+ * scan (0: not yet), stamped by row_ctl. */
+static epd_split_t s_split;
+static volatile uint32_t s_first_us;
+static uint32_t s_lap;
+
 static void IRAM_ATTR row_ctl(void *p, int type)
 {
+    if (type == ROW_START && !s_first_us) s_first_us = now_us() | 1u;
     if (s_seq_on) {
         if (type == ROW_START) {
             if (!epd_scan_seq_start(&s_seq)) ((FASTEPDSTATE *)p)->native_height = 0; /* FastEpdX::scan_partial */
@@ -329,6 +337,54 @@ template <class F> static int on_panel_core(F &&f)
 #endif
 
 static FastEpdX s_epd;
+
+#define IOX_ADDR      0x20
+/* TCA9535 pin 10 (P1_2) is the BQ27427 fuel-gauge reset on the X. FastEPD's EPDiy V7 IO init makes
+ * pins 8..13 outputs driven low, which would hold the gauge in reset: hand it back as an input. */
+#define IOX_GAUGE_RST 10
+#define IOX_TRIES     3
+
+/* The time since the last lap goes to `part`. */
+static void lap(int part)
+{
+    uint32_t n = now_us();
+    epd_split_add(&s_split, part, n - s_lap);
+    s_lap = n;
+}
+static void split_begin(void)
+{
+    epd_split_reset(&s_split);
+    s_lap = now_us();
+}
+/* One library call on the panel core: the time before it goes to `part`, its own to lib and scans. */
+template <class F> static int lib_call(int part, F &&f)
+{
+    lap(part);
+    s_first_us = 0;
+    int rc = on_panel_core(static_cast<F &&>(f));
+    uint32_t n = now_us();
+    epd_split_call(&s_split, s_lap, s_first_us, n);
+    s_lap = n;
+    return rc;
+}
+/* Rails up before the first scan, so the time it takes is seen on its own (the library's own power up at the start
+ * of each update then finds them up and returns). The time before goes to `part`. */
+static int rails_up(int part)
+{
+    lap(part);
+    int rc = s_epd.einkPower(1);
+    lap(EPD_SPLIT_UP);
+    return rc;
+}
+static void rails_down(int part)
+{
+    lap(part);
+    s_epd.einkPower(0);
+    s_epd.ioPinMode(IOX_GAUGE_RST, 1);
+    lap(EPD_SPLIT_DOWN);
+}
+extern "C" const epd_split_t *epdp_last_split(void) { return &s_split; }
+
 static bool s_open;
 static uint32_t s_bus_hz = EPDP_BUS_HW_CS; /* epdp_set_bus_hz */
 static uint32_t s_last_ms;
@@ -406,11 +462,6 @@ static bool scratch(size_t n)
     return false;
 }
 
-#define IOX_ADDR      0x20
-/* TCA9535 pin 10 (P1_2) is the BQ27427 fuel-gauge reset on the X. FastEPD's EPDiy V7 IO init makes
- * pins 8..13 outputs driven low, which would hold the gauge in reset: hand it back as an input. */
-#define IOX_GAUGE_RST 10
-#define IOX_TRIES     3
 
 #if CONFIG_SPIRAM_MODE_OCT || CONFIG_ESPTOOLPY_OCT_FLASH
 #define OCTAL true
@@ -533,13 +584,13 @@ extern "C" int epdp_full(int clear_mode)
     if (clear_mode < 0 || clear_mode > 3) return EPDP_E_ARG;
     if (!iox_alive()) return EPDP_E_IO;
     int64_t t0 = esp_timer_get_time();
+    split_begin();
     if (s_fresh) memset(s_fresh, 0, EPD_FRESH_PLANES * (size_t)(s_epd.width() / 8) * s_epd.height()); /* all driven by the full waveform */
     s_fresh_dirty = false;
     rows_begin(false);
-    int rc = on_panel_core([&] { return s_epd.fullUpdate(modes[clear_mode], false); });
+    int rc = lib_call(EPD_SPLIT_PREP, [&] { return s_epd.fullUpdate(modes[clear_mode], false); });
     rows_end();
-    s_epd.einkPower(0);
-    s_epd.ioPinMode(IOX_GAUGE_RST, 1);
+    rails_down(EPD_SPLIT_AFTER);
     s_last_ms = (uint32_t)((esp_timer_get_time() - t0) / 1000);
     return rc == BBEP_SUCCESS ? EPDP_OK : EPDP_E_IO;
 }
@@ -575,7 +626,7 @@ extern "C" int epdp_gray_to_1bit(void)
  * through, the neutral scan after it or not (epd_scan.h). On the panel core, the trail rows included. */
 static int scan_step(const epd_scan_rows_t &r, int passes, bool neutral)
 {
-    return on_panel_core([&] {
+    return lib_call(EPD_SPLIT_MASKS, [&] {
         epd_scan_seq_call(&s_seq, &r, passes, neutral, s_scan_used.skip_us, s_scan_skip ? s_scan_used.min_ms * 1000u : 0);
         s_seq_on = true;
         int rc = s_epd.scan_partial(r, passes);
@@ -625,6 +676,7 @@ extern "C" int epdp_partial(int y0, int y1)
     int first, last;
     epd_par_rows(s_epd.height(), y0, y1, &first, &last);
     int64_t t0 = esp_timer_get_time();
+    split_begin();
     uint8_t *cur = s_epd.currentBuffer(), *prev = s_epd.previousBuffer();
     memcpy(s_p, prev, n);
     memcpy(s_c, cur, n);
@@ -636,10 +688,10 @@ extern "C" int epdp_partial(int y0, int y1)
     const bool redriven = s_wave.redrive && any_fresh && ns && st[0].phase == EPD_WAVE_KICK;
     memset(&s_wave_ms, 0, sizeof s_wave_ms);
     epd_wave_fresh_info(redriven ? s_fresh : nullptr, n, (size_t)(s_epd.width() / 8), &s_redrive);
+    int rc = rails_up(EPD_SPLIT_PREP);
     rows_begin(true);
-    int rc = BBEP_SUCCESS;
     int sy0 = -1, sy1 = -1;
-    const bool seq = scan_begin(&rc);
+    const bool seq = rc == BBEP_SUCCESS && scan_begin(&rc);
     /* One FastEPD partial per step (epd_parwave.h), rails kept on in between. FastEPD copies current into
      * previous as it goes, so every step rebuilds both from the saved frames. */
     for (int i = 0; i < ns && rc == BBEP_SUCCESS; i++) {
@@ -650,19 +702,19 @@ extern "C" int epdp_partial(int y0, int y1)
         if (seq)
             rc = scan_run(prev, cur, n, &sy0, &sy1, st[i].frames, i, ns);
         else
-            rc = on_panel_core([&] { return s_epd.partialUpdate(i + 1 < ns, first, last); });
+            rc = lib_call(EPD_SPLIT_MASKS, [&] { return s_epd.partialUpdate(i + 1 < ns, first, last); });
         s_wave_ms.ms[st[i].phase] = (uint16_t)((esp_timer_get_time() - t) / 1000);
         s_wave_ms.frames[st[i].phase] = st[i].frames;
     }
     rows_end();
     s_given.pwr_after = (uint8_t)s_epd.powered();
     s_epd.setPasses(s_wave.main, s_full_passes);
-    s_epd.einkPower(0);
-    s_epd.ioPinMode(IOX_GAUGE_RST, 1);
+    rails_down(EPD_SPLIT_MASKS);
     mark_slow_driven(n, redriven);
     if (rc == BBEP_SUCCESS && epd_wave_track(s_fresh, s_p, s_c, n, redriven, s_wave.redrive)) s_fresh_dirty = true;
     memcpy(cur, s_c, n);
     memcpy(prev, s_c, n);
+    lap(EPD_SPLIT_AFTER);
     s_last_ms = (uint32_t)((esp_timer_get_time() - t0) / 1000);
     return rc == BBEP_SUCCESS ? EPDP_OK : EPDP_E_IO;
 }
@@ -724,12 +776,13 @@ extern "C" int epdp_gray_partial(const epdp_gwin_t *win, int nw, const uint8_t *
         }
     }
     int64_t t0 = esp_timer_get_time();
+    split_begin();
     uint8_t *cur = s_epd.currentBuffer(), *prev = s_epd.previousBuffer();
+    int rc = rails_up(EPD_SPLIT_PREP);
     rows_begin(true);
     memset(&s_gpart, 0, sizeof s_gpart);
-    int rc = BBEP_SUCCESS;
     int sy0 = -1, sy1 = -1;
-    const bool seq = scan_begin(&rc);
+    const bool seq = rc == BBEP_SUCCESS && scan_begin(&rc);
     for (int i = 0; i < ns && rc == BBEP_SUCCESS; i++) {
         memset(prev, 0xff, n);
         memset(cur, 0xff, n);
@@ -748,14 +801,13 @@ extern "C" int epdp_gray_partial(const epdp_gwin_t *win, int nw, const uint8_t *
         if (seq)
             rc = scan_run(prev, cur, n, &sy0, &sy1, st[i].frames, i, ns);
         else
-            rc = on_panel_core([&] { return s_epd.partialUpdate(i + 1 < ns, 0, H - 1); });
+            rc = lib_call(EPD_SPLIT_MASKS, [&] { return s_epd.partialUpdate(i + 1 < ns, 0, H - 1); });
         s_gpart.steps++;
         s_gpart.frames = (uint8_t)(s_gpart.frames + st[i].frames);
     }
     rows_end();
     s_epd.setPasses(s_wave.main, s_full_passes);
-    s_epd.einkPower(0);
-    s_epd.ioPinMode(IOX_GAUGE_RST, 1);
+    rails_down(EPD_SPLIT_MASKS);
     /* changed pixels went through the whole table: no longer fresh partial blacks */
     uint8_t chg[1872 / 8], tp[1872 / 8], tc[1872 / 8];
     for (int k = 0; k < nw && (size_t)win[k].w / 8 <= sizeof chg; k++) {
@@ -774,6 +826,7 @@ extern "C" int epdp_gray_partial(const epdp_gwin_t *win, int nw, const uint8_t *
     }
     memset(prev, 0xff, n);
     memset(cur, 0xff, n);
+    lap(EPD_SPLIT_AFTER);
     s_last_ms = (uint32_t)((esp_timer_get_time() - t0) / 1000);
     return rc == BBEP_SUCCESS ? EPDP_OK : EPDP_E_IO;
 }

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later */
 #include <stdio.h>
 
+#include "esp_timer.h"
 #include "hal_esp_priv.h"
 
 #if BOARD_PANEL_FASTEPD /* whole file */
@@ -53,6 +54,20 @@ void hal_esp_par_log_scan(void)
         hal_logf("W panel scan: %lu rows written and %lu clocked through in %lu scans of %d rows, %lu stray row steps",
                  (unsigned long)st->careful, (unsigned long)st->skipped, (unsigned long)st->frames, epdp_height(),
                  (unsigned long)st->stray);
+}
+
+/* Last of an update's lines: "panel time total=.. begin=.. write=.. up=.. prep=.. masks=.. lib=.. scans=.. down=..
+ * after=.. save=.. log=.. other=.. calls=.." in ms (epd_split.h): the driver's parts and the caller's (begin, write,
+ * save), the time the lines before this one took to write (log), and what no part covers (other). total runs from the
+ * caller's begin (t_begin) to here; t_log is when the first of the update's lines was written. */
+void hal_esp_par_log_time(const epd_split_t *caller, int64_t t_begin, int64_t t_log)
+{
+    epd_split_t s = *epdp_last_split();
+    char b[200];
+    int64_t now = esp_timer_get_time();
+    epd_split_merge(&s, caller);
+    epd_split_add(&s, EPD_SPLIT_LOG, (uint32_t)(now - t_log));
+    hal_logf("panel time %s", epd_split_str(&s, (uint32_t)(now - t_begin), b, sizeof b));
 }
 
 /* issue #203: the frames FastEPD was given at the drive call, its own state then, and per step (kick/main/extra)

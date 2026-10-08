@@ -472,6 +472,19 @@ static void test_gate_clocks_reported(void)
     TEST_ASSERT_NOT_NULL(strstr(F.log, "show mode=partial why=changed area=0,0,8,1 depth=1"));
     TEST_ASSERT_NOT_NULL(strstr(F.log, "ckv=11265/8 per=1408 rows=1404"));
     TEST_ASSERT_NULL(strstr(F.log, "WRONG"));
+    /* the log line splits the update's time: ms on the panel, pre before it (here: its allocations, 7 ms each, and
+     * none of the transfer's, which come before the update) */
+    TEST_ASSERT_NOT_NULL(strstr(F.log, " pre=0 n="));
+    F.alloc_us = 7000;
+    F.refresh_us = 123000;
+    s_want[0] ^= 1;
+    uint64_t t0 = F.now;
+    TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(F.log, "show mode=partial"), F.log);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(F.log, " ms=123 pre="), F.log);
+    int pre = atoi(strstr(F.log, " pre=") + 5);
+    TEST_ASSERT_TRUE_MESSAGE(pre >= 7 && pre % 7 == 0 && (uint64_t)pre * 1000 + 123000 < F.now - t0, F.log);
+    F.alloc_us = F.refresh_us = 0;
     /* issue #203: two gate clocks a row */
     F.gate = (usbdisp_gates_t){22495, 8, 1404, 2811, false};
     s_want[0] ^= 1;

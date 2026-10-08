@@ -133,6 +133,9 @@ static hal_refresh_t s_mode;
 static bool s_begun;
 static int s_y0, s_y1; /* partial: rows written */
 static const char *s_clear_used = "";
+/* The caller's parts of the update's time (epd_split.h: begin, write, save, log) and when its begin started */
+static epd_split_t s_split;
+static int64_t s_t_begin;
 
 /* The gray table in use (epd_graytab.h): FastEPD's or stock's rows, single rows replaced by the tuning key gray_row.
  * Two readers: the gray partial takes s_tab.m at each refresh; a full refresh uses the lookup FastEPD built from the
@@ -417,6 +420,8 @@ int hal_panel_begin(uint8_t depth, hal_refresh_t mode)
 {
     if ((depth != 1 && depth != 2 && depth != 4) || (mode == HAL_REFRESH_PARTIAL && depth != 1 && !s_gp.on))
         return HAL_E_FAIL;
+    s_t_begin = esp_timer_get_time();
+    epd_split_reset(&s_split);
     s_held = held();
     if (!s_held && s_after_hold && !s_console && mode == HAL_REFRESH_PARTIAL)
         return HAL_E_FAIL; /* the app then refreshes fully */
@@ -443,6 +448,7 @@ int hal_panel_begin(uint8_t depth, hal_refresh_t mode)
     hal_stats.refresh_kind = mode == HAL_REFRESH_FULL ? 1 : 2;
     hal_stats.rects = 0;
     s_begun = true;
+    epd_split_add(&s_split, EPD_SPLIT_BEGIN, (uint32_t)(esp_timer_get_time() - s_t_begin));
     return HAL_OK;
 }
 
@@ -455,7 +461,17 @@ static uint16_t gray2to4(uint8_t b)
     return o;
 }
 
+static int panel_write(const tiny_rect_t *r, const uint8_t *prev, const uint8_t *next, size_t stride);
+
 int hal_panel_write(const tiny_rect_t *r, const uint8_t *prev, const uint8_t *next, size_t stride)
+{
+    int64_t t = esp_timer_get_time();
+    int rc = panel_write(r, prev, next, stride);
+    epd_split_add(&s_split, EPD_SPLIT_WRITE, (uint32_t)(esp_timer_get_time() - t));
+    return rc;
+}
+
+static int panel_write(const tiny_rect_t *r, const uint8_t *prev, const uint8_t *next, size_t stride)
 {
     if (!s_begun || !next)
         return HAL_E_FAIL;
@@ -579,7 +595,10 @@ int hal_panel_refresh(void)
         rc = s_gw_bad ? EPDP_E_ARG : s_ngw ? epdp_gray_partial(s_gw, s_ngw, tab, np, s_gp.dark, s_gp.light) : EPDP_OK;
         gw_free();
         hal_stats.refresh_ms = (uint32_t)((esp_timer_get_time() - t) / 1000);
+        int64_t tf = esp_timer_get_time();
         fresh_save();
+        int64_t tl = esp_timer_get_time();
+        epd_split_add(&s_split, EPD_SPLIT_SAVE, (uint32_t)(tl - tf));
         const epdp_gpart_info_t *g = epdp_last_gpart();
         char rb[200], gb[64];
         hal_logf("panel gpart depth=%u rows=%d..%d ms=%u dark=%u light=%u gray=%s steps=%u frames=%u chg=%lu drv=%lu %s "
@@ -588,6 +607,7 @@ int hal_panel_refresh(void)
                  (unsigned long)g->driven_px, hal_esp_par_rows_str(rb, sizeof rb), rc);
         hal_esp_par_log_drive(s_mode == HAL_REFRESH_FULL);
         hal_esp_par_log_scan();
+        hal_esp_par_log_time(&s_split, s_t_begin, tl);
     } else if (s_mode == HAL_REFRESH_PARTIAL) {
         rc = s_y1 >= s_y0 ? epdp_partial(s_y0, s_y1) : EPDP_OK;
         if (rc == EPDP_OK && s_since_full < UINT16_MAX)
@@ -595,7 +615,9 @@ int hal_panel_refresh(void)
         hal_stats.refresh_ms = (uint32_t)((esp_timer_get_time() - t) / 1000);
         int64_t tf = esp_timer_get_time();
         fresh_save();
-        unsigned fms = (unsigned)((esp_timer_get_time() - tf) / 1000);
+        int64_t tl = esp_timer_get_time();
+        unsigned fms = (unsigned)((tl - tf) / 1000);
+        epd_split_add(&s_split, EPD_SPLIT_SAVE, (uint32_t)(tl - tf));
         static int64_t last_log;
         if (rc || !s_live || esp_timer_get_time() - last_log > 60000000) { /* live seconds: once a minute */
             last_log = esp_timer_get_time();
@@ -613,6 +635,7 @@ int hal_panel_refresh(void)
             hal_esp_par_log_given(g);
             hal_esp_par_log_drive(s_mode == HAL_REFRESH_FULL);
             hal_esp_par_log_scan();
+            hal_esp_par_log_time(&s_split, s_t_begin, tl);
         }
     } else {
         rc = epdp_full(clear_mode());
@@ -624,11 +647,13 @@ int hal_panel_refresh(void)
         s_fresh_tag = esp_random() | 1u;
         s_fresh_ready = true;
         hal_fs_remove(FRESH_PATH);
-        hal_stats.refresh_ms = (uint32_t)((esp_timer_get_time() - t) / 1000);
+        int64_t tl = esp_timer_get_time();
+        hal_stats.refresh_ms = (uint32_t)((tl - t) / 1000);
         char rb[200], gb[64];
         hal_logf("panel full depth=%u ms=%u clear=%s gray=%s %s rc=%d", s_depth, (unsigned)hal_stats.refresh_ms,
                  s_clear_used, gray_str(gb, sizeof gb), hal_esp_par_rows_str(rb, sizeof rb), rc);
         hal_esp_par_log_drive(s_mode == HAL_REFRESH_FULL);
+        hal_esp_par_log_time(&s_split, s_t_begin, tl);
     }
     return rc == EPDP_OK ? HAL_OK : HAL_E_IO;
 }
