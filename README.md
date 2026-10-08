@@ -95,4 +95,4 @@ and at the gray depths, backup, flash, restore. Battery life unplugged is not me
 
 Firmware: GPL-3.0-or-later. Python package, flash page, docs: MIT. Files from others: `NOTICE`.
 
-This tree is generated from the tiny-paper main repository (`SOURCE` names the commit).
+This repository is the home of the project: it is edited here. What is planned and what was seen on a device is in `PLAN.md`.
