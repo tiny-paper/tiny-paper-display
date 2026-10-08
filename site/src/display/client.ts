@@ -11,6 +11,8 @@ export interface DisplayHello {
   tuning?: Record<string, number | string>;
   /** The picture the device keeps (and its depth is in the hash), absent when it keeps none or does not know it. */
   fingerprint?: string;
+  /** The most pixels a partial update takes in its rectangle, per gray depth ("2", "4"); absent: no limit. */
+  partial_max?: Record<string, number>;
 }
 export const DISPLAY_ERRORS: Record<number, string> = {
   1: 'UNKNOWN_CMD', 2: 'BAD_REQUEST', 3: 'BUSY', 10: 'IO', 11: 'SEQUENCE', 13: 'TOO_LARGE',

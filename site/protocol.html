@@ -73,7 +73,7 @@ cache: after a lost answer send <code>hello</code> and start the picture again.<
 <td>0x01</td>
 <td>hello</td>
 <td>any map (the app&#39;s <code>{ proto: 1, app: tstr }</code> is fine)</td>
-<td><code>{ proto: 1, project: &quot;display&quot;, fw: tstr, board: tstr, w: uint, h: uint, depths: [uint], colors?: [tstr], max_payload: 6144, max_png: uint, chunk: 4096, partial_depths: [uint], modes: [tstr], full_every: uint, fingerprint_hash: &quot;fnv1a64&quot;, fingerprint?: tstr, bt?: tstr }</code></td>
+<td><code>{ proto: 1, project: &quot;display&quot;, fw: tstr, board: tstr, w: uint, h: uint, depths: [uint], colors?: [tstr], max_payload: 6144, max_png: uint, chunk: 4096, partial_depths: [uint], modes: [tstr], full_every: uint, fingerprint_hash: &quot;fnv1a64&quot;, fingerprint?: tstr, bt?: tstr, partial_max?: map, tuning?: map }</code> (<code>partial_max</code>: &quot;Area and refresh mode&quot;; <code>tuning</code>: &quot;Tuning&quot;)</td>
 </tr>
 <tr>
 <td>0x08</td>
@@ -263,7 +263,12 @@ into the frame kept.</p>
 its changed rectangle may have at most 262144 pixels on the TRMNL X (512 x 512, about a tenth of the 1872 x 1404 panel; 256
 KiB of copies at 4 bit). The device finds the rectangle before it touches the panel. With no mode named, a larger change is a
 full refresh (<code>why: &quot;large&quot;</code>); with <code>partial</code> named it is refused <code>MODE</code> (&quot;a partial update at 4 bit takes at most 262144
-changed pixels in its rectangle, this one has N: use full&quot;). A 1 bit partial has no such limit. A photo (a whole dithered
+changed pixels in its rectangle, this one has N: use full&quot;). <code>hello.partial_max</code> gives it per gray depth (<code>{ &quot;2&quot;: 262144, &quot;4&quot;: 262144 }</code>; no key: no limit), so a host splits a large change into
+several rectangles that each fit. The limit is the area of the rectangle, because the copies are a window: the memory a gray
+partial of N pixels needs is N bytes (old and new at 4 bit, N / 2 each) plus the frame kept and the new frame (1.3 MB each at
+4 bit), FastEPD&#39;s two buffers (1.3 MB each), the fresh bitmap (0.66 MB) and a scratch buffer (0.33 MB): about 6.2 MB of the
+X&#39;s 8 MB PSRAM before the windows, so roughly 1.8 MB less what the system uses, in one contiguous block. 262144 is 14 % of
+that: strokes up to 176 x 840 (148,000 pixels) are seen working on a panel; more has not been tried. A 1 bit partial has no such limit. A photo (a whole dithered
 picture) is therefore a full refresh, whatever the frame kept.</p>
 <p>The frame kept is forgotten, so the next update is a full refresh whatever was asked (a rectangle then has white
 around it): at power-on, after a refused step of a show, a transfer cut (quiet for 10 s, or replaced by a new

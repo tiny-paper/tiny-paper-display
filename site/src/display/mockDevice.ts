@@ -141,6 +141,7 @@ export class MockDisplayDevice {
           const show = { ...(b.mode === undefined ? {} : { mode: b.mode }), ...(b.x === undefined ? {} : { x: b.x, y: b.y }), w: v.getUint32(16), h: v.getUint32(20), bits: this.png[24]!, png: this.png };
           this.shows.push(show);
           if (this.lost) { this.lost = false; res = { ...res, why: 'cut' }; }
+          else if (b.mode === undefined && b.x !== undefined) res = { mode: 'partial', why: 'changed', depth: show.bits, ms: 0, x: b.x, y: b.y ?? 0, w: show.w, h: show.h };
           else if (b.mode && b.mode !== 'full') res = { mode: b.mode, why: b.mode === 'partial' ? 'changed' : 'asked', depth: show.bits, ms: 0, x: b.x ?? 0, y: b.y ?? 0, w: show.w, h: show.h };
         }
       } else res = { err: 1, msg: 'not a display command' };

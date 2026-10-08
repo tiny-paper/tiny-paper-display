@@ -89,6 +89,11 @@ right is still to be recorded, and then become the table.
 
 Idea, not started: drive light grays directly from white instead of through black.
 
+A gray partial update takes at most 262144 pixels in its changed rectangle (hello `partial_max`; memory sums in the spec: about 1.8 MB
+free of 8 MB PSRAM after the frames, not measured). The Sketch page names no mode at 2 and 4 bit, so a long stroke is a partial
+update or, when too much changed, a full refresh the device chooses (`why: large`); strokes are also split into rectangles that
+each fit `partial_max`. The limit itself is a guess kept until the free heap is measured.
+
 The drive options of the X (gray table, pre-push frames, passes, waveform, row timing, clear) are reachable from the Sketch
 page's Debug section for comparison, without reflashing; 1 bit looked best, which of the gray settings looks best is still to be recorded.
 

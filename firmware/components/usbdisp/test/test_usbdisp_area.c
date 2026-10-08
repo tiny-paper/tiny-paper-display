@@ -273,6 +273,18 @@ static void gray_limit_device(uint32_t max_px)
 
 static void test_gray_partial_too_large(void)
 {
+    /* hello tells the limit per gray depth (a board without a limit, or with 1 bit only, has no key) */
+    gray_limit_device(100);
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_HELLO, NULL, 0));
+    const uint8_t *pm, *pv;
+    size_t pmn, pvn;
+    TEST_ASSERT_TRUE(cbor_map_get(s_ans, s_ans_len, "partial_max", 11, &pm, &pmn));
+    TEST_ASSERT_EQUAL_INT(100, map_int(pm, pmn, "2", -1));
+    TEST_ASSERT_EQUAL_INT(100, map_int(pm, pmn, "4", -1));
+    TEST_ASSERT_FALSE(cbor_map_get(pm, pmn, "1", 1, &pv, &pvn));
+    device_partial(W, H, 1, 1, true, 0);
+    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_HELLO, NULL, 0));
+    TEST_ASSERT_FALSE(cbor_map_get(s_ans, s_ans_len, "partial_max", 11, &pm, &pmn));
     /* under the limit: a partial update */
     gray_limit_device(40 * 1000);
     s_want[5 * W + 13] ^= 5;

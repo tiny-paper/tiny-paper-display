@@ -154,6 +154,24 @@ void usbdisp_refuse(usbdisp_t *d, const link_frame_t *f, int err, const char *ms
     usbdisp_send(d, f, &w);
 }
 
+/* partial_max: { "2": px, "4": px } the most pixels a partial update takes in its rectangle at each gray depth that has a limit */
+static size_t pmax_n(const usbdisp_t *d)
+{
+    return d->c.gray_partial_max_px ? (size_t)((d->c.partial_depths >> 1 & 1) + (d->c.partial_depths >> 2 & 1)) : 0;
+}
+
+static void put_pmax(const usbdisp_t *d, cbor_w_t *w)
+{
+    cbor_put_str(w, "partial_max");
+    cbor_put_map(w, pmax_n(d));
+    static const char *const key[3] = {"1", "2", "4"};
+    for (unsigned b = 1; b < 3; b++)
+        if (d->c.partial_depths >> b & 1) {
+            cbor_put_str(w, key[b]);
+            cbor_put_uint(w, d->c.gray_partial_max_px);
+        }
+}
+
 static size_t tune_n(const usbdisp_t *d)
 {
     return d->c.tune_count && d->c.tune_info && d->c.tune_get && d->c.tune_set && d->c.tune_defaults ? d->c.tune_count(d->c.ctx) : 0;
@@ -192,7 +210,7 @@ static void hello(usbdisp_t *d, const link_frame_t *f)
     static const char *const bwry[] = {"black", "white", "red", "yellow"};
     cbor_w_t w;
     cbor_w_init(&w, d->tx, sizeof d->tx);
-    cbor_put_map(&w, (size_t)(13 + (d->c.bwry ? 1 : 0) + (d->c.bt_open ? 1 : 0)) + 1 + (d->fingerprint[0] != 0) + (tune_n(d) > 0));
+    cbor_put_map(&w, (size_t)(13 + (d->c.bwry ? 1 : 0) + (d->c.bt_open ? 1 : 0)) + 1 + (d->fingerprint[0] != 0) + (tune_n(d) > 0) + (pmax_n(d) > 0));
     cbor_put_str(&w, "proto");
     cbor_put_uint(&w, LINK_PROTO);
     cbor_put_str(&w, "project");
@@ -258,6 +276,8 @@ static void hello(usbdisp_t *d, const link_frame_t *f)
     }
     if (tune_n(d))
         put_tuning(d, &w);
+    if (pmax_n(d))
+        put_pmax(d, &w);
     usbdisp_send(d, f, &w);
 }
 

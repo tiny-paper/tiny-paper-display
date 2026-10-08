@@ -8,6 +8,8 @@ export interface Swatch { value: number; name: string; rgb: readonly [number, nu
 /** What the sketch draws with: the depth sent, the colours the panel shows at it, and whether strokes go out as partial updates. */
 export interface SketchInk { depth: number; color: boolean; partial: boolean; paper: number; swatches: Swatch[]; note: string }
 export const UNDO_STEPS = 10;
+/** The side of the squares that follow a stroke (a multiple of 8). */
+export const CELL = 64;
 
 /** The depth the device updates partially at decides the colours: a rectangle must have a depth in `partial_depths`. */
 export function sketchInk(hello: DisplayHello, forceDepth?: number): SketchInk {
@@ -50,6 +52,8 @@ export class SketchModel {
   /** Called with every rectangle whose pixels changed (the page repaints it). */
   onPaint: (r: Rect) => void = () => {};
   private dirty: Box | null = null;
+  private cells: Uint8Array; // CELL x CELL squares touched since the last send: a long stroke is sent as several rectangles that follow it
+  private cols: number;
   private light = false; // a pixel got lighter since the last send: a partial update turns black to white only weakly
   private stroke: Box | null = null;
   private before: Uint8Array | null = null;
@@ -60,6 +64,8 @@ export class SketchModel {
     if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1 || w * h > 4_194_304) throw new Error('The panel size is invalid');
     this.px = new Uint8Array(w * h).fill(paper);
     this.scratch = new Uint8Array(w * h);
+    this.cols = Math.ceil(w / CELL);
+    this.cells = new Uint8Array(this.cols * Math.ceil(h / CELL));
   }
   get canUndo(): boolean { return this.undos.length > 0; }
   get hasDirty(): boolean { return !!this.dirty; }
@@ -126,6 +132,7 @@ export class SketchModel {
   takeDirty(): Rect | null {
     const d = this.dirty;
     this.dirty = null;
+    this.cells.fill(0);
     return d ? alignRect(rectOf(d), this.w, this.h) : null;
   }
   /**
@@ -159,7 +166,40 @@ export class SketchModel {
   /** Whether a pixel got lighter since the last call (a send that cleans must follow). */
   takeLighter(): boolean { const l = this.light; this.light = false; return l; }
   /** Put a rectangle back (its send failed). */
-  markDirty(r: Rect, lighter = false): void { this.dirty = grow(this.dirty, r.x, r.y, r.x + r.w, r.y + r.h); if (lighter) this.light = true; }
+  markDirty(r: Rect, lighter = false): void { this.dirty = grow(this.dirty, r.x, r.y, r.x + r.w, r.y + r.h); this.mark(r.x, r.y, r.x + r.w, r.y + r.h); if (lighter) this.light = true; }
+  private mark(x0: number, y0: number, x1: number, y1: number): void {
+    for (let cy = Math.floor(y0 / CELL); cy <= Math.floor((y1 - 1) / CELL); cy++) for (let cx = Math.floor(x0 / CELL); cx <= Math.floor((x1 - 1) / CELL); cx++) this.cells[cy * this.cols + cx] = 1;
+  }
+  /**
+   * What changed since the last call as rectangles (x and width in steps of 8) that each have at most `maxPx` pixels: the
+   * bounding box when it fits (or no limit), else the squares the stroke touched, split along the longer side until each
+   * group's box fits, so a long diagonal stroke is two or three rectangles, not one box of mostly unchanged pixels. null: nothing.
+   */
+  takeTiles(maxPx = 0): Rect[] | null {
+    const touched: [number, number][] = [];
+    this.cells.forEach((v, i) => { if (v) touched.push([i % this.cols, Math.floor(i / this.cols)]); });
+    const box = this.takeDirty(); // clears the squares too
+    if (!box) return null;
+    if (!maxPx || box.w * box.h <= maxPx || this.w % 8 !== 0 || maxPx < CELL * CELL) return [box];
+    const rectOfCells = (c: [number, number][]): Rect => {
+      const x0 = Math.min(...c.map((p) => p[0])) * CELL, y0 = Math.min(...c.map((p) => p[1])) * CELL;
+      const x1 = Math.min(this.w, (Math.max(...c.map((p) => p[0])) + 1) * CELL), y1 = Math.min(this.h, (Math.max(...c.map((p) => p[1])) + 1) * CELL);
+      return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    };
+    const out: Rect[] = [];
+    const pack = (c: [number, number][]): void => {
+      const r = rectOfCells(c);
+      if (r.w * r.h <= maxPx || c.length === 1) { out.push(r); return; }
+      const axis = r.w >= r.h ? 0 : 1;
+      const sorted = [...c].sort((a, b) => a[axis]! - b[axis]! || a[1 - axis]! - b[1 - axis]!);
+      const mid = sorted[Math.floor(sorted.length / 2)]![axis]!;
+      let lo = sorted.filter((p) => p[axis]! < mid), hi = sorted.filter((p) => p[axis]! >= mid);
+      if (!lo.length || !hi.length) { lo = sorted.slice(0, Math.ceil(sorted.length / 2)); hi = sorted.slice(lo.length); }
+      pack(lo); pack(hi);
+    };
+    pack(touched);
+    return out;
+  }
   /** The pixel values of a rectangle, rows top to bottom. */
   values(r: Rect): Uint8Array { return this.copy(this.px, r); }
   /** The rectangle as the panel shows it. */
@@ -178,6 +218,7 @@ export class SketchModel {
   }
   private changed(b: Box): void {
     this.dirty = grow(this.dirty, ...b);
+    this.mark(b[0], b[1], b[2], b[3]);
     if (this.before) this.stroke = grow(this.stroke, ...b);
     this.onPaint(rectOf(b));
   }

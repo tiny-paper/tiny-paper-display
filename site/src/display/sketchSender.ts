@@ -6,7 +6,7 @@ import type { CborMap } from '../protocol/cbor.ts';
 import { DisplayError, displayAnswer, type DisplayHello, type DisplayMode } from './client.ts';
 import { fingerprintOf } from './fingerprint.ts';
 import { packedPng } from './png.ts';
-import { SketchModel, sketchInk, type SketchInk } from './sketchModel.ts';
+import { SketchModel, sketchInk, type Rect, type SketchInk } from './sketchModel.ts';
 
 /** The part of DisplayClient the sketch uses. */
 export interface SketchShow { show(png: Uint8Array, hello: DisplayHello, options?: { mode?: DisplayMode; passes?: number; x?: number; y?: number }): Promise<CborMap> }
@@ -46,6 +46,7 @@ export class SketchSender {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private due = 0;
   private sending = false;
+  private queue: Rect[] = []; // the rest of a change split into rectangles that each fit the device's limit
   private drawing = false;
   private whole = true;
   private asked = false;
@@ -66,6 +67,7 @@ export class SketchSender {
     this.client = client; this.hello = hello; this.link++;
     const m = this.model, kept = !!(hello && client && hello.fingerprint && this.ink.partial && !this.ink.color &&
       hello.fingerprint === fingerprintOf(m.values(m.whole), m.w, m.h, this.ink.depth));
+    this.queue = [];
     this.whole = !kept; this.partials = 0; this.lightened = 0; this.drawing = false;
     this.cancel();
     if (client && this.ink.partial && !kept) this.schedule(Date.now(), true);
@@ -113,7 +115,12 @@ export class SketchSender {
     const full = this.asked || (this.ink.partial && (this.whole || wornOut || eraseFull || (this.fullAfter > 0 && this.partials >= this.fullAfter)));
     const note = this.asked ? this.note : eraseFull ? ' Full refresh because pixels got lighter (debug setting erase: full).' : wornOut && !this.whole ? ` Full refresh by itself: ${this.lightened} sends in a row erased pixels by a partial update, which leaves faint traces.` : '';
     if (!full && !this.ink.partial) return;
-    const dirty = m.takeDirty();
+    // a partial update goes out as rectangles that each fit what the device takes (hello.partial_max at this depth)
+    const limit = Number(hello.partial_max?.[String(this.ink.depth)]) || 0;
+    let tiles: Rect[] = [];
+    if (full) { this.queue = []; m.takeDirty(); } else tiles = [...this.queue, ...(m.takeTiles(limit) ?? [])];
+    this.queue = tiles.slice(1);
+    const dirty = full ? null : tiles[0] ?? null;
     const lighter = m.takeLighter();
     const clean = lighter && !full && this.erase === 'auto' ? cleanMode(hello, this.ink.depth) : null;
     if (!full && !dirty) return;
@@ -128,7 +135,7 @@ export class SketchSender {
     this.say('sending', `Asked for ${what}; waiting for the panel...`);
     try {
       const png = await packedPng(rows, rect.w, rect.h, this.ink.depth, this.ink.color);
-      const mode: Options = full ? { mode: 'full' } : clean ? { mode: clean.mode, ...(clean.passes ? { passes: clean.passes } : {}) } : this.strokeMode === 'auto' ? { mode: 'partial' } : { mode: this.strokeMode, ...(this.strokeMode === 'passes' ? { passes: 2 } : {}) };
+      const mode: Options = full ? { mode: 'full' } : clean ? { mode: clean.mode, ...(clean.passes ? { passes: clean.passes } : {}) } : this.strokeMode === 'auto' ? (this.ink.depth > 1 ? {} : { mode: 'partial' }) : { mode: this.strokeMode, ...(this.strokeMode === 'passes' ? { passes: 2 } : {}) };
       const options: Options = full || all ? mode : { x: rect.x, y: rect.y, ...mode };
       const r = await this.showOnce(client, hello, png, options, what);
       if (link !== this.link) return;
@@ -143,6 +150,8 @@ export class SketchSender {
     } catch (e) {
       if (link !== this.link) return;
       if (dirty) m.markDirty(dirty, lighter);
+      for (const q of this.queue) m.markDirty(q);
+      this.queue = [];
       if (full) { this.asked = true; this.note = note; } // not sent: the next send is the whole drawing again
       this.whole = true; // a refused or cut show makes the device forget the frame it kept
       this.say('error', `Asked for ${what}. Not shown: ${(e as Error).message}. ${this.client === client ? 'The device may show something else now: the next update is the whole drawing (draw on, or press Full refresh).' : ''}`.trim());
@@ -151,7 +160,7 @@ export class SketchSender {
       this.sending = false;
       if (link !== this.link && this.client && this.ink.partial) this.schedule(Date.now(), true);
     }
-    const again = this.whole || m.hasDirty || this.asked || this.lightened >= LIGHTEN_AFTER || (this.fullAfter > 0 && this.partials >= this.fullAfter);
+    const again = this.whole || m.hasDirty || this.queue.length > 0 || this.asked || this.lightened >= LIGHTEN_AFTER || (this.fullAfter > 0 && this.partials >= this.fullAfter);
     if (again && this.ink.partial) this.schedule(this.drawing && !this.whole ? this.sentAt + this.timing.everyMs : Date.now(), false);
   }
   /** BUSY: wait as long as the device says (bounded) and try once more. */

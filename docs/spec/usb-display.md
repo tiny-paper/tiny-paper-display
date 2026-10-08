@@ -29,7 +29,7 @@ cache: after a lost answer send `hello` and start the picture again.
 
 | cmd | Name | Request | Answer |
 |---|---|---|---|
-| 0x01 | hello | any map (the app's `{ proto: 1, app: tstr }` is fine) | `{ proto: 1, project: "display", fw: tstr, board: tstr, w: uint, h: uint, depths: [uint], colors?: [tstr], max_payload: 6144, max_png: uint, chunk: 4096, partial_depths: [uint], modes: [tstr], full_every: uint, fingerprint_hash: "fnv1a64", fingerprint?: tstr, bt?: tstr }` |
+| 0x01 | hello | any map (the app's `{ proto: 1, app: tstr }` is fine) | `{ proto: 1, project: "display", fw: tstr, board: tstr, w: uint, h: uint, depths: [uint], colors?: [tstr], max_payload: 6144, max_png: uint, chunk: 4096, partial_depths: [uint], modes: [tstr], full_every: uint, fingerprint_hash: "fnv1a64", fingerprint?: tstr, bt?: tstr, partial_max?: map, tuning?: map }` (`partial_max`: "Area and refresh mode"; `tuning`: "Tuning") |
 | 0x08 | show_begin | `{ size: uint, x?: uint, y?: uint, mode?: tstr, passes?: uint }`: the PNG's bytes, where it goes and how ("Area and refresh mode") | `{ chunk: 4096, next: 0 }`; replaces an open transfer (which counts as cut) |
 | 0x09 | show_chunk | `{ off: uint, data: bstr }` | `{ next: uint }`. `off` must be `next`; the first chunk holds at least the PNG's first 29 bytes and is checked at once (size, depth) |
 | 0x0A | show_end | `{}` | `{ depth: uint, ms: uint, mode: tstr, why: tstr, x: uint, y: uint, w: uint, h: uint, passes?: uint, ckv?: map, warn?: tstr, same?: true }` after the refresh ("The answer") |
@@ -123,7 +123,12 @@ A gray partial update (2 or 4 bit; `partial_depths` lists them) keeps copies of 
 its changed rectangle may have at most 262144 pixels on the TRMNL X (512 x 512, about a tenth of the 1872 x 1404 panel; 256
 KiB of copies at 4 bit). The device finds the rectangle before it touches the panel. With no mode named, a larger change is a
 full refresh (`why: "large"`); with `partial` named it is refused `MODE` ("a partial update at 4 bit takes at most 262144
-changed pixels in its rectangle, this one has N: use full"). A 1 bit partial has no such limit. A photo (a whole dithered
+changed pixels in its rectangle, this one has N: use full"). `hello.partial_max` gives it per gray depth (`{ "2": 262144, "4": 262144 }`; no key: no limit), so a host splits a large change into
+several rectangles that each fit. The limit is the area of the rectangle, because the copies are a window: the memory a gray
+partial of N pixels needs is N bytes (old and new at 4 bit, N / 2 each) plus the frame kept and the new frame (1.3 MB each at
+4 bit), FastEPD's two buffers (1.3 MB each), the fresh bitmap (0.66 MB) and a scratch buffer (0.33 MB): about 6.2 MB of the
+X's 8 MB PSRAM before the windows, so roughly 1.8 MB less what the system uses, in one contiguous block. 262144 is 14 % of
+that: strokes up to 176 x 840 (148,000 pixels) are seen working on a panel; more has not been tried. A 1 bit partial has no such limit. A photo (a whole dithered
 picture) is therefore a full refresh, whatever the frame kept.
 
 The frame kept is forgotten, so the next update is a full refresh whatever was asked (a rectangle then has white

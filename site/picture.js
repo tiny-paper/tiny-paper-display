@@ -721,7 +721,8 @@ var MockDisplayDevice = class {
           if (this.lost) {
             this.lost = false;
             res = { ...res, why: "cut" };
-          } else if (b.mode && b.mode !== "full") res = { mode: b.mode, why: b.mode === "partial" ? "changed" : "asked", depth: show.bits, ms: 0, x: b.x ?? 0, y: b.y ?? 0, w: show.w, h: show.h };
+          } else if (b.mode === void 0 && b.x !== void 0) res = { mode: "partial", why: "changed", depth: show.bits, ms: 0, x: b.x, y: b.y ?? 0, w: show.w, h: show.h };
+          else if (b.mode && b.mode !== "full") res = { mode: b.mode, why: b.mode === "partial" ? "changed" : "asked", depth: show.bits, ms: 0, x: b.x ?? 0, y: b.y ?? 0, w: show.w, h: show.h };
         }
       } else res = { err: 1, msg: "not a display command" };
       const log = cmd === 10 && this.hello.tuning ? this.logFor(res) : [];

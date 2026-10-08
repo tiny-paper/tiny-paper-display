@@ -91,7 +91,17 @@ export function fakeDisplay(over = {}) {
       if (dev.keeps !== undefined && (!area || forced)) dev.keeps = show.bits;
       dev.shows.push(show);
       dev.pngs.push(Uint8Array.from(png));
-      res = forced ? { mode: 'full', why: forced, depth: show.bits, ms: 9, x: 0, y: 0, w: dev.hello.w, h: dev.hello.h } : begin.mode && begin.mode !== 'full'
+      // the device's own limit for a gray partial (usbdisp_area.c), not told in hello here: `dev.limit` pixels of rectangle
+      const tooLarge = dev.limit !== undefined && show.bits > 1 && area && show.w * show.h > dev.limit;
+      if (tooLarge && begin.mode === 'partial') {
+        res = { err: 36, msg: `a partial update at ${show.bits} bit takes at most ${dev.limit} changed pixels in its rectangle, this one has ${show.w * show.h}: use full` };
+        dev.keeps = null; dev.refusals.push(res.msg); dev.shows.pop(); dev.pngs.pop();
+        return [frameHex(seq, cmd | 0x80, toHex(Uint8Array.from(cbor(res))))];
+      }
+      res = tooLarge && begin.mode === undefined ? { mode: 'full', why: 'large', depth: show.bits, ms: 2585, x: 0, y: 0, w: dev.hello.w, h: dev.hello.h }
+        : forced ? { mode: 'full', why: forced, depth: show.bits, ms: 9, x: 0, y: 0, w: dev.hello.w, h: dev.hello.h }
+        : begin.mode === undefined && area ? { mode: 'partial', why: 'changed', depth: show.bits, ms: 7, x: begin.x, y: begin.y, w: show.w, h: show.h }
+        : begin.mode && begin.mode !== 'full'
         ? { mode: begin.mode, why: begin.mode === 'partial' ? 'changed' : 'asked', depth: show.bits, ms: 7, x: begin.x ?? 0, y: begin.y ?? 0, w: show.w, h: show.h }
         : { mode: 'full', why: 'asked', depth: show.bits, ms: 9, x: 0, y: 0, w: dev.hello.w, h: dev.hello.h };
     } else res = { err: 1, msg: 'not a display command' };

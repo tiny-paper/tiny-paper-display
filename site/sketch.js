@@ -172,6 +172,7 @@ async function packedPng(rows, w, h, depth, color) {
 
 // src/display/sketchModel.ts
 var UNDO_STEPS = 10;
+var CELL = 64;
 function sketchInk(hello, forceDepth) {
   const partial = hello.modes.includes("partial") && hello.partial_depths.length > 0;
   const color = !partial && !!hello.colors;
@@ -206,6 +207,8 @@ var SketchModel = class {
     if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1 || w * h > 4194304) throw new Error("The panel size is invalid");
     this.px = new Uint8Array(w * h).fill(paper);
     this.scratch = new Uint8Array(w * h);
+    this.cols = Math.ceil(w / CELL);
+    this.cells = new Uint8Array(this.cols * Math.ceil(h / CELL));
   }
   w;
   h;
@@ -215,6 +218,9 @@ var SketchModel = class {
   onPaint = () => {
   };
   dirty = null;
+  cells;
+  // CELL x CELL squares touched since the last send: a long stroke is sent as several rectangles that follow it
+  cols;
   light = false;
   // a pixel got lighter since the last send: a partial update turns black to white only weakly
   stroke = null;
@@ -295,6 +301,7 @@ var SketchModel = class {
   takeDirty() {
     const d = this.dirty;
     this.dirty = null;
+    this.cells.fill(0);
     return d ? alignRect(rectOf(d), this.w, this.h) : null;
   }
   /**
@@ -336,7 +343,50 @@ var SketchModel = class {
   /** Put a rectangle back (its send failed). */
   markDirty(r, lighter = false) {
     this.dirty = grow(this.dirty, r.x, r.y, r.x + r.w, r.y + r.h);
+    this.mark(r.x, r.y, r.x + r.w, r.y + r.h);
     if (lighter) this.light = true;
+  }
+  mark(x0, y0, x1, y1) {
+    for (let cy = Math.floor(y0 / CELL); cy <= Math.floor((y1 - 1) / CELL); cy++) for (let cx = Math.floor(x0 / CELL); cx <= Math.floor((x1 - 1) / CELL); cx++) this.cells[cy * this.cols + cx] = 1;
+  }
+  /**
+   * What changed since the last call as rectangles (x and width in steps of 8) that each have at most `maxPx` pixels: the
+   * bounding box when it fits (or no limit), else the squares the stroke touched, split along the longer side until each
+   * group's box fits, so a long diagonal stroke is two or three rectangles, not one box of mostly unchanged pixels. null: nothing.
+   */
+  takeTiles(maxPx = 0) {
+    const touched = [];
+    this.cells.forEach((v, i) => {
+      if (v) touched.push([i % this.cols, Math.floor(i / this.cols)]);
+    });
+    const box = this.takeDirty();
+    if (!box) return null;
+    if (!maxPx || box.w * box.h <= maxPx || this.w % 8 !== 0 || maxPx < CELL * CELL) return [box];
+    const rectOfCells = (c) => {
+      const x0 = Math.min(...c.map((p) => p[0])) * CELL, y0 = Math.min(...c.map((p) => p[1])) * CELL;
+      const x1 = Math.min(this.w, (Math.max(...c.map((p) => p[0])) + 1) * CELL), y1 = Math.min(this.h, (Math.max(...c.map((p) => p[1])) + 1) * CELL);
+      return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    };
+    const out = [];
+    const pack = (c) => {
+      const r = rectOfCells(c);
+      if (r.w * r.h <= maxPx || c.length === 1) {
+        out.push(r);
+        return;
+      }
+      const axis = r.w >= r.h ? 0 : 1;
+      const sorted = [...c].sort((a, b) => a[axis] - b[axis] || a[1 - axis] - b[1 - axis]);
+      const mid = sorted[Math.floor(sorted.length / 2)][axis];
+      let lo = sorted.filter((p) => p[axis] < mid), hi = sorted.filter((p) => p[axis] >= mid);
+      if (!lo.length || !hi.length) {
+        lo = sorted.slice(0, Math.ceil(sorted.length / 2));
+        hi = sorted.slice(lo.length);
+      }
+      pack(lo);
+      pack(hi);
+    };
+    pack(touched);
+    return out;
   }
   /** The pixel values of a rectangle, rows top to bottom. */
   values(r) {
@@ -358,6 +408,7 @@ var SketchModel = class {
   }
   changed(b) {
     this.dirty = grow(this.dirty, ...b);
+    this.mark(b[0], b[1], b[2], b[3]);
     if (this.before) this.stroke = grow(this.stroke, ...b);
     this.onPaint(rectOf(b));
   }
@@ -514,6 +565,8 @@ var SketchSender = class {
   timer = null;
   due = 0;
   sending = false;
+  queue = [];
+  // the rest of a change split into rectangles that each fit the device's limit
   drawing = false;
   whole = true;
   asked = false;
@@ -534,6 +587,7 @@ var SketchSender = class {
     this.hello = hello;
     this.link++;
     const m = this.model, kept2 = !!(hello && client && hello.fingerprint && this.ink.partial && !this.ink.color && hello.fingerprint === fingerprintOf(m.values(m.whole), m.w, m.h, this.ink.depth));
+    this.queue = [];
     this.whole = !kept2;
     this.partials = 0;
     this.lightened = 0;
@@ -611,7 +665,14 @@ var SketchSender = class {
     const full = this.asked || this.ink.partial && (this.whole || wornOut || eraseFull || this.fullAfter > 0 && this.partials >= this.fullAfter);
     const note = this.asked ? this.note : eraseFull ? " Full refresh because pixels got lighter (debug setting erase: full)." : wornOut && !this.whole ? ` Full refresh by itself: ${this.lightened} sends in a row erased pixels by a partial update, which leaves faint traces.` : "";
     if (!full && !this.ink.partial) return;
-    const dirty = m.takeDirty();
+    const limit = Number(hello.partial_max?.[String(this.ink.depth)]) || 0;
+    let tiles = [];
+    if (full) {
+      this.queue = [];
+      m.takeDirty();
+    } else tiles = [...this.queue, ...m.takeTiles(limit) ?? []];
+    this.queue = tiles.slice(1);
+    const dirty = full ? null : tiles[0] ?? null;
     const lighter = m.takeLighter();
     const clean = lighter && !full && this.erase === "auto" ? cleanMode(hello, this.ink.depth) : null;
     if (!full && !dirty) return;
@@ -627,7 +688,7 @@ var SketchSender = class {
     this.say("sending", `Asked for ${what}; waiting for the panel...`);
     try {
       const png = await packedPng(rows, rect.w, rect.h, this.ink.depth, this.ink.color);
-      const mode = full ? { mode: "full" } : clean ? { mode: clean.mode, ...clean.passes ? { passes: clean.passes } : {} } : this.strokeMode === "auto" ? { mode: "partial" } : { mode: this.strokeMode, ...this.strokeMode === "passes" ? { passes: 2 } : {} };
+      const mode = full ? { mode: "full" } : clean ? { mode: clean.mode, ...clean.passes ? { passes: clean.passes } : {} } : this.strokeMode === "auto" ? this.ink.depth > 1 ? {} : { mode: "partial" } : { mode: this.strokeMode, ...this.strokeMode === "passes" ? { passes: 2 } : {} };
       const options = full || all ? mode : { x: rect.x, y: rect.y, ...mode };
       const r = await this.showOnce(client, hello, png, options, what);
       if (link !== this.link) return;
@@ -645,6 +706,8 @@ var SketchSender = class {
     } catch (e) {
       if (link !== this.link) return;
       if (dirty) m.markDirty(dirty, lighter);
+      for (const q of this.queue) m.markDirty(q);
+      this.queue = [];
       if (full) {
         this.asked = true;
         this.note = note;
@@ -656,7 +719,7 @@ var SketchSender = class {
       this.sending = false;
       if (link !== this.link && this.client && this.ink.partial) this.schedule(Date.now(), true);
     }
-    const again = this.whole || m.hasDirty || this.asked || this.lightened >= LIGHTEN_AFTER || this.fullAfter > 0 && this.partials >= this.fullAfter;
+    const again = this.whole || m.hasDirty || this.queue.length > 0 || this.asked || this.lightened >= LIGHTEN_AFTER || this.fullAfter > 0 && this.partials >= this.fullAfter;
     if (again && this.ink.partial) this.schedule(this.drawing && !this.whole ? this.sentAt + this.timing.everyMs : Date.now(), false);
   }
   /** BUSY: wait as long as the device says (bounded) and try once more. */
@@ -1265,7 +1328,8 @@ var MockDisplayDevice = class {
           if (this.lost) {
             this.lost = false;
             res = { ...res, why: "cut" };
-          } else if (b.mode && b.mode !== "full") res = { mode: b.mode, why: b.mode === "partial" ? "changed" : "asked", depth: show.bits, ms: 0, x: b.x ?? 0, y: b.y ?? 0, w: show.w, h: show.h };
+          } else if (b.mode === void 0 && b.x !== void 0) res = { mode: "partial", why: "changed", depth: show.bits, ms: 0, x: b.x, y: b.y ?? 0, w: show.w, h: show.h };
+          else if (b.mode && b.mode !== "full") res = { mode: b.mode, why: b.mode === "partial" ? "changed" : "asked", depth: show.bits, ms: 0, x: b.x ?? 0, y: b.y ?? 0, w: show.w, h: show.h };
         }
       } else res = { err: 1, msg: "not a display command" };
       const log = cmd === 10 && this.hello.tuning ? this.logFor(res) : [];
@@ -1439,6 +1503,7 @@ no device connected`;
 }
 export {
   BRUSH_NAMES,
+  CELL,
   DEBUG_DEFAULTS,
   DISPLAY_ERRORS,
   DISPLAY_MODES,

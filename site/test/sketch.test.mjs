@@ -252,7 +252,7 @@ test('a device with gray partial depths: 16 swatches, strokes go as partial upda
   gray.page.state.pen.color = 6;
   gray.stroke([[300, 200], [340, 240]]);
   await until('the partial show', () => gray.dev.shows.length === 2);
-  assert.equal(gray.dev.shows[1].mode, 'partial');
+  assert.equal(gray.dev.shows[1].mode, undefined); // at 4 bit the page names no mode: the device chooses
   assert.equal(gray.dev.shows[1].bits, 4);
   const bw = await connected(1403, { board: 'trmnl_x', w: 1872, depths: [1, 2, 4], partial_depths: [1] });
   assert.equal(bw.el('partial').textContent, 'Partial updates at: 1 bit', 'what the device reported, so a device without grays is seen on the page');
@@ -305,14 +305,14 @@ test('Erase and Undo where nothing stronger than partial exists (4 bit): counted
   assert.equal(dev.shows.length, 4);
   el('undo').onclick();
   await shown(dev, 5);
-  assert.equal(dev.shows[4].mode, 'partial', 'no inverse at 4 bit, whatever the modes list says');
+  assert.equal(dev.shows[4].mode, undefined, 'no inverse at 4 bit, whatever the modes list says');
   await said(el, /^Asked for a partial update of .* Changed area refreshed: changed pixels \(7 ms\)\. \d+ ms in all\. Erasing by a partial update can leave faint traces at 4 bit: a full refresh follows after 3 such sends \(1 so far\)\.$/);
   el('undo').onclick();
   await shown(dev, 6);
   await said(el, /\(2 so far\)\.$/);
   el('undo').onclick();
   await shown(dev, 7);
-  assert.equal(dev.shows[6].mode, 'partial');
+  assert.equal(dev.shows[6].mode, undefined);
   await shown(dev, 8);
   const f = dev.shows[7];
   assert.deepEqual([f.mode, f.x, f.w, f.h, f.bits], ['full', undefined, 1872, 445, 4]);
@@ -443,7 +443,7 @@ test('Debug: each test pattern sends its own partial updates after a full refres
     await until(`${name} sent`, () => el('debugresults').textContent.includes(`sketch.test: ${name} sent`) && dev.shows.length === before + 1 + partials);
     const mine = dev.shows.slice(before);
     assert.equal(mine[0].mode, 'full', `${name}: the blank panel first`);
-    assert.deepEqual(new Set(mine.slice(1).map((s) => s.mode)), new Set(['partial']), `${name}: partial updates`);
+    assert.deepEqual(new Set(mine.slice(1).map((s) => s.mode)), new Set([undefined]), `${name}: partial updates`);
     assert.ok(mine.slice(1).every((s) => s.bits === 4));
     assert.equal(el('report').value.includes(`test=${name}`), true);
   };
@@ -656,7 +656,7 @@ test('Grays: the page starts at 1 bit with two swatches on a gray capable device
   p.page.state.pen.color = 6;
   stroke([[500, 300], [540, 340]]);
   await shown(dev, 4);
-  assert.deepEqual([dev.shows[3].mode, dev.shows[3].bits], ['partial', 4]);
+  assert.deepEqual([dev.shows[3].mode, dev.shows[3].bits], [undefined, 4]);
   // back: the canvas thresholded, one full refresh at 1 bit, nothing else
   el('grays').checked = false;
   el('grays').onchange();
@@ -756,4 +756,22 @@ test('A full refresh the device chose because too much changed is said in words,
   stroke([[300, 200], [340, 240]]);
   await until('the answer', () => /too much changed for a partial update: refreshed the whole panel/.test(el('status').textContent));
   assert.equal(el('status').dataset.state, 'ok');
+});
+
+test('A long diagonal stroke at 4 bit is shown (partial or full), never refused: the page names no mode there', async () => {
+  const dev = fakeDisplay({ h: 520, ...XDEV });
+  dev.limit = 50000; // the device's limit for a gray partial, which hello does not tell here: a box of 1600 x 400 is far over it
+  const p = open({ dev, storage: graysOn('trmnl_x') });
+  await p.page.connect();
+  await until('the whole drawing', () => dev.shows.length === 1 && p.el('status').dataset.state === 'ok');
+  p.stroke([[100, 50], [500, 150], [900, 250], [1300, 350], [1700, 450]]);
+  await shown(dev, 2);
+  await until('the stroke is answered', () => p.el('status').dataset.state === 'ok' && /too much changed for a partial update: refreshed the whole panel/.test(p.el('status').textContent));
+  assert.deepEqual(dev.refusals, [], 'no refusal reached the page');
+  assert.equal(dev.shows[1].mode, undefined, 'at 4 bit no mode is named');
+  // a small stroke after it is a partial update again, still no mode named
+  p.stroke([[100, 480], [140, 500]]);
+  await shown(dev, 3);
+  await until('small stroke answered', () => /Changed area refreshed/.test(p.el('status').textContent));
+  assert.deepEqual(dev.refusals, []);
 });
