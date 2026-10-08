@@ -104,5 +104,22 @@ test('verifyLive: the live lists are read past every cache, retried until they s
 test('the flash page reads its release list past the cache; pages.yml checks the live site after a release deploy', () => {
   assert.match(readFileSync(join(SITE, 'index.html'), 'utf8'), /fetch\(`fw\/releases\.json\?cb=\$\{Date\.now\(\)\}`, \{ cache: 'no-store' \}\)/);
   const pages = readFileSync(join(WORKFLOWS, 'pages.yml'), 'utf8');
-  assert.match(pages, /if: \$\{\{ inputs\.tag != '' \}\}\n(.*\n)*?\s+run: node site\/publish\.mjs verify /);
+  assert.match(pages, /run: node site\/publish\.mjs verify "\$PAGE_URL" "\$TAG" "\$GITHUB_RUN_ID"/, 'every deploy asks the live site whether it is this run');
+  assert.match(pages, /tee _site\/build\.json > _site\/testing\/build\.json/);
+});
+
+test('verifyLive: a deployment that reports success but is not the live one is caught by its run id', async () => {
+  const base = 'https://example.test/site/';
+  const site = (run, tags) => async (url) => {
+    if (url.includes('build.json')) return json({ run });
+    if (url.includes('releases.json')) return json(tags.map((t) => ({ tagName: t })));
+    return json({});
+  };
+  await verifyLive({ base, tag: 't9', run: '77', fetchFn: site('77', ['t9']), sleep: async () => {}, tries: 2 });
+  await assert.rejects(verifyLive({ base, tag: 't9', run: '77', fetchFn: site('76', ['t9']), sleep: async () => {}, tries: 2 }), /build\.json is run 76, this deploy is run 77: the deployment was not applied/);
+  await assert.rejects(verifyLive({ base, tag: 't9', run: '77', fetchFn: site('77', ['t8']), sleep: async () => {}, tries: 2 }), /does not list t9/);
+  // no tag: only the run is checked, on both pages
+  const seen = [];
+  await verifyLive({ base, run: '5', fetchFn: async (u) => { seen.push(u.split('?')[0]); return json({ run: '5' }); }, sleep: async () => {} });
+  assert.deepEqual(seen, [`${base}build.json`, `${base}testing/build.json`]);
 });

@@ -77,6 +77,8 @@ jobs:
           mkdir -p _site/testing
           publish main-src/site _site main "$main_tag"
           publish testing-src/site _site/testing testing "$TAG"
+          # which run made this site: the live site can then be asked whether it is this deployment (verify below)
+          printf '{"run":"%s","attempt":"%s","sha":"%s","ref":"%s","event":"%s"}\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_SHA" "$GITHUB_REF" "$GITHUB_EVENT_NAME" | tee _site/build.json > _site/testing/build.json
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
@@ -84,9 +86,8 @@ jobs:
       - id: deployment
         uses: actions/deploy-pages@v4
       # a green deploy job is not a live site: read the live lists (past every cache) and fail when the release is not there
-      - name: The live site shows the release
-        if: ${{ inputs.tag != '' }}
+      - name: The live site is this deployment and shows the release
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
           TAG: ${{ inputs.tag }}
-        run: node site/publish.mjs verify "$PAGE_URL" "$TAG"
+        run: node site/publish.mjs verify "$PAGE_URL" "$TAG" "$GITHUB_RUN_ID"

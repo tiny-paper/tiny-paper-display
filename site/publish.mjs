@@ -51,14 +51,21 @@ export function assemble({ site, out, testing, all, tag }) {
  * `base`: the site's root URL with a trailing slash. A v* tag is checked on the main page and the testing page, a t* tag
  * on the testing page.
  */
-export async function verifyLive({ base, tag, fetchFn = fetch, tries = 12, waitMs = 10000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
+export async function verifyLive({ base, tag = '', run = '', fetchFn = fetch, tries = 12, waitMs = 10000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
   const pages = tag.startsWith('v') ? [base, `${base}testing/`] : [`${base}testing/`];
+  if (!tag) pages.splice(0, pages.length, base, `${base}testing/`);
   let last = '';
   for (let i = 1; i <= tries; i++) {
     try {
       last = '';
       for (const page of pages) {
         const bust = `cb=${Date.now()}${i}`;
+        if (run) { // is this deployment the one that is live? (a deployment can report success and not be applied)
+          const b = await fetchFn(`${page}build.json?${bust}`, { cache: 'no-store' });
+          const live = b.ok ? (await b.json()).run : `HTTP ${b.status}`;
+          if (String(live) !== String(run)) { last = `${page}build.json is run ${live}, this deploy is run ${run}: the deployment was not applied`; break; }
+        }
+        if (!tag) continue;
         const list = await fetchFn(`${page}fw/releases.json?${bust}`, { cache: 'no-store' });
         if (!list.ok) { last = `${page}fw/releases.json: HTTP ${list.status}`; break; }
         if (!(await list.json()).some((r) => r.tagName === tag)) { last = `${page}fw/releases.json does not list ${tag}`; break; }
@@ -73,10 +80,10 @@ export async function verifyLive({ base, tag, fetchFn = fetch, tries = 12, waitM
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url) && process.argv[2] === 'verify') {
-  const [, , , base, tag] = process.argv;
+  const [, , , base, tag, run] = process.argv;
   try {
-    await verifyLive({ base: base.endsWith('/') ? base : `${base}/`, tag });
-    console.log(`the live site lists ${tag} and serves its files`);
+    await verifyLive({ base: base.endsWith('/') ? base : `${base}/`, tag: tag || '', run: run || '' });
+    console.log(`the live site is ${run ? `run ${run}` : 'up'}${tag ? ` and lists ${tag} and serves its files` : ''}`);
   } catch (e) {
     console.error(`publish: ${e.message}`);
     process.exit(1);
