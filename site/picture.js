@@ -530,11 +530,14 @@ var X_KNOBS = [
   { name: "row_hold", min: 0, max: 20, def: 2 },
   { name: "row_drive", min: 0, max: 200, def: 32 },
   { name: "clear", min: 0, max: 3, def: 0, words: ["auto", "none", "fast", "slow"] },
+  { name: "gray_row", min: 0, max: 0, def: 0, text: true },
+  // `level:passes` entries; the value is the rows that differ, as text
   { name: "step_neutral", min: 0, max: 1, def: 0, words: ["each", "end"] },
   { name: "row_skip", min: 0, max: 1, def: 0, words: ["off", "on"] },
   { name: "row_skip_us", min: 2, max: 50, def: 10 },
   { name: "scan_min_ms", min: 0, max: 150, def: 0 }
 ];
+var knobStart = (k) => k.text ? "" : k.def;
 function tuningMap(values, knobs = X_KNOBS) {
   return Object.fromEntries(knobs.map((k, i) => [k.name, k.words ? k.words[values[i] - k.min] : values[i]]));
 }
@@ -543,12 +546,14 @@ function applyTuning(values, request, knobs = X_KNOBS) {
   const range = (k) => k.words ? `allowed ${k.words.join(", ")}` : `allowed ${k.min} to ${k.max}`;
   if (request === "defaults") {
     knobs.forEach((k, i) => {
-      values[i] = k.def;
+      values[i] = knobStart(k);
     });
     return refused;
   }
   if (typeof request !== "object" || request === null || Array.isArray(request)) return { tuning: 'tuning is a map of keys, or "defaults"' };
-  for (const [key, v] of Object.entries(request)) {
+  const table = knobs.findIndex((k) => k.name === "gray_table");
+  const entries = Object.entries(request).sort(([a], [b]) => Number(b === "gray_table") - Number(a === "gray_table"));
+  for (const [key, v] of entries) {
     if (Object.keys(refused).length >= 8) break;
     const i = knobs.findIndex((k2) => k2.name === key);
     if (i < 0) {
@@ -556,6 +561,11 @@ function applyTuning(values, request, knobs = X_KNOBS) {
       continue;
     }
     const k = knobs[i];
+    if (k.text) {
+      const why = grayRows(values, i, table, v);
+      if (why) refused[key] = why;
+      continue;
+    }
     let n;
     if (typeof v === "number" && Number.isInteger(v)) n = v;
     else if (typeof v === "boolean" && k.words && k.max === 1) n = v ? 1 : 0;
@@ -568,9 +578,33 @@ function applyTuning(values, request, knobs = X_KNOBS) {
     }
     if (n === void 0) refused[key] = `${k.words ? "not one of the words" : "not a whole number"}; ${range(k)}`;
     else if (n < k.min || n > k.max) refused[key] = `out of range; ${range(k)}`;
-    else values[i] = n;
+    else {
+      if (i === table && values[i] !== n) knobs.forEach((x, j) => {
+        if (x.text) values[j] = "";
+      });
+      values[i] = n;
+    }
   }
   return refused;
+}
+function grayRows(values, at, table, v) {
+  if (typeof v !== "string") return "the value is text: level:passes entries";
+  if (v === "" || v === "defaults") {
+    values[at] = "";
+    return "";
+  }
+  const stock = values[table] === 1, n = stock ? 9 : 8, name = stock ? "stock" : "fastepd";
+  const rows = /* @__PURE__ */ new Map();
+  for (const e of String(values[at]).split(" ").filter(Boolean)) rows.set(Number(e.split(":")[0]), e.split(":")[1]);
+  for (const e of v.split(/[\s,]+/).filter(Boolean)) {
+    const m = /^(\d+):(.*)$/.exec(e);
+    if (!m || Number(m[1]) > 15) return `${e}: not level:passes with a level 0 to 15`;
+    if (!/^[.DL]*$/.test(m[2])) return `level ${m[1]}: a pass is . D or L`;
+    if (m[2].length !== n) return `level ${m[1]}: ${m[2].length} passes given, the ${name} table has ${n}`;
+    rows.set(Number(m[1]), m[2]);
+  }
+  values[at] = [...rows].sort(([a], [b]) => a - b).map(([l, p]) => `${l}:${p}`).join(" ");
+  return "";
 }
 var MOCK_PANELS = { x: "TRMNL X", og: "TRMNL OG", picpak: "PicPak" };
 var MockDisplayDevice = class {
@@ -604,7 +638,7 @@ var MockDisplayDevice = class {
   png = new Uint8Array();
   next = 0;
   /** The TRMNL X's knobs, now (`x` panel only). */
-  knobs = X_KNOBS.map((k) => k.def);
+  knobs = X_KNOBS.map(knobStart);
   /** `x`, `og`, `picpak`: that board's panel as its hello describes it (usb-display.md "Boards"); else a 16 x 8 test panel. */
   constructor(panel = "") {
     if (panel === "x") Object.assign(this.hello, {
