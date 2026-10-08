@@ -30,7 +30,7 @@ Work lands on `testing` first; `main` moves by promoting a state that was tried 
 |---|---|---|
 | 1 Flash, backup, restore | a flash page | backup and restore; one page with the tabs Flash and Test, switching to Test after an install; a plain warning that installing erases the firmware on the device |
 | 2 USB and Bluetooth | the firmware and its protocol; Bluetooth off by default with a setup step | the first run on a real device, on each board, cable and Bluetooth |
-| 3 Packages | a Python package | the JavaScript package; first releases, version 0.1.0 |
+| 3 Packages | a Python package that installs from the git URL; a guide page ("Use it") | the JavaScript package; first releases, version 0.1.0 |
 | 4 Sketch in the browser | a sketch page, black and white, grays where the device reports them; Clear and erasing avoid traces | the grays judged on a device; the painting by a drawing library; into the Test tab |
 | 5 Sketch in Python | a first version exists | later |
 | 6 Partial refresh | in the firmware | seen on a device per board and depth before it is offered there (table below) |
