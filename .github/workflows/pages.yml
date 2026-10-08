@@ -1,13 +1,28 @@
-# The GitHub Pages site: the flash page, the Sketch page and the API page (site/), with the files of the published releases copied next
-# to them (fw/<tag>/), because a browser cannot read release downloads from another origin. Runs after a release, on a
-# change of site/ on main, and by hand. Publishes only when Pages is switched on for the repository (source: GitHub
-# Actions).
+# The GitHub Pages site, both branches in one deployment: main's site/ at the root, testing's site/ under testing/ with
+# a visible "testing" label on every page. The files of the published releases are copied next to each site (fw/<tag>/),
+# because a browser cannot read release downloads from another origin: the main page lists releases, the testing page
+# pre-releases and releases (site/publish.mjs, site/test/publish.test.mjs). Runs on a change of site/ on either branch,
+# after a release (build.yml passes its tag: the deploy waits for that release and fails if it or its files are
+# missing, it never publishes the old list), and by hand. Publishes only when Pages is switched on for the repository
+# (source: GitHub Actions). The environment github-pages must allow the branches main and testing and the tags v* and t*.
 name: pages
 on:
   workflow_call:
+    inputs:
+      tag:
+        description: 'the release this deploy follows (must be listed and complete)'
+        type: string
+        required: false
+        default: ''
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'a release that must be listed and complete (empty: none)'
+        type: string
+        required: false
+        default: ''
   push:
-    branches: [main]
+    branches: [main, testing]
     paths: ['site/**', '.github/workflows/pages.yml']
 
 permissions:
@@ -26,18 +41,42 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/checkout@v4   # this ref: the scripts and the workflow
       - uses: actions/checkout@v4
+        with: { ref: main, path: main-src }
+      - uses: actions/checkout@v4
+        with: { ref: testing, path: testing-src }
       - name: Site and the newest releases
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
         run: |
-          mkdir -p _site/fw
-          cp site/*.html site/*.js _site/   # every page and script (site/test/pages.test.mjs: nothing a page loads is left out)
-          gh release list --exclude-drafts --exclude-pre-releases --limit 5 --json tagName,publishedAt > _site/fw/releases.json
-          for tag in $(gh release list --exclude-drafts --exclude-pre-releases --limit 5 --json tagName --jq '.[].tagName'); do
-            gh release download "$tag" --dir "_site/fw/$tag"
+          set -euo pipefail
+          # a release that was just created may not be listed yet: wait for it, then fail loudly
+          ok=0
+          for i in $(seq 1 20); do
+            gh release list --exclude-drafts --limit 100 --json tagName,publishedAt,isPrerelease,isDraft > all.json
+            if [ -z "$TAG" ] || node -e 'const t=process.argv[1];process.exit(JSON.parse(require("fs").readFileSync("all.json","utf8")).some(r=>r.tagName===t)?0:1)' "$TAG"; then ok=1; break; fi
+            echo "release $TAG is not listed yet ($i of 20)"; sleep 15
           done
-          cat _site/fw/releases.json
+          [ "$ok" = 1 ] || { echo "::error::release $TAG never appeared: the site is not published"; exit 1; }
+          # a v* tag is a release (both pages list it); a t* tag is a test build (the testing page only)
+          main_tag=""; case "$TAG" in v*) main_tag="$TAG";; esac
+          publish() { # <site dir> <out dir> <main|testing> <required tag>
+            tags=$(node site/publish.mjs "$1" "$2" "$3" all.json "$4")
+            for tag in $tags; do
+              gh release download "$tag" --dir "$2/fw/$tag"
+            done
+            if [ -n "$4" ]; then
+              for f in trmnl_og__flash.txt picpak__flash.txt trmnl_x__flash.txt; do
+                [ -s "$2/fw/$4/$f" ] || { echo "::error::$4 has no $f: the site is not published"; exit 1; }
+              done
+            fi
+            cat "$2/fw/releases.json"
+          }
+          mkdir -p _site/testing
+          publish main-src/site _site main "$main_tag"
+          publish testing-src/site _site/testing testing "$TAG"
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

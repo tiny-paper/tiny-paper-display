@@ -1,10 +1,12 @@
-# Tests and the three firmware images on every push; a tag v* publishes the images as a GitHub release, each board's
-# files under `<board>__<file>` with its flash layout `<board>__flash.txt`, then the Pages site picks the release up.
+# Tests and the three firmware images on every push; a tag v* (on main) publishes the images as a GitHub release, a tag
+# t* (on testing, for example t20261008.1) as a GitHub PRE-release, a test build: each board's files under
+# `<board>__<file>` with its flash layout `<board>__flash.txt`, then the Pages site picks the release up (it is
+# called with the tag and fails when that release or its files are missing). publish.yml (PyPI) runs on v* only.
 name: build
 on:
   push:
     branches: ['**']
-    tags: ['v*']
+    tags: ['v*', 't*']
   pull_request:
 
 permissions:
@@ -52,13 +54,15 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/t')
     needs: [test, firmware]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           path: out
@@ -68,7 +72,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ls out/trmnl_og__flash.txt out/picpak__flash.txt out/trmnl_x__flash.txt
-          gh release create "$GITHUB_REF_NAME" out/* --title "$GITHUB_REF_NAME" \
+          kind=""
+          case "$GITHUB_REF_NAME" in
+            t*) # a test build: only from a commit that is on testing
+              git merge-base --is-ancestor "$GITHUB_SHA" origin/testing || { echo "::error::$GITHUB_REF_NAME is not on testing"; exit 1; }
+              kind="--prerelease" ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" out/* $kind --title "$GITHUB_REF_NAME" \
             --notes "Display firmware for TRMNL OG, PicPak and TRMNL X. Install from the flash page, or with esptool: the \`# separate:\` line of \`<board>__flash.txt\` (it keeps the device's settings). $(cat SOURCE | head -1)."
 
   pages:
@@ -78,3 +88,5 @@ jobs:
       pages: write
       id-token: write
     uses: ./.github/workflows/pages.yml
+    with:
+      tag: ${{ github.ref_name }}

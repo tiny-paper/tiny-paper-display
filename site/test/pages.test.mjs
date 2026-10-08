@@ -41,16 +41,11 @@ test('every file a page loads is there and is copied to the published site', () 
     }
   }
   for (const f of ['sketch.js', 'sketch-page.js', 'bt-setup.js', 'frame.js', 'flash.js']) assert.ok(seen.has(f), `${f} is not reached from a page`);
+  // pages.yml publishes with publish.mjs, which copies every .html and .js file of site/
   const workflow = readFileSync(join(SITE, '..', '.github/workflows/pages.yml'), 'utf8');
-  const cp = workflow.match(/^\s*cp (.+?) _site\/(\s|$)/m);
-  assert.ok(cp, 'pages.yml: no cp ... _site/');
-  const all = readdirSync(SITE);
-  const copied = new Set(cp[1].trim().split(/\s+/).flatMap((pattern) => {
-    assert.ok(pattern.startsWith('site/'), pattern);
-    const rx = new RegExp(`^${pattern.slice(5).replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')}$`);
-    return all.filter((f) => rx.test(f));
-  }));
-  assert.deepEqual([...seen].filter((f) => !copied.has(f)).sort(), [], 'loaded by a page but not copied by pages.yml');
+  assert.match(workflow, /node site\/publish\.mjs/);
+  assert.match(readFileSync(join(SITE, 'publish.mjs'), 'utf8'), /!\/\\\.\(html\|js\)\$\/\.test\(f\)/, 'publish.mjs: copies .html and .js');
+  assert.deepEqual([...seen].filter((f) => !/\.(html|js)$/.test(f)).sort(), [], 'loaded by a page but not copied by publish.mjs');
 });
 
 test('the Sketch page loads only the site\'s own files: its policy says so and nothing in it needs more', () => {

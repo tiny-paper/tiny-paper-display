@@ -103,7 +103,7 @@ if (note) { $('nosupport').textContent = note; $('nosupport').hidden = false; }
 try {
   const r = await fetch('fw/releases.json');
   const releases = r.ok ? await r.json() : [];
-  for (const rel of releases) $('release').add(new Option(rel.tagName, rel.tagName));
+  for (const rel of releases) $('release').add(new Option(rel.isPrerelease ? `${rel.tagName} (test build)` : rel.tagName, rel.tagName));
   if (!releases.length) say('No release is published yet.', 'warn');
   else if (!note) $('install').disabled = false;
 } catch {
