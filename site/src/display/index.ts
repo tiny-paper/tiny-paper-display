@@ -4,3 +4,4 @@ export * from './sketchModel.ts';
 export * from './sketchPen.ts';
 export * from './sketchSender.ts';
 export * from './mockDevice.ts';
+export * from './debug.ts';

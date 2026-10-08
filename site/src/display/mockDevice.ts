@@ -3,12 +3,53 @@
 import { cborEncode, type CborMap } from '../protocol/cbor.ts';
 import { FrameParser, decodePayload, encodeFrame } from '../protocol/link-frame.ts';
 
+/** The TRMNL X's tuning knobs as the firmware lists them (usb-display.md "Tuning"): range, default, words. */
+export const X_KNOBS: readonly { name: string; min: number; max: number; def: number; words?: readonly string[] }[] = [
+  { name: 'gray_table', min: 0, max: 1, def: 1, words: ['fastepd', 'stock'] },
+  { name: 'gray_partial', min: 0, max: 1, def: 1, words: ['off', 'on'] },
+  { name: 'gray_dark', min: 0, max: 14, def: 0 }, { name: 'gray_light', min: 0, max: 14, def: 3 },
+  { name: 'passes_partial', min: 1, max: 14, def: 4 }, { name: 'passes_full', min: 1, max: 14, def: 3 },
+  { name: 'wave_kick', min: 0, max: 14, def: 2 }, { name: 'wave_extra', min: 0, max: 14, def: 0 }, { name: 'wave_redrive', min: 0, max: 3, def: 2 },
+  { name: 'row_settle', min: 0, max: 20, def: 2 }, { name: 'row_hold', min: 0, max: 20, def: 2 }, { name: 'row_drive', min: 0, max: 200, def: 32 },
+  { name: 'clear', min: 0, max: 3, def: 0, words: ['auto', 'none', 'fast', 'slow'] },
+];
+/** The knobs as hello and every `set` answer report them: a word where the knob has words, else the number. */
+export function tuningMap(values: readonly number[], knobs = X_KNOBS): Record<string, number | string> {
+  return Object.fromEntries(knobs.map((k, i) => [k.name, k.words ? k.words[values[i]! - k.min]! : values[i]!]));
+}
+/**
+ * What the firmware does with `set { tuning }` (usbdisp.c set_tuning): each key on its own, the good ones applied, the others
+ * answered under `refused` with why and the allowed range. `values` is changed in place.
+ */
+export function applyTuning(values: number[], request: unknown, knobs = X_KNOBS): Record<string, string> {
+  const refused: Record<string, string> = {};
+  const range = (k: typeof knobs[number]): string => (k.words ? `allowed ${k.words.join(', ')}` : `allowed ${k.min} to ${k.max}`);
+  if (request === 'defaults') { knobs.forEach((k, i) => { values[i] = k.def; }); return refused; }
+  if (typeof request !== 'object' || request === null || Array.isArray(request)) return { tuning: 'tuning is a map of keys, or "defaults"' };
+  for (const [key, v] of Object.entries(request as Record<string, unknown>)) {
+    if (Object.keys(refused).length >= 8) break;
+    const i = knobs.findIndex((k) => k.name === key);
+    if (i < 0) { refused[key] = `no such key; known: ${knobs.map((k) => k.name).join(' ')}`.slice(0, 120); continue; }
+    const k = knobs[i]!;
+    let n: number | undefined;
+    if (typeof v === 'number' && Number.isInteger(v)) n = v;
+    else if (typeof v === 'boolean' && k.words && k.max === 1) n = v ? 1 : 0;
+    else if (typeof v === 'string' && k.words) { const w = k.words.indexOf(v); n = w < 0 ? undefined : w + k.min; }
+    else if (typeof v === 'object') { refused[key] = 'the value is a number or a word'; continue; }
+    if (n === undefined) refused[key] = `${k.words ? 'not one of the words' : 'not a whole number'}; ${range(k)}`;
+    else if (n < k.min || n > k.max) refused[key] = `out of range; ${range(k)}`;
+    else values[i] = n;
+  }
+  return refused;
+}
+
 /** The panels a preview can pretend to be (usb-display.md "Boards"). */
 export const MOCK_PANELS = { x: 'TRMNL X', og: 'TRMNL OG', picpak: 'PicPak' } as const;
 export type MockPanel = keyof typeof MOCK_PANELS;
 export class MockDisplayDevice {
   readonly hello: { proto: number; project: string; fw: string; board: string; w: number; h: number; depths: number[]; colors?: string[];
-    partial_depths: number[]; modes: string[]; full_every: number; max_png: number; max_payload: number; chunk: number } = {
+    partial_depths: number[]; modes: string[]; full_every: number; max_png: number; max_payload: number; chunk: number;
+    tuning?: Record<string, number | string> } = {
       proto: 1, project: 'display', fw: 'test', board: 'trmnl_og', w: 16, h: 8,
       depths: [1, 2], partial_depths: [1], modes: ['full', 'partial', 'inverse', 'passes'],
       full_every: 20, max_png: 8192, max_payload: 6144, chunk: 4096 };
@@ -25,10 +66,12 @@ export class MockDisplayDevice {
   private output: (b: Uint8Array) => void = () => {};
   private png = new Uint8Array();
   private next = 0;
+  /** The TRMNL X's knobs, now (`x` panel only). */
+  readonly knobs: number[] = X_KNOBS.map((k) => k.def);
   /** `x`, `og`, `picpak`: that board's panel as its hello describes it (usb-display.md "Boards"); else a 16 x 8 test panel. */
   constructor(panel = '') {
     if (panel === 'x') Object.assign(this.hello, { board: 'trmnl_x', w: 1872, h: 1404, depths: [1, 2, 4], partial_depths: [1, 2, 4], max_png: 1_319_644,
-      modes: ['full', 'partial', 'partial_all', 'inverse', 'passes'] });
+      modes: ['full', 'partial', 'partial_all', 'inverse', 'passes'], tuning: tuningMap(this.knobs) });
     else if (panel === 'og') Object.assign(this.hello, { w: 800, h: 480, max_png: 131_072, modes: ['full', 'partial', 'inverse'] });
     else if (panel === 'picpak') Object.assign(this.hello, { board: 'picpak', w: 400, h: 300, depths: [1], colors: ['black', 'white', 'red', 'yellow'],
       partial_depths: [], modes: ['full'], full_every: 0, max_png: 65_536 });
@@ -41,8 +84,11 @@ export class MockDisplayDevice {
       const req = decodePayload(payload);
       this.calls.push({ cmd, req });
       let res: object;
-      if (cmd === 1) res = this.hello;
-      else if (this.error) { res = { err: this.error, msg: 'fake refusal', ...(this.detail === undefined ? {} : { detail: this.detail }) }; this.error = 0; }
+      if (cmd === 1) res = this.hello.tuning ? { ...this.hello, tuning: tuningMap(this.knobs) } : this.hello;
+      else if (cmd === 12 && !this.error) {
+        const refused = req.tuning === undefined ? {} : this.hello.tuning ? applyTuning(this.knobs, req.tuning) : { tuning: 'this board has no panel tuning' };
+        res = { full_every: this.hello.full_every, ...(this.hello.tuning ? { tuning: tuningMap(this.knobs) } : {}), ...(Object.keys(refused).length ? { refused } : {}) };
+      } else if (this.error) { res = { err: this.error, msg: 'fake refusal', ...(this.detail === undefined ? {} : { detail: this.detail }) }; this.error = 0; }
       else if (cmd === 8) { this.png = new Uint8Array(Number(req.size)); this.next = 0; this.begin = req; res = { next: 0, chunk: 4096 }; }
       else if (cmd === 9) {
         const data = req.data as Uint8Array;

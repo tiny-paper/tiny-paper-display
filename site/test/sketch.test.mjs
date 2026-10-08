@@ -23,21 +23,23 @@ async function until(what, cond, ms = 4000) {
 }
 
 /** The page in a browser with (or without) Web Serial; `dev`: what the port picker hands out. */
-function open({ dev = null, search = '', serial = true } = {}) {
+function open({ dev = null, search = '', serial = true, storage = null, clipboard = undefined } = {}) {
   const document = fakeDocument(HTML);
   const listeners = {};
   const navigator = serial ? { serial: {
     requestPort: async () => { if (!dev) throw new Error('nothing picked'); return dev.port; },
     addEventListener: (type, f) => { listeners[type] = f; },
   } } : {};
-  const page = startSketchPage({ document, navigator, location: { search }, ImageData: FakeImageData });
+  if (clipboard) navigator.clipboard = clipboard;
+  const resizers = [];
+  const page = startSketchPage({ document, navigator, location: { search }, ImageData: FakeImageData, localStorage: storage, onResize: (f) => resizers.push(f) });
   const el = (id) => document.getElementById(id);
   const stroke = (points) => {
     el('canvas').dispatch('pointerdown', pointer(...points[0]));
     for (const p of points.slice(1)) el('canvas').dispatch('pointermove', pointer(...p));
     el('canvas').dispatch('pointerup', pointer(...points.at(-1)));
   };
-  return { page, el, stroke, listeners };
+  return { page, el, stroke, listeners, resize: () => resizers.forEach((f) => f()) };
 }
 // each test its own panel height: the page keeps one drawing per panel shape while it is loaded
 async function connected(h, over = {}) {
@@ -56,7 +58,9 @@ test('connect: the device named, a canvas of the panel\'s pixels, its two colour
   assert.equal(el('pad').hidden, false);
   assert.deepEqual([el('canvas').width, el('canvas').height], [800, 480]);
   assert.deepEqual(el('swatches').children.map((b) => b.title), ['black', 'white']);
-  assert.deepEqual(el('brushes').children.map((b) => b.textContent), ['Small', 'Medium', 'Large']);
+  assert.deepEqual(el('brushes').children.map((b) => b.getAttribute('aria-label')), ['Small', 'Medium', 'Large']);
+  assert.deepEqual(el('brushes').children.map((b) => b.title), ['Small', 'Medium', 'Large']);
+  assert.deepEqual(el('brushes').children.map((b) => b.children[1].textContent), ['Small', 'Medium', 'Large'], 'the word stays for assistive technology');
   assert.equal(el('connect').textContent, 'Disconnect');
   assert.equal(el('install').hidden, true);
   assert.equal(el('nosupport').hidden, true);
@@ -294,4 +298,219 @@ test('Erase and Undo where nothing stronger than partial exists (4 bit): counted
   await said(el, /^Asked for a full refresh of the whole drawing \(1872 x 445\)\. Full refresh: as requested \(9 ms\)\. \d+ ms in all\. Full refresh by itself: 3 sends in a row erased pixels by a partial update, which leaves faint traces\.$/);
   await sleep(400);
   assert.equal(dev.shows.length, 8, 'the count starts again after the full refresh');
+});
+
+// ---- the Debug section: a pasted configuration, per-key results, test patterns and the report
+const XDEV = { board: 'trmnl_x', w: 1872, depths: [1, 2, 4], partial_depths: [1, 2, 4], modes: ['full', 'partial', 'partial_all', 'inverse', 'passes'], max_png: 1319644, tuning: true };
+const apply = async (p, config) => { p.el('debugjson').value = typeof config === 'string' ? config : JSON.stringify(config); p.el('debugapply').onclick(); };
+const resultsHave = (p, re) => until(`the results ${re}`, () => re.test(p.el('debugresults').textContent));
+
+test('Debug: valid JSON is applied, the device part as one set, the page part in effect: strokes go out at the chosen depth and mode', async () => {
+  const { dev, el, stroke, page } = await connected(450, XDEV);
+  assert.equal(el('debugnone').hidden, true);
+  await apply({ el }, { tuning: { gray_table: 'fastepd', gray_dark: 2 }, sketch: { depth: 2, mode: 'partial', full_after: 5, erase: 'partial' } });
+  await resultsHave({ el }, /sketch\.erase: applied: partial/);
+  assert.equal(dev.sets.length, 1, 'the device part is one set');
+  assert.deepEqual(dev.sets[0], { tuning: { gray_table: 'fastepd', gray_dark: 2 } });
+  assert.deepEqual(dev.knobs.slice(0, 3), [0, 1, 2]);
+  const text = el('debugresults').textContent;
+  assert.match(text, /tuning\.gray_table: applied: fastepd/);
+  assert.match(text, /tuning\.gray_dark: applied: 2/);
+  assert.match(text, /sketch\.depth: applied: 2 bit/);
+  assert.equal(el('swatches').children.length, 4, 'a drawing at 2 bit has 4 grays');
+  assert.equal(el('fullafter').value, '5');
+  await until('the whole drawing at 2 bit', () => dev.shows.length === 2 && dev.shows[1].bits === 2);
+  stroke([[300, 200], [340, 240]]);
+  await shown(dev, 3);
+  assert.deepEqual([dev.shows[2].mode, dev.shows[2].bits], ['partial', 2]);
+  // depth 1 with a named mode: strokes go out in that mode
+  await apply({ el }, { sketch: { depth: 1, mode: 'passes' } });
+  await until('the whole drawing at 1 bit', () => dev.shows.length === 4);
+  stroke([[300, 200], [340, 240]]);
+  await shown(dev, 5);
+  assert.deepEqual([dev.shows[4].mode, dev.shows[4].passes, dev.shows[4].bits], ['passes', 2, 1]);
+  assert.equal(dev.sets.length, 1, 'a page-only configuration sends no set');
+});
+
+test('Debug: a refused key is shown with the device\'s words and the rest is still applied', async () => {
+  const { dev, el } = await connected(451, XDEV);
+  await apply({ el }, { tuning: { gray_dark: 99, gray_light: 5, nonsense: 1, gray_table: 'linear' }, sketch: { full_after: 7, mode: 'nope', erase: 'full' } });
+  await resultsHave({ el }, /sketch\.erase: applied: full/);
+  const t = el('debugresults').textContent;
+  assert.match(t, /tuning\.gray_dark: refused: out of range; allowed 0 to 14/);
+  assert.match(t, /tuning\.gray_table: refused: not one of the words; allowed fastepd, stock/);
+  assert.match(t, /tuning\.nonsense: refused: no such key; known: gray_table gray_partial/);
+  assert.match(t, /tuning\.gray_light: applied: 5/);
+  assert.match(t, /sketch\.mode: refused: the device lists full, partial, partial_all, inverse, passes; or auto/);
+  assert.match(t, /sketch\.full_after: applied: 7/);
+  assert.equal(dev.knobs[3], 5);
+  assert.equal(dev.knobs[2], 0, 'a refused value changes nothing');
+  assert.equal(el('fullafter').value, '7');
+  assert.match(el('report').value, /gray_light=5/, 'the report shows the tuning the device reports now');
+});
+
+test('Debug: text that is not valid JSON is reported with its place and nothing is sent', async () => {
+  const { dev, el } = await connected(452, XDEV);
+  const shows = dev.shows.length;
+  await apply({ el }, '{\n  "tuning": {\n    "gray_dark": 2,\n  }\n}');
+  await resultsHave({ el }, /Not valid JSON/);
+  assert.match(el('debugresults').textContent, /\(line 4, column 3\)\. Nothing was sent\./);
+  await apply({ el }, '[1, 2]');
+  await resultsHave({ el }, /must be a JSON object/);
+  await apply({ el }, '{ "tuning": 5 }');
+  await resultsHave({ el }, /"tuning" must be an object of keys, or "defaults"/);
+  await apply({ el }, '{ "tunning": {} }');
+  await resultsHave({ el }, /tunning: refused: no such part/);
+  await sleep(200);
+  assert.equal(dev.sets.length, 0);
+  assert.equal(dev.shows.length, shows);
+});
+
+test('Debug: a device without panel tuning says so, refuses the tuning keys without sending, and the sketch part works', async () => {
+  const { dev, el } = await connected(453, { board: 'trmnl_og' });
+  assert.equal(el('debugnone').hidden, false);
+  await apply({ el }, { tuning: { gray_dark: 1 }, sketch: { full_after: 9 } });
+  await resultsHave({ el }, /sketch\.full_after: applied: 9/);
+  assert.match(el('debugresults').textContent, /tuning\.gray_dark: refused: this device has no panel tuning/);
+  assert.equal(dev.sets.length, 0);
+  assert.match(el('report').value, /tuning: none \(this device has no panel tuning\)/);
+});
+
+test('Debug: Reset puts both sides back to their defaults', async () => {
+  const { dev, el } = await connected(454, XDEV);
+  await apply({ el }, { tuning: { gray_dark: 7, clear: 'slow' }, sketch: { depth: 1, full_after: 3 } });
+  await until('applied', () => dev.knobs[2] === 7 && el('swatches').children.length === 2);
+  el('debugreset').onclick();
+  await resultsHave({ el }, /sketch: defaults restored/);
+  assert.deepEqual(dev.sets.at(-1), { tuning: 'defaults' });
+  assert.deepEqual(dev.knobs.slice(2, 3).concat(dev.knobs[12]), [0, 0]);
+  assert.equal(el('swatches').children.length, 16);
+  assert.equal(el('fullafter').value, '30');
+  assert.match(el('report').value, /sketch: depth=auto \(4 bit in use\) mode=auto full_after=30 erase=auto/);
+});
+
+test('Debug: the report holds the device, the tuning, the page settings, what was seen and the last 12 status lines with their times', async () => {
+  let copied = '';
+  const dev = fakeDisplay({ h: 455, ...XDEV });
+  const { el, stroke, page } = open({ dev, clipboard: { writeText: async (t) => { copied = t; } } });
+  await page.connect();
+  await until('connected', () => dev.shows.length === 1 && el('status').dataset.state === 'ok');
+  for (let i = 0; i < 14; i++) { stroke([[100 + i * 20, 100], [110 + i * 20, 110]]); await shown(dev, 2 + i); await said(el, /partial update/); }
+  el('debugsaw').value = 'grays look even';
+  el('debugsaw').oninput();
+  const r = el('report').value;
+  assert.match(r, /^tiny-paper display report\ndevice: trmnl_x 1872x455, display firmware 0\.0\.0\+test/);
+  assert.match(r, /device partial depths: 1,2,4; modes: full,partial,partial_all,inverse,passes/);
+  assert.match(r, /tuning: gray_table=stock gray_partial=on gray_dark=0 gray_light=3 /);
+  assert.match(r, /sketch: depth=auto \(4 bit in use\) mode=auto full_after=30 erase=auto/);
+  assert.match(r, /what I saw: grays look even/);
+  const status = r.split('status lines:\n')[1].split('\n');
+  assert.equal(status.length, 12, 'the last 12');
+  assert.ok(status.every((l) => /^\d\d:\d\d:\d\d Asked for /.test(l)), status[0]);
+  assert.match(r, /last 12 status lines:/);
+  // the copy button hands the report to the clipboard
+  await el('reportcopy').onclick();
+  assert.equal(copied, r, 'the copy button puts the report on the clipboard');
+  assert.equal(el('reportnote').textContent, 'Copied.');
+});
+
+test('Debug: each test pattern sends its own partial updates after a full refresh of the blank panel', async () => {
+  const { dev, el } = await connected(456 + 100, XDEV);
+  const run = async (name, partials) => {
+    const before = dev.shows.length;
+    await apply({ el }, { sketch: { test: name } });
+    await until(`${name} sent`, () => el('debugresults').textContent.includes(`sketch.test: ${name} sent`) && dev.shows.length === before + 1 + partials);
+    const mine = dev.shows.slice(before);
+    assert.equal(mine[0].mode, 'full', `${name}: the blank panel first`);
+    assert.deepEqual(new Set(mine.slice(1).map((s) => s.mode)), new Set(['partial']), `${name}: partial updates`);
+    assert.ok(mine.slice(1).every((s) => s.bits === 4));
+    assert.equal(el('report').value.includes(`test=${name}`), true);
+  };
+  await run('grays', 15); // 16 bars; the white one changes nothing
+  await run('lines', 6);
+  await run('box', 2);
+  await apply({ el }, { sketch: { test: 'circles' } });
+  await resultsHave({ el }, /sketch\.test: refused: grays, lines, box/);
+});
+
+test('Debug: the last pasted text is read back after a reload, and applying it again reproduces the try', async () => {
+  const store = new Map();
+  const storage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) };
+  const dev = fakeDisplay({ h: 458, ...XDEV });
+  const p = open({ dev, storage });
+  await p.page.connect();
+  await until('connected', () => dev.shows.length === 1 && p.el('status').dataset.state === 'ok');
+  const text = '{ "tuning": { "gray_dark": 4 } }';
+  await apply(p, text);
+  await resultsHave(p, /tuning\.gray_dark: applied: 4/);
+  const dev2 = fakeDisplay({ h: 459, ...XDEV });
+  const again = open({ dev: dev2, storage });
+  assert.equal(again.el('debugjson').value, text, 'the text is back, not applied');
+  await again.page.connect();
+  await until('connected', () => dev2.shows.length === 1);
+  assert.equal(dev2.knobs[2], 0, 'a reload applies nothing by itself');
+  again.el('debugapply').onclick();
+  await resultsHave(again, /tuning\.gray_dark: applied: 4/);
+  assert.equal(dev2.knobs[2], 4);
+});
+
+test('the cursor circle is the brush diameter times the display scale, follows the pointer, and the toolbar dots show the same sizes', async () => {
+  const { el, page, resize } = await connected(460);
+  const canvas = el('canvas');
+  const shownAt = (scale) => { canvas.getBoundingClientRect = () => ({ left: 10, top: 20, width: 800 * scale, height: 460 * scale }); resize(); };
+  const cursor = el('cursor');
+  const move = (x, y, type = 'mouse') => canvas.dispatch('pointermove', { ...pointer(x, y), pointerType: type });
+  const sizes = [2, 5, 14]; // the brushes of an 800 wide panel
+  assert.deepEqual(page.state.pen.brushes, sizes);
+  for (const scale of [0.5, 0.375]) {
+    shownAt(scale);
+    sizes.forEach((px, i) => {
+      assert.equal(el('brushes').children[i].children[0].style.width, `${px * scale}px`, `the dot of brush ${i} at scale ${scale}`);
+      assert.equal(el('brushes').children[i].children[0].style.height, `${px * scale}px`);
+    });
+    for (let i = 0; i < 3; i++) {
+      page.state.pen.size = i;
+      move(110, 70);
+      const d = sizes[i] * scale;
+      assert.equal(cursor.hidden, false);
+      assert.deepEqual([cursor.style.width, cursor.style.height], [`${d}px`, `${d}px`], `brush ${i} at scale ${scale}`);
+      assert.equal(cursor.style.left, `${100 - d / 2}px`, 'centred on the pointer');
+      assert.equal(cursor.style.top, `${50 - d / 2}px`);
+      assert.equal(cursor.style.borderRadius, '50%');
+    }
+  }
+  // a resize while the pointer rests: the circle follows the new scale without a move
+  shownAt(0.25);
+  assert.equal(cursor.style.width, `${14 * 0.25}px`);
+  // black: a light ring around it; white: a dark one
+  assert.match(cursor.style.boxShadow, /^0 0 0 1px rgb\(0 0 0\), 0 0 0 2px #fff$/);
+  page.state.pen.color = 1;
+  move(110, 70);
+  assert.match(cursor.style.boxShadow, /2px #000$/);
+  // the eraser: a square with a cross
+  el('eraser').onclick();
+  assert.equal(cursor.style.borderRadius, '0');
+  assert.match(cursor.style.background, /linear-gradient/);
+  el('eraser').onclick();
+  // leaving the canvas hides it
+  canvas.dispatch('pointerleave', {});
+  assert.equal(cursor.hidden, true);
+  // touch: nothing until the stroke starts, gone when it ends
+  move(110, 70, 'touch');
+  assert.equal(cursor.hidden, true);
+  canvas.dispatch('pointerdown', { ...pointer(110, 70), pointerType: 'touch' });
+  assert.equal(cursor.hidden, false);
+  canvas.dispatch('pointerup', { ...pointer(110, 70), pointerType: 'touch' });
+  assert.equal(cursor.hidden, true);
+});
+
+test('the toolbar brushes are dots with the word as label and tooltip, the chosen one marked', async () => {
+  const { el } = await connected(461);
+  const b = el('brushes').children;
+  assert.deepEqual(b.map((x) => x.attrs['aria-label']), ['Small', 'Medium', 'Large']);
+  assert.deepEqual(b.map((x) => x.title), ['Small', 'Medium', 'Large']);
+  assert.deepEqual(b.map((x) => x.children[1].textContent), ['Small', 'Medium', 'Large']);
+  assert.deepEqual(b.map((x) => x.attrs['aria-pressed']), ['false', 'true', 'false'], 'Medium is chosen at the start');
+  b[2].onclick();
+  assert.deepEqual(b.map((x) => x.attrs['aria-pressed']), ['false', 'false', 'true']);
 });

@@ -10,10 +10,10 @@ export interface SketchInk { depth: number; color: boolean; partial: boolean; pa
 export const UNDO_STEPS = 10;
 
 /** The depth the device updates partially at decides the colours: a rectangle must have a depth in `partial_depths`. */
-export function sketchInk(hello: DisplayHello): SketchInk {
+export function sketchInk(hello: DisplayHello, forceDepth?: number): SketchInk {
   const partial = hello.modes.includes('partial') && hello.partial_depths.length > 0;
   const color = !partial && !!hello.colors;
-  const depth = partial ? Math.max(...hello.partial_depths) : color ? 2 : Math.max(...hello.depths);
+  const depth = partial ? (forceDepth !== undefined && hello.partial_depths.includes(forceDepth) ? forceDepth : Math.max(...hello.partial_depths)) : color ? 2 : Math.max(...hello.depths);
   const max = (1 << depth) - 1;
   const swatches: Swatch[] = [];
   if (color) {
@@ -127,6 +127,22 @@ export class SketchModel {
     const d = this.dirty;
     this.dirty = null;
     return d ? alignRect(rectOf(d), this.w, this.h) : null;
+  }
+  /** Whether a pixel got lighter since the last send (not cleared). */
+  get lighterPending(): boolean { return this.light; }
+  /** A filled rectangle as one undo step (the debug test patterns). */
+  fillRect(r: Rect, value: number): void {
+    this.begin();
+    let box: Box | null = null;
+    for (let y = Math.max(0, r.y); y < Math.min(this.h, r.y + r.h); y++) for (let x = Math.max(0, r.x); x < Math.min(this.w, r.x + r.w); x++) {
+      const old = this.px[y * this.w + x]!;
+      if (old === value) continue;
+      if (value > old) this.light = true;
+      this.px[y * this.w + x] = value;
+      box = grow(box, x, y, x + 1, y + 1);
+    }
+    if (box) this.changed(box);
+    this.end();
   }
   /** Whether a pixel got lighter since the last call (a send that cleans must follow). */
   takeLighter(): boolean { const l = this.light; this.light = false; return l; }

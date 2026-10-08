@@ -4,11 +4,15 @@
 // is the one the Bluetooth setup uses. `?mock=x|og|picpak`: no device, a pretend one answers.
 // Every failure ends as plain words on the page.
 import { DisplayLink } from './bt-setup.js';
-import { BRUSH_NAMES, DisplayClient, FULL_AFTER, MOCK_PANELS, MockDisplayDevice, SketchPen, displayHello, sketchSession } from './sketch.js';
+import {
+  BRUSH_NAMES, DEBUG_DEFAULTS, DisplayClient, FULL_AFTER, MOCK_PANELS, MockDisplayDevice, SketchPen, checkSketch, displayHello, parseDebug,
+  reportText, sketchSession, testOf, testPlan, tuningRequest, tuningResults,
+} from './sketch.js';
 
 const HELLO_MS = 3000;
 // a full refresh of the largest panel takes several seconds; the device answers when the panel is done
 const SHOW_MS = 120000;
+const DEBUG_KEY = 'tp-sketch-debug-text';
 const BOARD_TITLES = { trmnl_x: 'TRMNL X', trmnl_og: 'TRMNL OG', picpak: 'PicPak' };
 
 /** What the device's hello says about partial updates, in words: "Partial updates at: 1, 2 and 4 bit (16 grays)". */
@@ -36,7 +40,7 @@ export function mockPort(device) {
 }
 
 /**
- * Start the page in `env` ({ document, navigator, location, ImageData }): returns { ready, connect, disconnect, state }.
+ * Start the page in `env` ({ document, navigator, location, ImageData, localStorage? }): returns { ready, connect, disconnect, state }.
  * `ready` resolves when the preview device, if asked for, is attached.
  */
 export function startSketchPage(env) {
@@ -47,13 +51,27 @@ export function startSketchPage(env) {
     return el;
   };
   const serial = env.navigator && 'serial' in env.navigator ? env.navigator.serial : null;
-  const state = { link: null, port: null, hello: null, sender: null, pen: null, preview: null };
+  const state = { link: null, port: null, hello: null, sender: null, pen: null, preview: null, client: null,
+    dbg: { ...DEBUG_DEFAULTS }, history: [], busy: false, test: null };
+  const store = {
+    get: (k) => { try { return env.localStorage?.getItem(k) ?? null; } catch { return null; } },
+    set: (k, v) => { try { env.localStorage?.setItem(k, v); } catch { /* not remembered */ } },
+  };
   const canvas = $('canvas');
 
   const say = (s) => {
     $('status').textContent = s.text;
     $('status').className = s.state === 'error' ? 'warn' : '';
     $('status').dataset.state = s.state;
+    if (s.state === 'ok' || s.state === 'error') {
+      state.history.push({ at: new Date().toTimeString().slice(0, 8), text: s.text });
+      if (state.history.length > 12) state.history.shift();
+    }
+    report();
+  };
+  const report = () => {
+    $('report').value = reportText({ hello: state.hello, sketch: state.dbg, depthUsed: state.sender ? state.sender.ink.depth : null,
+      saw: $('debugsaw').value, history: state.history, test: state.test });
   };
   const device = (text, cls) => { $('device').textContent = text; $('device').className = cls || 'mut'; };
   const paint = (r) => {
@@ -65,9 +83,48 @@ export function startSketchPage(env) {
     const pen = state.pen;
     [...$('brushes').children].forEach((b, i) => b.setAttribute('aria-pressed', String(pen.size === i)));
     [...$('swatches').children].forEach((b) => b.setAttribute('aria-pressed', String(!pen.eraser && String(pen.color) === b.dataset.value)));
+    place();
     $('eraser').setAttribute('aria-pressed', String(pen.eraser));
     $('undo').disabled = !pen.canUndo;
   };
+  /** Panel pixels to screen pixels: the canvas is shown at its own width, usually smaller than the panel's. */
+  const scale = () => { const b = canvas.getBoundingClientRect(); return canvas.width ? b.width / canvas.width : 1; };
+  const cursor = $('cursor');
+  const mark = { x: 0, y: 0, on: false };
+  /** The brush dots of the toolbar and the cursor circle, at the display scale: what a tap leaves is what they show. */
+  function sizes() {
+    const s = scale();
+    if (state.pen) [...$('brushes').children].forEach((b, i) => {
+      const d = state.pen.diameterOf(i) * s;
+      b.children[0].style.width = `${d}px`;
+      b.children[0].style.height = `${d}px`;
+    });
+    place();
+  }
+  function place() {
+    if (!mark.on || !state.pen) { cursor.hidden = true; return; }
+    const d = state.pen.diameter * scale();
+    const sw = state.sender.ink.swatches.find((x) => x.value === state.pen.color);
+    const rgb = sw ? sw.rgb : [0, 0, 0];
+    const light = rgb[0] * 0.299 + rgb[1] * 0.587 + rgb[2] * 0.114 > 128;
+    const eraser = state.pen.eraser;
+    const inner = eraser ? '#000' : `rgb(${rgb.join(' ')})`;
+    const outer = eraser ? '#fff' : light ? '#000' : '#fff';
+    Object.assign(cursor.style, {
+      width: `${d}px`, height: `${d}px`, left: `${mark.x - d / 2}px`, top: `${mark.y - d / 2}px`,
+      borderRadius: eraser ? '0' : '50%', boxShadow: `0 0 0 1px ${inner}, 0 0 0 2px ${outer}`,
+      background: eraser ? 'linear-gradient(to top right, transparent calc(50% - 0.5px), #888 calc(50% - 0.5px) calc(50% + 0.5px), transparent calc(50% + 0.5px)), linear-gradient(to bottom right, transparent calc(50% - 0.5px), #888 calc(50% - 0.5px) calc(50% + 0.5px), transparent calc(50% + 0.5px))' : 'none',
+    });
+    cursor.hidden = false;
+  }
+  /** The pointer is over the canvas at e: the cursor follows it (a touch shows it only while a stroke is drawn). */
+  function follow(e, stroke) {
+    if (e.pointerType === 'touch' && !stroke) return;
+    const b = canvas.getBoundingClientRect();
+    mark.x = e.clientX - b.left; mark.y = e.clientY - b.top; mark.on = true;
+    $('canvaswrap').className = 'pen';
+    place();
+  }
   const button = (text, onclick) => {
     const b = doc.createElement('button');
     b.textContent = text;
@@ -77,10 +134,24 @@ export function startSketchPage(env) {
 
   /** The tools and the canvas for this device's panel; its drawing is kept while the page is open. */
   function show(hello, client) {
-    const sender = sketchSession(hello);
+    const sender = sketchSession(hello, state.dbg.depth ?? undefined);
     const pen = new SketchPen(sender);
-    state.hello = hello; state.sender = sender; state.pen = pen;
-    $('brushes').replaceChildren(...BRUSH_NAMES.map((name, i) => button(name, () => { pen.size = i; pressed(); })));
+    state.hello = hello; state.sender = sender; state.pen = pen; state.client = client;
+    sender.strokeMode = state.dbg.mode; sender.erase = state.dbg.erase;
+    $('debugnone').hidden = !!hello.tuning;
+    $('brushes').replaceChildren(...BRUSH_NAMES.map((name, i) => {
+      const b = button('', () => { pen.size = i; pressed(); });
+      const dot = doc.createElement('span');
+      dot.className = 'dot';
+      const word = doc.createElement('span');
+      word.className = 'sr';
+      word.textContent = name;
+      b.replaceChildren(dot, word);
+      b.title = name;
+      b.setAttribute('aria-label', name);
+      return b;
+    }));
+    sizes();
     $('swatches').replaceChildren(...sender.ink.swatches.map((s) => {
       const b = button('', () => { pen.color = s.value; pen.eraser = false; pressed(); });
       b.className = 'swatch';
@@ -93,15 +164,17 @@ export function startSketchPage(env) {
     $('note').textContent = sender.ink.note;
     $('note').hidden = !sender.ink.note;
     $('fullafterrow').hidden = !sender.ink.partial;
-    $('fullafter').value = String(FULL_AFTER);
-    sender.fullAfter = FULL_AFTER;
+    $('fullafter').value = String(state.dbg.full_after);
+    sender.fullAfter = state.dbg.full_after;
     canvas.width = sender.model.w;
     canvas.height = sender.model.h;
+    sizes();
     sender.model.onPaint = paint;
     paint(sender.model.whole);
     sender.onStatus = say;
     say(sender.status);
     $('pad').hidden = false;
+    sizes(); // the pad is laid out now: the dots take the display scale
     $('full').disabled = false;
     pressed();
     sender.attach(client, hello);
@@ -170,6 +243,7 @@ export function startSketchPage(env) {
   canvas.addEventListener('pointerdown', (e) => {
     if (!state.pen || (e.pointerType === 'mouse' && e.button !== 0)) return;
     if (!state.pen.down(e.pointerId, at(e))) return;
+    follow(e, true);
     e.preventDefault();
     if (canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId);
   });
@@ -177,11 +251,17 @@ export function startSketchPage(env) {
     if (!state.pen) return;
     const more = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
     state.pen.move(e.pointerId, (more.length ? more : [e]).map(at));
+    follow(e, state.pen.drawing);
   });
-  const up = (e) => { if (state.pen && state.pen.up(e.pointerId)) pressed(); };
+  canvas.addEventListener('pointerleave', () => { mark.on = false; $('canvaswrap').className = ''; place(); });
+  if (env.onResize) env.onResize(sizes);
+  const up = (e) => {
+    if (state.pen && state.pen.up(e.pointerId)) pressed();
+    if (e.pointerType === 'touch') { mark.on = false; place(); }
+  };
   canvas.addEventListener('pointerup', up);
   canvas.addEventListener('pointercancel', up);
-  $('eraser').onclick = () => { state.pen.eraser = !state.pen.eraser; pressed(); };
+  $('eraser').onclick = () => { state.pen.eraser = !state.pen.eraser; pressed(); place(); };
   $('undo').onclick = () => { state.pen.undo(); pressed(); };
   $('clear').onclick = () => { state.pen.clear(); pressed(); };
   $('full').onclick = () => state.sender.fullRefresh();
@@ -189,6 +269,88 @@ export function startSketchPage(env) {
     const n = Number($('fullafter').value);
     state.sender.fullAfter = $('fullafter').value !== '' && Number.isInteger(n) && n >= 0 && n <= 250 ? n : FULL_AFTER;
   };
+  /** The Debug section: apply a pasted configuration, one line per key. */
+  const lines = (list) => { $('debugresults').textContent = list.map((r) => `${r.key}: ${r.text}`).join('\n'); report(); };
+  async function runTest(name) {
+    const s = state.sender;
+    if (!s.ink.partial) return [{ key: 'sketch.test', applied: false, text: 'refused: this device has no partial updates' }];
+    state.busy = true; state.test = name; $('debugapply').disabled = true;
+    try {
+      s.model.clear(); s.fullRefresh(); await s.sendNow();
+      for (const step of testPlan(name, s.model.w, s.model.h, s.ink.paper)) {
+        if (step.rect) s.model.fillRect(step.rect, step.value);
+        else { s.model.begin(); s.model.line(...step.line); s.model.end(); }
+        await s.sendNow();
+      }
+    } finally { state.busy = false; $('debugapply').disabled = false; }
+    return [{ key: 'sketch.test', applied: true, text: `${name} sent` }];
+  }
+  function takeSketch(next) {
+    const before = state.sender.ink.depth;
+    state.dbg = next;
+    const want = sketchSession(state.hello, next.depth ?? undefined);
+    if (want.ink.depth !== before) show(state.hello, state.client); // another depth: another drawing
+    else { state.sender.strokeMode = next.mode; state.sender.erase = next.erase; state.sender.fullAfter = next.full_after; $('fullafter').value = String(next.full_after); }
+  }
+  async function applyDebug() {
+    const text = $('debugjson').value;
+    store.set(DEBUG_KEY, text);
+    const p = parseDebug(text);
+    if (!p.ok) { lines([{ key: 'text', text: p.error }]); return; }
+    if (!state.sender || !state.client) { lines([{ key: 'device', text: 'no device connected: nothing applied' }]); return; }
+    const out = p.extra.map((k) => ({ key: k, applied: false, text: 'refused: no such part; use tuning and sketch' }));
+    if (p.tuning !== undefined) {
+      const names = p.tuning === 'defaults' ? [] : Object.keys(p.tuning);
+      if (!state.hello.tuning) {
+        out.push(...(names.length ? names : ['tuning']).map((k) => ({ key: k === 'tuning' ? k : `tuning.${k}`, applied: false, text: 'refused: this device has no panel tuning' })));
+      } else {
+        const { req, results } = tuningRequest(p.tuning);
+        out.push(...results);
+        if (req === 'defaults' || Object.keys(req).length) {
+          try {
+            const r = await state.client.request(12, { tuning: req });
+            if (r.tuning) state.hello.tuning = r.tuning;
+            if (req === 'defaults') out.push({ key: 'tuning', applied: !r.refused, text: r.refused ? `refused: ${JSON.stringify(r.refused)}` : 'defaults restored' });
+            else out.push(...tuningResults(Object.keys(req), r.refused, r.tuning));
+          } catch (e) { out.push({ key: 'tuning', applied: false, text: `refused: ${e && e.message ? e.message : String(e)}` }); }
+        }
+      }
+    }
+    const { next, results } = checkSketch(p.sketch, state.hello, state.dbg);
+    out.push(...results);
+    takeSketch(next);
+    lines(out);
+    const t = testOf(p.sketch);
+    if (t) {
+      try { out.push(...await runTest(t)); } catch (e) { out.push({ key: 'sketch.test', applied: false, text: `failed: ${e && e.message ? e.message : String(e)}` }); }
+      lines(out);
+    }
+  }
+  $('debugapply').onclick = () => { if (!state.busy) void applyDebug(); };
+  $('debugreset').onclick = async () => {
+    if (state.busy || !state.client) { lines([{ key: 'device', text: 'no device connected: nothing reset' }]); return; }
+    const out = [];
+    if (state.hello.tuning) {
+      try {
+        const r = await state.client.request(12, { tuning: 'defaults' });
+        if (r.tuning) state.hello.tuning = r.tuning;
+        out.push({ key: 'tuning', text: 'defaults restored' });
+      } catch (e) { out.push({ key: 'tuning', text: `refused: ${e && e.message ? e.message : String(e)}` }); }
+    }
+    takeSketch({ ...DEBUG_DEFAULTS });
+    out.push({ key: 'sketch', text: 'defaults restored' });
+    state.test = null;
+    lines(out);
+  };
+  $('debugsaw').oninput = report;
+  $('reportcopy').onclick = async () => {
+    const text = $('report').value;
+    try { await env.navigator.clipboard.writeText(text); $('reportnote').textContent = 'Copied.'; } catch {
+      try { $('report').select?.(); $('reportnote').textContent = env.document.execCommand?.('copy') ? 'Copied.' : 'Select the text above and copy it.'; } catch { $('reportnote').textContent = 'Select the text above and copy it.'; }
+    }
+  };
+  $('debugjson').value = store.get(DEBUG_KEY) ?? '';
+  report();
   $('connect').onclick = connect;
   $('connect').disabled = !serial;
   $('nosupport').hidden = !!serial;
@@ -209,4 +371,8 @@ export function startSketchPage(env) {
   return { ready, connect, disconnect, state };
 }
 
-if (typeof document !== 'undefined') startSketchPage({ document, navigator, location, ImageData });
+if (typeof document !== 'undefined') {
+  let storage = null;
+  try { storage = localStorage; } catch { /* blocked: the Debug text is not remembered */ }
+  startSketchPage({ document, navigator, location, ImageData, localStorage: storage, onResize: (f) => addEventListener('resize', f) });
+}

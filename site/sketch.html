@@ -20,7 +20,13 @@
   button[aria-pressed='true'] { outline: 3px solid var(--sel); outline-offset: 1px; }
   .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
   .swatch { width: 30px; height: 30px; padding: 0; border: 1px solid #777; border-radius: 50%; }
-  canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; border: 1px solid var(--line); margin: 12px 0; touch-action: none; cursor: crosshair; background: #fff; }
+  #canvaswrap { position: relative; margin: 12px 0; }
+  canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; border: 1px solid var(--line); margin: 0; touch-action: none; cursor: crosshair; background: #fff; }
+  #canvaswrap.pen canvas { cursor: none; }
+  #cursor { position: absolute; left: 0; top: 0; pointer-events: none; box-sizing: border-box; border-radius: 50%; }
+  #brushes button { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; position: relative; }
+  .dot { display: block; border-radius: 50%; background: currentColor; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   input[type='number'] { width: 5em; }
   .warn { color: var(--bad); font-weight: 600; } .ok { color: var(--ok); font-weight: 600; } .mut { color: var(--mut); }
   a { color: inherit; }
@@ -53,13 +59,40 @@ computer. <a href="sketch.html?mock=x">See the page work without a device.</a></
     <button id="undo" disabled>Undo</button>
     <button id="clear">Clear</button>
   </div>
-  <canvas id="canvas" aria-label="Sketch, the panel's pixels"></canvas>
+  <div id="canvaswrap"><canvas id="canvas" aria-label="Sketch, the panel's pixels"></canvas><div id="cursor" hidden aria-hidden="true"></div></div>
   <div class="tools">
     <button id="full">Full refresh</button>
     <label id="fullafterrow">Full refresh by itself after <input id="fullafter" type="number" min="0" max="250">
     partial updates (0: never)</label>
   </div>
   <p id="status" role="status"></p>
+  <details id="debug">
+    <summary>Debug</summary>
+    <p class="mut" id="debughelp">For trying how the panel is driven and handing the result to someone else: paste a
+    configuration, press Apply, draw, then copy the Report and paste it back. Nothing here is stored in the device
+    (it lasts until the device restarts) and nothing is kept by this page across a reload except the text below.<br>
+    <code>{ "tuning": { ... }, "sketch": { ... } }</code>. <b>tuning</b>: the panel's drive keys (TRMNL X), or
+    <code>"defaults"</code>; the keys are in the protocol page, "Tuning". <b>sketch</b>: <code>depth</code> (1, 2 or 4: the
+    bit depth strokes go out at, where the device does partial updates at it), <code>mode</code> (auto, partial, full
+    or another mode the device lists), <code>full_after</code> (a full refresh after n partial sends, 0 never),
+    <code>erase</code> (auto, partial or full: what a send that makes pixels lighter does), <code>test</code>: a pattern
+    the page draws and sends by itself after a full refresh of the blank panel, the same every time:
+    <b>grays</b> one bar for each level from black to white, each its own partial update (the white bar changes nothing,
+    so it is not sent); <b>lines</b> thin, medium and thick black lines, six partial updates; <b>box</b> a mid gray box,
+    then a white box inside it, two partial updates.</p>
+    <p id="debugnone" class="mut" hidden>This device has no panel tuning: the <code>tuning</code> part is refused, the
+    <code>sketch</code> part works.</p>
+    <textarea id="debugjson" rows="10" spellcheck="false" aria-label="Debug configuration, JSON" style="width:100%;box-sizing:border-box;font:13px/1.4 ui-monospace,monospace" placeholder='{ "tuning": { "gray_table": "fastepd", "gray_dark": 0 }, "sketch": { "test": "grays" } }'></textarea>
+    <div class="tools">
+      <button id="debugapply">Apply</button>
+      <button id="debugreset">Reset</button>
+    </div>
+    <pre id="debugresults" role="status" style="white-space:pre-wrap"></pre>
+    <h3>Report</h3>
+    <label>What I saw <input id="debugsaw" type="text" style="width:70%" placeholder="for example: grays 3 to 9 darker than before"></label>
+    <textarea id="report" rows="12" readonly aria-label="Report to copy" style="width:100%;box-sizing:border-box;font:13px/1.4 ui-monospace,monospace"></textarea>
+    <div class="tools"><button id="reportcopy">Copy report</button><span id="reportnote" class="mut" role="status"></span></div>
+  </details>
 </section>
 
 <p class="mut">No device at hand: the page with a pretend

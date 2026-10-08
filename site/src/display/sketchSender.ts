@@ -34,6 +34,9 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 export class SketchSender {
   /** Partial sends before an automatic full refresh; 0: never. */
   fullAfter = FULL_AFTER;
+  /** Debug settings (the Debug section): the mode strokes go out in ('auto': partial), and what erasing does. */
+  strokeMode: DisplayMode | 'auto' = 'auto';
+  erase: 'auto' | 'partial' | 'full' = 'auto';
   onStatus: (s: SketchStatus) => void = () => {};
   status: SketchStatus = { state: 'idle', text: 'Nothing sent yet.' };
   private client: SketchShow | null = null;
@@ -76,6 +79,12 @@ export class SketchSender {
   /** Send the whole drawing in full mode. */
   fullRefresh(): void { this.asked = true; this.schedule(Date.now(), true); }
   stop(): void { this.cancel(); }
+  /** Send what is waiting now and return when the device has answered (the debug test patterns: one send a step). */
+  async sendNow(): Promise<void> {
+    while (this.sending) await sleep(20);
+    this.cancel();
+    await this.flush();
+  }
 
   private cancel(): void { if (this.timer) clearTimeout(this.timer); this.timer = null; }
   private schedule(at: number, replace: boolean): void {
@@ -89,13 +98,14 @@ export class SketchSender {
   private async flush(): Promise<void> {
     const client = this.client, hello = this.hello, link = this.link, m = this.model;
     if (!client || !hello || this.sending) return; // a send in flight looks at the drawing again when it ends
-    const wornOut = this.lightened >= LIGHTEN_AFTER;
-    const full = this.asked || (this.ink.partial && (this.whole || wornOut || (this.fullAfter > 0 && this.partials >= this.fullAfter)));
-    const note = this.asked ? this.note : wornOut && !this.whole ? ` Full refresh by itself: ${this.lightened} sends in a row erased pixels by a partial update, which leaves faint traces.` : '';
+    const wornOut = this.erase === 'auto' && this.lightened >= LIGHTEN_AFTER;
+    const eraseFull = this.erase === 'full' && this.ink.partial && m.lighterPending && !this.whole;
+    const full = this.asked || (this.ink.partial && (this.whole || wornOut || eraseFull || (this.fullAfter > 0 && this.partials >= this.fullAfter)));
+    const note = this.asked ? this.note : eraseFull ? ' Full refresh because pixels got lighter (debug setting erase: full).' : wornOut && !this.whole ? ` Full refresh by itself: ${this.lightened} sends in a row erased pixels by a partial update, which leaves faint traces.` : '';
     if (!full && !this.ink.partial) return;
     const dirty = m.takeDirty();
     const lighter = m.takeLighter();
-    const clean = lighter && !full ? cleanMode(hello, this.ink.depth) : null;
+    const clean = lighter && !full && this.erase === 'auto' ? cleanMode(hello, this.ink.depth) : null;
     if (!full && !dirty) return;
     const rect = full ? m.whole : dirty!;
     const all = rect.w === m.w && rect.h === m.h;
@@ -104,11 +114,11 @@ export class SketchSender {
     this.sentAt = Date.now();
     const rows = packRows(m.values(rect), rect.w, rect.h, this.ink.depth); // the pixels as they are now, before any wait
     const at = `${rect.w} x ${rect.h} pixels at ${rect.x}, ${rect.y}`;
-    const what = full ? `a full refresh of the whole drawing (${m.w} x ${m.h})` : clean ? `${clean.words} of ${at}, to clean the pixels that got lighter` : `a partial update of ${at}`;
+    const what = full ? `a full refresh of the whole drawing (${m.w} x ${m.h})` : clean ? `${clean.words} of ${at}, to clean the pixels that got lighter` : this.strokeMode !== 'auto' && this.strokeMode !== 'partial' ? `an update in mode ${this.strokeMode} of ${at}` : `a partial update of ${at}`;
     this.say('sending', `Asked for ${what}; waiting for the panel...`);
     try {
       const png = await packedPng(rows, rect.w, rect.h, this.ink.depth, this.ink.color);
-      const mode: Options = full ? { mode: 'full' } : clean ? { mode: clean.mode, ...(clean.passes ? { passes: clean.passes } : {}) } : { mode: 'partial' };
+      const mode: Options = full ? { mode: 'full' } : clean ? { mode: clean.mode, ...(clean.passes ? { passes: clean.passes } : {}) } : this.strokeMode === 'auto' ? { mode: 'partial' } : { mode: this.strokeMode, ...(this.strokeMode === 'passes' ? { passes: 2 } : {}) };
       const options: Options = full || all ? mode : { x: rect.x, y: rect.y, ...mode };
       const r = await this.showOnce(client, hello, png, options, what);
       if (link !== this.link) return;
@@ -116,7 +126,7 @@ export class SketchSender {
       if (full || all) this.whole = false;
       if (lost && !all) this.whole = true;
       if (r.mode === 'full') { this.partials = 0; this.lightened = 0; } else if (r.mode !== 'none') this.partials++;
-      const weak = lighter && !clean && r.mode === 'partial';
+      const weak = lighter && !clean && this.erase === 'auto' && r.mode === 'partial';
       if (weak) this.lightened++;
       const trace = weak && this.lightened < LIGHTEN_AFTER ? ` Erasing by a partial update can leave faint traces at ${this.ink.depth} bit: a full refresh follows after ${LIGHTEN_AFTER} such sends (${this.lightened} so far).` : '';
       this.say('ok', `Asked for ${what}. ${displayAnswer(r)} ${Date.now() - this.sentAt} ms in all.${lost && !all ? ' The device had lost its picture: sending the whole drawing.' : ''}${note}${trace}`);
@@ -148,8 +158,8 @@ export class SketchSender {
 
 /** One drawing per panel shape, kept while the page is open: leaving the page or a reconnect does not lose it. */
 let kept: { key: string; sender: SketchSender } | null = null;
-export function sketchSession(hello: DisplayHello): SketchSender {
-  const ink = sketchInk(hello);
+export function sketchSession(hello: DisplayHello, depth?: number): SketchSender {
+  const ink = sketchInk(hello, depth);
   const key = [hello.w, hello.h, ink.depth, ink.color, ink.partial].join();
   if (kept?.key !== key) kept = { key, sender: new SketchSender(new SketchModel(hello.w, hello.h, ink.paper), ink) };
   return kept.sender;

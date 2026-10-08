@@ -7,6 +7,8 @@ export interface DisplayHello {
   proto: number; project: 'display'; fw: string; board: string; w: number; h: number;
   depths: number[]; colors?: string[]; max_payload: number; max_png: number; chunk: number;
   partial_depths: number[]; modes: string[]; full_every: number;
+  /** The panel tuning now (usb-display.md "Tuning"), only where the board has knobs. */
+  tuning?: Record<string, number | string>;
 }
 export const DISPLAY_ERRORS: Record<number, string> = {
   1: 'UNKNOWN_CMD', 2: 'BAD_REQUEST', 3: 'BUSY', 10: 'IO', 11: 'SEQUENCE', 13: 'TOO_LARGE',

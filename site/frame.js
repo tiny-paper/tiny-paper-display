@@ -21,7 +21,7 @@ const head = (major, n) => {
   return [(major << 5) | 26, (n >>> 24) & 0xff, (n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
 };
 
-/** One CBOR map with text keys; values: bool, small uint, text, bytes (Uint8Array). Anything else is a bug of the caller. */
+/** One CBOR map with text keys; values: bool, small uint, text, bytes (Uint8Array), a map of these. Anything else is a bug of the caller. */
 export function encodeMap(obj) {
   const out = [];
   const keys = Object.keys(obj);
@@ -38,7 +38,8 @@ export function encodeMap(obj) {
     } else if (v instanceof Uint8Array) {
       out.push(...head(2, v.length));
       for (const x of v) out.push(x);
-    } else throw new Error(`cannot encode ${k}`);
+    } else if (v && typeof v === 'object' && !Array.isArray(v)) out.push(...encodeMap(v)); // a map of the same kinds (set { tuning })
+    else throw new Error(`cannot encode ${k}`);
   }
   return Uint8Array.from(out);
 }

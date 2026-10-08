@@ -22,12 +22,22 @@ export const HELLO = {
   modes: ['full', 'partial', 'inverse'], full_every: 20, max_png: 131072, max_payload: 6144, chunk: 4096,
 };
 
+// The TRMNL X's knobs as docs/spec/usb-display.md "Tuning" lists them: [name, min, max, default, words?]
+const KNOBS = [
+  ['gray_table', 0, 1, 1, ['fastepd', 'stock']], ['gray_partial', 0, 1, 1, ['off', 'on']], ['gray_dark', 0, 14, 0], ['gray_light', 0, 14, 3],
+  ['passes_partial', 1, 14, 4], ['passes_full', 1, 14, 3], ['wave_kick', 0, 14, 2], ['wave_extra', 0, 14, 0], ['wave_redrive', 0, 3, 2],
+  ['row_settle', 0, 20, 2], ['row_hold', 0, 20, 2], ['row_drive', 0, 200, 32], ['clear', 0, 3, 0, ['auto', 'none', 'fast', 'slow']],
+];
+const tuningOf = (vals) => Object.fromEntries(KNOBS.map(([n, , , , w], i) => [n, w ? w[vals[i]] : vals[i]]));
+
 /**
- * { port, shows, hello, refuse }: `shows` holds every finished show ({ mode, x, y, w, h, bits } with w, h and bits read
+ * { port, shows, hello, refuse, sets, knobs }: `shows` holds every finished show ({ mode, x, y, w, h, bits } with w, h and bits read
  * from the PNG it received). `refuse = { err, msg }`: the next show ends with that refusal. `hello: null`: silence.
  */
 export function fakeDisplay(over = {}) {
-  const dev = { hello: over === null ? null : { ...HELLO, ...over }, shows: [], refuse: null, port: null };
+  const knobs = KNOBS.map((k) => k[3]);
+  const dev = { hello: over === null ? null : { ...HELLO, ...over }, shows: [], refuse: null, port: null, sets: [], knobs };
+  if (dev.hello && dev.hello.tuning === true) dev.hello.tuning = tuningOf(knobs); // `tuning: true`: a board with the knobs
   let begin = {};
   let png = new Uint8Array();
   dev.port = fakePort((tx) => {
@@ -36,7 +46,26 @@ export function fakeDisplay(over = {}) {
     const cmd = b[5];
     const req = decodeMap(b.subarray(6, b.length - 2));
     let res;
-    if (cmd === 1) res = dev.hello;
+    if (cmd === 1) res = dev.hello && dev.hello.tuning ? { ...dev.hello, tuning: tuningOf(knobs) } : dev.hello;
+    else if (cmd === 12) {
+      dev.sets.push(req);
+      const refused = {};
+      if (!dev.hello.tuning) { if (req.tuning !== undefined) refused.tuning = 'this board has no panel tuning'; }
+      else if (req.tuning === 'defaults') KNOBS.forEach((k, i) => { knobs[i] = k[3]; });
+      else if (req.tuning !== undefined) {
+        for (const [key, v] of Object.entries(req.tuning)) {
+          const i = KNOBS.findIndex((k) => k[0] === key);
+          if (i < 0) { refused[key] = `no such key; known: ${KNOBS.map((k) => k[0]).join(' ')}`; continue; }
+          const [, min, max, , words] = KNOBS[i];
+          const range = words ? `allowed ${words.join(', ')}` : `allowed ${min} to ${max}`;
+          const n = typeof v === 'number' ? v : typeof v === 'boolean' && words ? Number(v) : words && words.includes(v) ? words.indexOf(v) + min : undefined;
+          if (n === undefined) refused[key] = `${words ? 'not one of the words' : 'not a whole number'}; ${range}`;
+          else if (n < min || n > max) refused[key] = `out of range; ${range}`;
+          else knobs[i] = n;
+        }
+      }
+      res = { full_every: dev.hello.full_every, ...(dev.hello.tuning ? { tuning: tuningOf(knobs) } : {}), ...(Object.keys(refused).length ? { refused } : {}) };
+    }
     else if (cmd === 8) { begin = req; png = new Uint8Array(req.size); res = { next: 0, chunk: 4096 }; }
     else if (cmd === 9) { png.set(req.data, req.off); res = { next: req.off + req.data.length }; }
     else if (cmd === 10 && dev.refuse) { res = dev.refuse; dev.refuse = null; }

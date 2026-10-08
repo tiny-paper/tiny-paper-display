@@ -18,6 +18,12 @@ export class SketchPen {
   constructor(readonly sender: SketchSender) { this.brushes = sketchBrushes(sender.model.w); }
   get canUndo(): boolean { return this.sender.model.canUndo; }
   private get value(): number { return this.eraser ? this.sender.ink.paper : this.color; }
+  /** Whether a stroke is being drawn. */
+  get drawing(): boolean { return this.last !== null; }
+  /** The diameter of brush `i`. */
+  diameterOf(i: number): number { return this.brushes[i] ?? this.brushes[1]; }
+  /** The brush's diameter in panel pixels (the cursor and the toolbar show it at the display scale). */
+  get diameter(): number { return this.width; }
   private get width(): number { return this.brushes[this.size] ?? this.brushes[1]; }
 
   /** A pointer went down; false when another one is already drawing. */

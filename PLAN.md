@@ -65,6 +65,9 @@ the same shade on a computer screen; accepted as the panel's character, not bein
 Ideas, not started: skip quickly over the rows outside the changed area (the time does not depend on the area today);
 drive light grays directly from white instead of through black.
 
+The drive options of the X (gray table, pre-push frames, passes, waveform, row timing, clear) are reachable from the Sketch
+page's Debug section for comparison, without reflashing; which setting looked best on glass is still to be recorded.
+
 ## Clean-up
 
 The firmware folder still carries code from the project it grew out of that the display firmware does not use

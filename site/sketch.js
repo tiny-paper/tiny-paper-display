@@ -1,4 +1,4 @@
-// esbuild 0.28.2, 12 source files of site/src (MIT): do not edit, run `npm run build` in site/.
+// esbuild 0.28.2, 13 source files of site/src (MIT): do not edit, run `npm run build` in site/.
 // src/display/client.ts
 var DISPLAY_MODES = ["full", "partial", "partial_all", "inverse", "passes"];
 var DISPLAY_ERRORS = {
@@ -171,10 +171,10 @@ async function packedPng(rows, w, h, depth, color) {
 
 // src/display/sketchModel.ts
 var UNDO_STEPS = 10;
-function sketchInk(hello) {
+function sketchInk(hello, forceDepth) {
   const partial = hello.modes.includes("partial") && hello.partial_depths.length > 0;
   const color = !partial && !!hello.colors;
-  const depth = partial ? Math.max(...hello.partial_depths) : color ? 2 : Math.max(...hello.depths);
+  const depth = partial ? forceDepth !== void 0 && hello.partial_depths.includes(forceDepth) ? forceDepth : Math.max(...hello.partial_depths) : color ? 2 : Math.max(...hello.depths);
   const max = (1 << depth) - 1;
   const swatches = [];
   if (color) {
@@ -296,6 +296,24 @@ var SketchModel = class {
     this.dirty = null;
     return d ? alignRect(rectOf(d), this.w, this.h) : null;
   }
+  /** Whether a pixel got lighter since the last send (not cleared). */
+  get lighterPending() {
+    return this.light;
+  }
+  /** A filled rectangle as one undo step (the debug test patterns). */
+  fillRect(r, value) {
+    this.begin();
+    let box = null;
+    for (let y = Math.max(0, r.y); y < Math.min(this.h, r.y + r.h); y++) for (let x = Math.max(0, r.x); x < Math.min(this.w, r.x + r.w); x++) {
+      const old = this.px[y * this.w + x];
+      if (old === value) continue;
+      if (value > old) this.light = true;
+      this.px[y * this.w + x] = value;
+      box = grow(box, x, y, x + 1, y + 1);
+    }
+    if (box) this.changed(box);
+    this.end();
+  }
   /** Whether a pixel got lighter since the last call (a send that cleans must follow). */
   takeLighter() {
     const l = this.light;
@@ -352,6 +370,18 @@ var SketchPen = class {
   }
   get value() {
     return this.eraser ? this.sender.ink.paper : this.color;
+  }
+  /** Whether a stroke is being drawn. */
+  get drawing() {
+    return this.last !== null;
+  }
+  /** The diameter of brush `i`. */
+  diameterOf(i) {
+    return this.brushes[i] ?? this.brushes[1];
+  }
+  /** The brush's diameter in panel pixels (the cursor and the toolbar show it at the display scale). */
+  get diameter() {
+    return this.width;
   }
   get width() {
     return this.brushes[this.size] ?? this.brushes[1];
@@ -430,6 +460,9 @@ var SketchSender = class {
   timing;
   /** Partial sends before an automatic full refresh; 0: never. */
   fullAfter = FULL_AFTER;
+  /** Debug settings (the Debug section): the mode strokes go out in ('auto': partial), and what erasing does. */
+  strokeMode = "auto";
+  erase = "auto";
   onStatus = () => {
   };
   status = { state: "idle", text: "Nothing sent yet." };
@@ -494,6 +527,12 @@ var SketchSender = class {
   stop() {
     this.cancel();
   }
+  /** Send what is waiting now and return when the device has answered (the debug test patterns: one send a step). */
+  async sendNow() {
+    while (this.sending) await sleep(20);
+    this.cancel();
+    await this.flush();
+  }
   cancel() {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
@@ -514,13 +553,14 @@ var SketchSender = class {
   async flush() {
     const client = this.client, hello = this.hello, link = this.link, m = this.model;
     if (!client || !hello || this.sending) return;
-    const wornOut = this.lightened >= LIGHTEN_AFTER;
-    const full = this.asked || this.ink.partial && (this.whole || wornOut || this.fullAfter > 0 && this.partials >= this.fullAfter);
-    const note = this.asked ? this.note : wornOut && !this.whole ? ` Full refresh by itself: ${this.lightened} sends in a row erased pixels by a partial update, which leaves faint traces.` : "";
+    const wornOut = this.erase === "auto" && this.lightened >= LIGHTEN_AFTER;
+    const eraseFull = this.erase === "full" && this.ink.partial && m.lighterPending && !this.whole;
+    const full = this.asked || this.ink.partial && (this.whole || wornOut || eraseFull || this.fullAfter > 0 && this.partials >= this.fullAfter);
+    const note = this.asked ? this.note : eraseFull ? " Full refresh because pixels got lighter (debug setting erase: full)." : wornOut && !this.whole ? ` Full refresh by itself: ${this.lightened} sends in a row erased pixels by a partial update, which leaves faint traces.` : "";
     if (!full && !this.ink.partial) return;
     const dirty = m.takeDirty();
     const lighter = m.takeLighter();
-    const clean = lighter && !full ? cleanMode(hello, this.ink.depth) : null;
+    const clean = lighter && !full && this.erase === "auto" ? cleanMode(hello, this.ink.depth) : null;
     if (!full && !dirty) return;
     const rect = full ? m.whole : dirty;
     const all = rect.w === m.w && rect.h === m.h;
@@ -530,11 +570,11 @@ var SketchSender = class {
     this.sentAt = Date.now();
     const rows = packRows(m.values(rect), rect.w, rect.h, this.ink.depth);
     const at = `${rect.w} x ${rect.h} pixels at ${rect.x}, ${rect.y}`;
-    const what = full ? `a full refresh of the whole drawing (${m.w} x ${m.h})` : clean ? `${clean.words} of ${at}, to clean the pixels that got lighter` : `a partial update of ${at}`;
+    const what = full ? `a full refresh of the whole drawing (${m.w} x ${m.h})` : clean ? `${clean.words} of ${at}, to clean the pixels that got lighter` : this.strokeMode !== "auto" && this.strokeMode !== "partial" ? `an update in mode ${this.strokeMode} of ${at}` : `a partial update of ${at}`;
     this.say("sending", `Asked for ${what}; waiting for the panel...`);
     try {
       const png = await packedPng(rows, rect.w, rect.h, this.ink.depth, this.ink.color);
-      const mode = full ? { mode: "full" } : clean ? { mode: clean.mode, ...clean.passes ? { passes: clean.passes } : {} } : { mode: "partial" };
+      const mode = full ? { mode: "full" } : clean ? { mode: clean.mode, ...clean.passes ? { passes: clean.passes } : {} } : this.strokeMode === "auto" ? { mode: "partial" } : { mode: this.strokeMode, ...this.strokeMode === "passes" ? { passes: 2 } : {} };
       const options = full || all ? mode : { x: rect.x, y: rect.y, ...mode };
       const r = await this.showOnce(client, hello, png, options, what);
       if (link !== this.link) return;
@@ -545,7 +585,7 @@ var SketchSender = class {
         this.partials = 0;
         this.lightened = 0;
       } else if (r.mode !== "none") this.partials++;
-      const weak = lighter && !clean && r.mode === "partial";
+      const weak = lighter && !clean && this.erase === "auto" && r.mode === "partial";
       if (weak) this.lightened++;
       const trace = weak && this.lightened < LIGHTEN_AFTER ? ` Erasing by a partial update can leave faint traces at ${this.ink.depth} bit: a full refresh follows after ${LIGHTEN_AFTER} such sends (${this.lightened} so far).` : "";
       this.say("ok", `Asked for ${what}. ${displayAnswer(r)} ${Date.now() - this.sentAt} ms in all.${lost && !all ? " The device had lost its picture: sending the whole drawing." : ""}${note}${trace}`);
@@ -580,8 +620,8 @@ var SketchSender = class {
   }
 };
 var kept = null;
-function sketchSession(hello) {
-  const ink = sketchInk(hello);
+function sketchSession(hello, depth) {
+  const ink = sketchInk(hello, depth);
   const key = [hello.w, hello.h, ink.depth, ink.color, ink.partial].join();
   if (kept?.key !== key) kept = { key, sender: new SketchSender(new SketchModel(hello.w, hello.h, ink.paper), ink) };
   return kept.sender;
@@ -967,6 +1007,58 @@ function decodePayload(p) {
 }
 
 // src/display/mockDevice.ts
+var X_KNOBS = [
+  { name: "gray_table", min: 0, max: 1, def: 1, words: ["fastepd", "stock"] },
+  { name: "gray_partial", min: 0, max: 1, def: 1, words: ["off", "on"] },
+  { name: "gray_dark", min: 0, max: 14, def: 0 },
+  { name: "gray_light", min: 0, max: 14, def: 3 },
+  { name: "passes_partial", min: 1, max: 14, def: 4 },
+  { name: "passes_full", min: 1, max: 14, def: 3 },
+  { name: "wave_kick", min: 0, max: 14, def: 2 },
+  { name: "wave_extra", min: 0, max: 14, def: 0 },
+  { name: "wave_redrive", min: 0, max: 3, def: 2 },
+  { name: "row_settle", min: 0, max: 20, def: 2 },
+  { name: "row_hold", min: 0, max: 20, def: 2 },
+  { name: "row_drive", min: 0, max: 200, def: 32 },
+  { name: "clear", min: 0, max: 3, def: 0, words: ["auto", "none", "fast", "slow"] }
+];
+function tuningMap(values, knobs = X_KNOBS) {
+  return Object.fromEntries(knobs.map((k, i) => [k.name, k.words ? k.words[values[i] - k.min] : values[i]]));
+}
+function applyTuning(values, request, knobs = X_KNOBS) {
+  const refused = {};
+  const range = (k) => k.words ? `allowed ${k.words.join(", ")}` : `allowed ${k.min} to ${k.max}`;
+  if (request === "defaults") {
+    knobs.forEach((k, i) => {
+      values[i] = k.def;
+    });
+    return refused;
+  }
+  if (typeof request !== "object" || request === null || Array.isArray(request)) return { tuning: 'tuning is a map of keys, or "defaults"' };
+  for (const [key, v] of Object.entries(request)) {
+    if (Object.keys(refused).length >= 8) break;
+    const i = knobs.findIndex((k2) => k2.name === key);
+    if (i < 0) {
+      refused[key] = `no such key; known: ${knobs.map((k2) => k2.name).join(" ")}`.slice(0, 120);
+      continue;
+    }
+    const k = knobs[i];
+    let n;
+    if (typeof v === "number" && Number.isInteger(v)) n = v;
+    else if (typeof v === "boolean" && k.words && k.max === 1) n = v ? 1 : 0;
+    else if (typeof v === "string" && k.words) {
+      const w = k.words.indexOf(v);
+      n = w < 0 ? void 0 : w + k.min;
+    } else if (typeof v === "object") {
+      refused[key] = "the value is a number or a word";
+      continue;
+    }
+    if (n === void 0) refused[key] = `${k.words ? "not one of the words" : "not a whole number"}; ${range(k)}`;
+    else if (n < k.min || n > k.max) refused[key] = `out of range; ${range(k)}`;
+    else values[i] = n;
+  }
+  return refused;
+}
 var MOCK_PANELS = { x: "TRMNL X", og: "TRMNL OG", picpak: "PicPak" };
 var MockDisplayDevice = class {
   hello = {
@@ -998,6 +1090,8 @@ var MockDisplayDevice = class {
   };
   png = new Uint8Array();
   next = 0;
+  /** The TRMNL X's knobs, now (`x` panel only). */
+  knobs = X_KNOBS.map((k) => k.def);
   /** `x`, `og`, `picpak`: that board's panel as its hello describes it (usb-display.md "Boards"); else a 16 x 8 test panel. */
   constructor(panel = "") {
     if (panel === "x") Object.assign(this.hello, {
@@ -1007,7 +1101,8 @@ var MockDisplayDevice = class {
       depths: [1, 2, 4],
       partial_depths: [1, 2, 4],
       max_png: 1319644,
-      modes: ["full", "partial", "partial_all", "inverse", "passes"]
+      modes: ["full", "partial", "partial_all", "inverse", "passes"],
+      tuning: tuningMap(this.knobs)
     });
     else if (panel === "og") Object.assign(this.hello, { w: 800, h: 480, max_png: 131072, modes: ["full", "partial", "inverse"] });
     else if (panel === "picpak") Object.assign(this.hello, {
@@ -1032,8 +1127,11 @@ var MockDisplayDevice = class {
       const req = decodePayload(payload);
       this.calls.push({ cmd, req });
       let res;
-      if (cmd === 1) res = this.hello;
-      else if (this.error) {
+      if (cmd === 1) res = this.hello.tuning ? { ...this.hello, tuning: tuningMap(this.knobs) } : this.hello;
+      else if (cmd === 12 && !this.error) {
+        const refused = req.tuning === void 0 ? {} : this.hello.tuning ? applyTuning(this.knobs, req.tuning) : { tuning: "this board has no panel tuning" };
+        res = { full_every: this.hello.full_every, ...this.hello.tuning ? { tuning: tuningMap(this.knobs) } : {}, ...Object.keys(refused).length ? { refused } : {} };
+      } else if (this.error) {
         res = { err: this.error, msg: "fake refusal", ...this.detail === void 0 ? {} : { detail: this.detail } };
         this.error = 0;
       } else if (cmd === 8) {
@@ -1063,8 +1161,144 @@ var MockDisplayDevice = class {
     }
   }
 };
+
+// src/display/debug.ts
+var DEBUG_DEFAULTS = { depth: null, mode: "auto", full_after: FULL_AFTER, erase: "auto" };
+var TEST_NAMES = ["grays", "lines", "box"];
+function parseDebug(text) {
+  let v;
+  try {
+    v = JSON.parse(text);
+  } catch (e) {
+    const msg = String(e.message);
+    const pos = /position (\d+)/.exec(msg);
+    let where = "";
+    if (pos) {
+      const before = text.slice(0, Number(pos[1]));
+      where = ` (line ${before.split("\n").length}, column ${before.length - before.lastIndexOf("\n")})`;
+    }
+    return { ok: false, error: `Not valid JSON: ${msg.replace(/ in JSON at position \d+.*$/, "").replace(/\s*\(line \d+ column \d+\)$/, "")}${where}. Nothing was sent.` };
+  }
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return { ok: false, error: 'The text must be a JSON object like { "tuning": { ... }, "sketch": { ... } }. Nothing was sent.' };
+  const o = v;
+  const extra = Object.keys(o).filter((k) => k !== "tuning" && k !== "sketch");
+  const t = o.tuning;
+  if (t !== void 0 && t !== "defaults" && (typeof t !== "object" || t === null || Array.isArray(t))) return { ok: false, error: '"tuning" must be an object of keys, or "defaults". Nothing was sent.' };
+  if (o.sketch !== void 0 && (typeof o.sketch !== "object" || o.sketch === null || Array.isArray(o.sketch))) return { ok: false, error: '"sketch" must be an object. Nothing was sent.' };
+  return { ok: true, tuning: t, sketch: o.sketch ?? {}, extra };
+}
+function checkSketch(sketch, hello, current) {
+  const next = { ...current };
+  const results = [];
+  const known = ["depth", "mode", "full_after", "erase", "test"];
+  const refuse = (key, why) => {
+    results.push({ key: `sketch.${key}`, applied: false, text: `refused: ${why}` });
+  };
+  const ok = (key, text) => {
+    results.push({ key: `sketch.${key}`, applied: true, text: `applied${text ? `: ${text}` : ""}` });
+  };
+  for (const key of Object.keys(sketch)) if (!known.includes(key)) refuse(key, `no such key; known: ${known.join(" ")}`);
+  const has = (k) => Object.hasOwn(sketch, k);
+  if (has("depth")) {
+    const d = sketch.depth;
+    if (d === null || d === "auto") {
+      next.depth = null;
+      ok("depth", "the deepest depth the device updates partially at");
+    } else if (!hello.partial_depths.length) refuse("depth", "this device has no partial updates");
+    else if (typeof d !== "number" || !hello.partial_depths.includes(d)) refuse("depth", `the device does partial updates at ${hello.partial_depths.join(", ")} bit only`);
+    else {
+      next.depth = d;
+      ok("depth", `${d} bit`);
+    }
+  }
+  const depthNow = next.depth ?? (hello.partial_depths.length ? Math.max(...hello.partial_depths) : 0);
+  if (has("mode")) {
+    const m = sketch.mode;
+    const modes = hello.modes.filter((x) => x !== "none");
+    if (m === "auto" || m === "partial") {
+      next.mode = m;
+      ok("mode", String(m));
+    } else if (typeof m !== "string" || !modes.includes(m)) refuse("mode", `the device lists ${modes.join(", ")}; or auto`);
+    else if (!["full", "partial"].includes(m) && depthNow !== 1) refuse("mode", `${m} needs 1 bit and strokes go at ${depthNow} bit (set sketch.depth 1)`);
+    else {
+      next.mode = m;
+      ok("mode", m);
+    }
+  }
+  if (has("full_after")) {
+    const n = sketch.full_after;
+    if (typeof n !== "number" || !Number.isInteger(n) || n < 0 || n > 250) refuse("full_after", "a whole number from 0 (never) to 250");
+    else {
+      next.full_after = n;
+      ok("full_after", String(n));
+    }
+  }
+  if (has("erase")) {
+    const e = sketch.erase;
+    if (e !== "auto" && e !== "partial" && e !== "full") refuse("erase", "auto, partial or full");
+    else {
+      next.erase = e;
+      ok("erase", e);
+    }
+  }
+  if (has("test") && !(sketch.test === null || typeof sketch.test === "string" && TEST_NAMES.includes(sketch.test))) refuse("test", `${TEST_NAMES.join(", ")}`);
+  return { next, results };
+}
+function testOf(sketch) {
+  return typeof sketch.test === "string" && TEST_NAMES.includes(sketch.test) ? sketch.test : null;
+}
+function tuningRequest(tuning) {
+  if (tuning === "defaults") return { req: "defaults", results: [] };
+  const req = {};
+  const results = [];
+  for (const [k, v] of Object.entries(tuning)) {
+    if (typeof v === "number" && Number.isInteger(v) || typeof v === "string" || typeof v === "boolean") req[k] = v;
+    else results.push({ key: `tuning.${k}`, applied: false, text: "refused: the value is a whole number or a word" });
+  }
+  return { req, results };
+}
+function tuningResults(sent, refused, tuning) {
+  return sent.map((k) => {
+    const why = refused?.[k];
+    return why !== void 0 ? { key: `tuning.${k}`, applied: false, text: `refused: ${String(why)}` } : { key: `tuning.${k}`, applied: true, text: `applied${tuning && k in tuning ? `: ${String(tuning[k])}` : ""}` };
+  });
+}
+function testPlan(name, w, h, paper) {
+  const X = (f) => Math.round(w * f), Y = (f) => Math.round(h * f);
+  if (name === "grays") {
+    const n = paper + 1, bw = Math.floor(w * 0.8 / n);
+    return Array.from({ length: n }, (_, i) => ({ rect: { x: X(0.1) + i * bw, y: Y(0.25), w: bw, h: Y(0.2) }, value: i }));
+  }
+  if (name === "lines") {
+    const b = sketchBrushes(w);
+    return [
+      ...b.map((s, i) => ({ line: [X(0.1), Y(0.55 + 0.05 * i), X(0.9), Y(0.55 + 0.05 * i), s, 0] })),
+      ...b.map((s, i) => ({ line: [X(0.2 + 0.3 * i), Y(0.72), X(0.2 + 0.3 * i), Y(0.92), s, 0] }))
+    ];
+  }
+  const mid = Math.round(paper / 2);
+  return [
+    { rect: { x: X(0.3), y: Y(0.5), w: X(0.4), h: Y(0.3) }, value: mid },
+    { rect: { x: X(0.4), y: Y(0.58), w: X(0.2), h: Y(0.14) }, value: paper }
+  ];
+}
+function reportText(o) {
+  const h = o.hello;
+  const lines = ["tiny-paper display report"];
+  if (!h) return `${lines[0]}
+no device connected`;
+  lines.push(`device: ${h.board} ${h.w}x${h.h}, display firmware ${h.fw}`);
+  lines.push(`device partial depths: ${h.partial_depths.length ? h.partial_depths.join(",") : "none"}; modes: ${h.modes.join(",")}`);
+  lines.push(h.tuning ? `tuning: ${Object.entries(h.tuning).map(([k, v]) => `${k}=${v}`).join(" ")}` : "tuning: none (this device has no panel tuning)");
+  lines.push(`sketch: depth=${o.sketch.depth ?? "auto"}${o.depthUsed ? ` (${o.depthUsed} bit in use)` : ""} mode=${o.sketch.mode} full_after=${o.sketch.full_after} erase=${o.sketch.erase}${o.test ? ` test=${o.test}` : ""}`);
+  lines.push(`what I saw: ${o.saw.trim() || "(nothing written)"}`);
+  lines.push(`last ${Math.min(12, o.history.length)} status lines:`);
+  for (const l of o.history.slice(-12)) lines.push(`${l.at} ${l.text}`);
+  return lines.join("\n");
+}
 export {
   BRUSH_NAMES,
+  DEBUG_DEFAULTS,
   DISPLAY_ERRORS,
   DISPLAY_MODES,
   DISPLAY_PALETTE,
@@ -1078,13 +1312,24 @@ export {
   SketchModel,
   SketchPen,
   SketchSender,
+  TEST_NAMES,
   UNDO_STEPS,
+  X_KNOBS,
   alignRect,
+  applyTuning,
+  checkSketch,
   cleanMode,
   displayAnswer,
   displayHello,
   packedPng,
+  parseDebug,
+  reportText,
   sketchBrushes,
   sketchInk,
-  sketchSession
+  sketchSession,
+  testOf,
+  testPlan,
+  tuningMap,
+  tuningRequest,
+  tuningResults
 };

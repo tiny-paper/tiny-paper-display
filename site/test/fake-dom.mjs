@@ -5,7 +5,7 @@
 export class FakeElement {
   constructor(tag, id = '', hidden = false) {
     Object.assign(this, { tag, id, hidden, disabled: false, textContent: '', className: '', value: '', title: '', width: 0, height: 0,
-      dataset: {}, style: {}, attrs: {}, children: [], listeners: {}, onclick: null, onchange: null, puts: [] });
+      dataset: {}, style: {}, attrs: {}, children: [], listeners: {}, onclick: null, onchange: null, oninput: null, puts: [] });
   }
   setAttribute(k, v) { this.attrs[k] = String(v); }
   getAttribute(k) { return this.attrs[k] ?? null; }
