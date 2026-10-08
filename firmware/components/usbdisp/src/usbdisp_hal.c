@@ -121,6 +121,7 @@ void usbdisp_hal_cfg(usbdisp_cfg_t *cfg, const char *fw)
     if (!cfg->bwry && b->partial_refresh)
         cfg->partial_depths = (uint8_t)(1 | (hal_panel_gray_partial() ? cfg->depths & 6 : 0));
     cfg->partial_all = cfg->partial_depths && hal_panel_partial_all(false);
+    cfg->gray_partial_max_px = cfg->partial_depths & 6 ? USBDISP_GRAY_PARTIAL_MAX_PX : 0;
     cfg->full_every = USBDISP_FULL_EVERY;
     cfg->rows_bottom_up = b->rows_bottom_up;
     cfg->band_rows = (uint16_t)((b->panel_h + USBDISP_BANDS - 1) / USBDISP_BANDS);

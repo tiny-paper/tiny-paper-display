@@ -102,12 +102,19 @@ typedef struct {
     bool ok;
 } usbdisp_gates_t;
 
+/* The most pixels a gray partial update takes in its changed rectangle on the TRMNL X (usb-display.md "Area and refresh mode"):
+ * 262144, 512 x 512, about a tenth of the panel; the copies of old and new pixels are 256 KiB then. */
+#define USBDISP_GRAY_PARTIAL_MAX_PX 262144u
+
 typedef struct {
     const char *fw, *board;
     uint16_t w, h;
     uint8_t depths;             /* gray PNG bit depths taken: bit0 = 1, bit1 = 2, bit2 = 4 */
     uint8_t partial_depths;     /* of those, the depths a partial refresh takes (0: none, always a full refresh) */
     bool partial_all;           /* the panel can drive every pixel of a window: partial_all, passes */
+    /* a gray partial (depth 2, 4) keeps old and new copies of its rectangle in RAM: its changed rectangle may have at most
+     * this many pixels (0: no limit). A larger change is a full refresh (`why: "large"`), or with `partial` named a refusal. */
+    uint32_t gray_partial_max_px;
     uint8_t full_every;         /* a full refresh after this many partial ones (0: never); the setting replaces it */
     bool bwry;                  /* black, white, red, yellow panel: gray 1-bit, or an indexed PNG of these colors */
     bool rows_bottom_up;        /* hal_board_t rows_bottom_up: bands are written bottom first */

@@ -306,6 +306,24 @@ void usbdisp_show_end(usbdisp_t *d, const link_frame_t *f)
         else
             run = USBDISP_MODE_PARTIAL, because = "changed";
     }
+    /* a partial update: the changed rectangle is found before the panel is touched, and a gray one that is too large for the
+     * copies of its pixels (usbdisp.h USBDISP_GRAY_PARTIAL_MAX_PX) is a full refresh, or with `partial` named a refusal */
+    tiny_rect_t chg = {0, 0, 0, 0};
+    bool chg_found = false;
+    if (!err && run == USBDISP_MODE_PARTIAL) {
+        chg_found = changed_rect(d, d->prev, next, stride, depth, &chg);
+        if (!chg_found) {
+            run = USBDISP_MODE_NONE, because = "unchanged";
+        } else if (depth > 1 && d->c.gray_partial_max_px && (uint32_t)chg.w * chg.h > d->c.gray_partial_max_px) {
+            if (mode == USBDISP_MODE_PARTIAL) {
+                snprintf(msg, sizeof msg, "a partial update at %u bit takes at most %lu changed pixels in its rectangle, this one has %lu: use full",
+                         (unsigned)depth, (unsigned long)d->c.gray_partial_max_px, (unsigned long)((uint32_t)chg.w * chg.h));
+                err = USBDISP_E_MODE, why = msg;
+            } else {
+                run = USBDISP_MODE_FULL, because = "large";
+            }
+        }
+    }
     uint32_t ms = 0;
     tiny_rect_t drv = whole;
     if (!err && run == USBDISP_MODE_NONE) {
@@ -314,13 +332,10 @@ void usbdisp_show_end(usbdisp_t *d, const link_frame_t *f)
         if (usbdisp_panel_full(d, depth, true, next, NULL, stride, &ms, &why))
             err = USBDISP_E_IO;
     } else if (!err && run == USBDISP_MODE_PARTIAL) {
-        if (!changed_rect(d, d->prev, next, stride, depth, &drv)) {
-            run = USBDISP_MODE_NONE, because = "unchanged";
-            drv = (tiny_rect_t){0, 0, 0, 0};
-        } else if (usbdisp_panel_area(d, depth, &drv, d->prev + rect_at(&drv, stride, depth),
-                                      next + rect_at(&drv, stride, depth), stride, false, &ms, &why)) {
+        drv = chg;
+        if (usbdisp_panel_area(d, depth, &drv, d->prev + rect_at(&drv, stride, depth), next + rect_at(&drv, stride, depth),
+                               stride, false, &ms, &why))
             err = USBDISP_E_IO;
-        }
     } else if (!err && run == USBDISP_MODE_INVERSE) {
         drv = r;
         err = inverse(d, &r, next, stride, &ms, &why);

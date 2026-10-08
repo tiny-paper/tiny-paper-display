@@ -76,7 +76,7 @@ export class DisplayClient {
   }
   private finish(r: CborMap): CborMap {
     if (!['full', 'partial', 'partial_all', 'inverse', 'passes', 'none'].includes(String(r.mode)) ||
-        !['asked', 'changed', 'unchanged', 'first', 'refused', 'cut', 'failed', 'memory', 'depth', 'board', 'cleanup'].includes(String(r.why)) ||
+        !['asked', 'changed', 'unchanged', 'first', 'refused', 'cut', 'failed', 'memory', 'depth', 'board', 'cleanup', 'large'].includes(String(r.why)) ||
         ![1, 2, 4].includes(Number(r.depth)) || ['ms', 'x', 'y', 'w', 'h'].some((k) => typeof r[k] !== 'number' || !Number.isSafeInteger(r[k]) || Number(r[k]) < 0)) throw new Error('Invalid display answer; check the panel before sending again');
     return r;
   }
@@ -86,6 +86,7 @@ const reasons: Record<string, string> = {
   asked: 'as requested', changed: 'changed pixels', unchanged: 'the picture was already shown', first: 'the first picture',
   refused: 'recovering after a refused transfer', cut: 'recovering after an interrupted transfer', failed: 'recovering after a panel failure',
   memory: 'no memory for the previous frame', depth: 'the bit depth changed', board: 'this panel needs a full refresh', cleanup: 'the periodic full refresh',
+  large: 'too much changed for a partial update: refreshed the whole panel',
 };
 export function displayAnswer(r: CborMap): string {
   const modes: Record<string, string> = { full: 'Full refresh', partial: 'Changed area refreshed', partial_all: 'Whole area refreshed', inverse: 'Inverse then picture refreshed', passes: 'Repeated area refresh', none: 'No refresh needed' };

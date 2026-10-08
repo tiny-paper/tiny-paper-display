@@ -119,6 +119,13 @@ multiple of 8, all of it lies inside the panel, its depth is in `partial_depths`
 Without them the rectangle is the whole panel. `full` with a rectangle refreshes the whole panel with the rectangle put
 into the frame kept.
 
+A gray partial update (2 or 4 bit; `partial_depths` lists them) keeps copies of old and new pixels of its rectangle in RAM, so
+its changed rectangle may have at most 262144 pixels on the TRMNL X (512 x 512, about a tenth of the 1872 x 1404 panel; 256
+KiB of copies at 4 bit). The device finds the rectangle before it touches the panel. With no mode named, a larger change is a
+full refresh (`why: "large"`); with `partial` named it is refused `MODE` ("a partial update at 4 bit takes at most 262144
+changed pixels in its rectangle, this one has N: use full"). A 1 bit partial has no such limit. A photo (a whole dithered
+picture) is therefore a full refresh, whatever the frame kept.
+
 The frame kept is forgotten, so the next update is a full refresh whatever was asked (a rectangle then has white
 around it): at power-on, after a refused step of a show, a transfer cut (quiet for 10 s, or replaced by a new
 show_begin), a panel failure, and after a picture at a depth outside `partial_depths`. `clear` leaves a white 1 bit
@@ -129,7 +136,7 @@ frame. A whole picture without a mode gives up the frame kept when memory is sho
 | Key | Value |
 |---|---|
 | `mode` | what ran: `full`, `partial`, `partial_all`, `inverse`, `passes`, or `none` (the picture is what the panel shows: nothing driven) |
-| `why` | `asked` (the mode named), `changed`, `unchanged`, or for a full refresh nobody named: `first`, `refused`, `cut`, `failed`, `memory` (why the frame kept was not known), `depth` (another depth than the picture shown, or one outside `partial_depths`), `board` (no partial refresh), `cleanup` (`full_every` reached) |
+| `why` | `asked` (the mode named), `changed`, `unchanged`, or for a full refresh nobody named: `first`, `refused`, `cut`, `failed`, `memory` (why the frame kept was not known), `depth` (another depth than the picture shown, or one outside `partial_depths`), `board` (no partial refresh), `cleanup` (`full_every` reached), `large` (too much changed for a gray partial update: the whole panel was refreshed) |
 | `x`, `y`, `w`, `h` | the area driven (all 0 with `none`) |
 | `same` | true with `mode: "none"` |
 | `passes` | with the mode `passes` |

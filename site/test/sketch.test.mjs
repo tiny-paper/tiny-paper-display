@@ -737,3 +737,11 @@ test('The fingerprint of the page is the one of the spec: the vectors', async ()
   }
   assert.ok(n >= 6);
 });
+
+test('A full refresh the device chose because too much changed is said in words, not as an invalid answer', async () => {
+  const { dev, el, stroke } = await connected(495, XDEV);
+  dev.refuse = { mode: 'full', why: 'large', depth: 4, ms: 2585, x: 0, y: 0, w: 1872, h: 495 };
+  stroke([[300, 200], [340, 240]]);
+  await until('the answer', () => /too much changed for a partial update: refreshed the whole panel/.test(el('status').textContent));
+  assert.equal(el('status').dataset.state, 'ok');
+});

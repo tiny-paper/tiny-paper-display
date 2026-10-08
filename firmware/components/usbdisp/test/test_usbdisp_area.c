@@ -257,6 +257,90 @@ static void test_gray_partial(void)
     TEST_ASSERT_EQUAL_HEX8_ARRAY(s_want, F.shown, W * H);
 }
 
+/* A gray partial keeps copies of its rectangle in RAM: the most pixels it takes is a limit of the board (usbdisp.h). Auto
+ * chooses a full refresh for a larger change, and says why; `partial` named is refused before the panel is touched; a
+ * single large rectangle is judged the same; a change under the limit is still a partial update. */
+static void gray_limit_device(uint32_t max_px)
+{
+    device_partial(W, H, 7, 7, true, 0);
+    C.gray_partial_max_px = max_px;
+    usbdisp_init(&D, &C);
+    random_px(s_want, W * H, 4);
+    size_t n = make_png(s_png, W, H, 4, 0, s_want);
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    TEST_ASSERT_EQUAL_STRING("full", ans_str("mode")); /* the first picture, at 4 bit */
+}
+
+static void test_gray_partial_too_large(void)
+{
+    /* under the limit: a partial update */
+    gray_limit_device(40 * 1000);
+    s_want[5 * W + 13] ^= 5;
+    size_t n = make_png(s_png, W, H, 4, 0, s_want);
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    TEST_ASSERT_EQUAL_STRING("partial", ans_str("mode"));
+    TEST_ASSERT_EQUAL_STRING("changed", ans_str("why"));
+
+    /* auto, a whole new picture over the limit: a full refresh, "large", the panel's partial path not used */
+    gray_limit_device(100);
+    random_px(s_want, W * H, 4);
+    n = make_png(s_png, W, H, 4, 0, s_want);
+    int partials = F.partials, fulls = F.fulls;
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    TEST_ASSERT_EQUAL_STRING("full", ans_str("mode"));
+    TEST_ASSERT_EQUAL_STRING("large", ans_str("why"));
+    TEST_ASSERT_EQUAL_INT(partials, F.partials);
+    TEST_ASSERT_EQUAL_INT(fulls + 1, F.fulls);
+    expect_shown(4, "large change: full");
+    /* the frame is known: a small change after it is a partial update again */
+    s_want[5 * W + 13] ^= 5;
+    n = make_png(s_png, W, H, 4, 0, s_want);
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    TEST_ASSERT_EQUAL_STRING("partial", ans_str("mode"));
+
+    /* `partial` named, too large: refused before the panel is touched, the limit and the size in the message */
+    random_px(s_want, W * H, 4);
+    n = make_png(s_png, W, H, 4, 0, s_want);
+    int begins = F.begins;
+    TEST_ASSERT_EQUAL_INT(USBDISP_E_MODE, show_at(s_png, n, 512, -1, 0, "partial", 0));
+    TEST_ASSERT_NOT_NULL(strstr(ans_str("msg"), "a partial update at 4 bit takes at most 100 changed pixels in its rectangle, this one has "));
+    TEST_ASSERT_NOT_NULL(strstr(ans_str("msg"), ": use full"));
+    TEST_ASSERT_EQUAL_INT(begins, F.begins);
+    TEST_ASSERT_EQUAL_INT(0, F.live);
+    TEST_ASSERT_NULL(usbdisp_prev(&D, NULL)); /* refused: the next update is a full one */
+    TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+    TEST_ASSERT_EQUAL_STRING("full", ans_str("mode"));
+
+    /* a single large rectangle: judged the same */
+    uint8_t box[32 * 8];
+    random_px(box, sizeof box, 4);
+    size_t bn = make_png(s_png, 32, 8, 4, 0, box);
+    begins = F.begins;
+    TEST_ASSERT_EQUAL_INT(USBDISP_E_MODE, show_at(s_png, bn, 512, 8, 4, "partial", 0));
+    TEST_ASSERT_EQUAL_INT(begins, F.begins);
+}
+
+/* After a real panel failure at a gray depth the frame kept is unknown: the next update is a full one and says why. */
+static void test_gray_panel_failure_forgets_the_frame(void)
+{
+    for (int step = 0; step < 2; step++) {
+        gray_limit_device(40 * 1000);
+        s_want[5 * W + 13] ^= 5;
+        size_t n = make_png(s_png, W, H, 4, 0, s_want);
+        if (step == 0)
+            F.fail_write = 1;
+        else
+            F.fail_refresh = 1;
+        TEST_ASSERT_EQUAL_INT(USBDISP_E_IO, show(s_png, n, 512));
+        F.fail_write = F.fail_refresh = 0;
+        TEST_ASSERT_NULL(usbdisp_prev(&D, NULL));
+        TEST_ASSERT_EQUAL_INT(F.begins, F.sleeps);
+        TEST_ASSERT_EQUAL_INT(0, show(s_png, n, 512));
+        TEST_ASSERT_EQUAL_STRING("full", ans_str("mode"));
+        TEST_ASSERT_EQUAL_STRING("failed", ans_str("why"));
+    }
+}
+
 /* A transfer that went quiet was cut: the device no longer trusts its frame, the next update is a full one. */
 static void test_cut_transfer_then_full(void)
 {
@@ -477,6 +561,8 @@ int main(void)
     RUN_TEST(test_modes_drive_as_named);
     RUN_TEST(test_board_without_partial_all);
     RUN_TEST(test_gray_partial);
+    RUN_TEST(test_gray_partial_too_large);
+    RUN_TEST(test_gray_panel_failure_forgets_the_frame);
     RUN_TEST(test_cut_transfer_then_full);
     RUN_TEST(test_alloc_fails_in_every_mode);
     RUN_TEST(test_panel_fails_mid_update);
