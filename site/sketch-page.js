@@ -308,13 +308,15 @@ export function startSketchPage(env) {
     state.busy = true; state.test = name; $('debugapply').disabled = true;
     try {
       s.model.clear(); s.fullRefresh(); await s.sendNow();
+      const whole = name === 'grays_full';
       for (const step of testPlan(name, s.model.w, s.model.h, s.ink.paper)) {
         if (step.rect) s.model.fillRect(step.rect, step.value);
         else { s.model.begin(); s.model.line(...step.line); s.model.end(); }
-        await s.sendNow();
+        if (!whole) await s.sendNow();
       }
+      if (whole) { s.fullRefresh(); await s.sendNow(); }
     } finally { state.busy = false; $('debugapply').disabled = false; }
-    return [{ key: 'sketch.test', applied: true, text: `${name} sent` }];
+    return [{ key: 'sketch.test', applied: true, text: `${name} sent${name === 'grays_full' ? ' (one full refresh)' : ''}` }];
   }
   function takeSketch(next) {
     const before = state.sender.ink.depth;

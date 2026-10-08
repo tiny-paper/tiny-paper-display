@@ -7,7 +7,7 @@ import { FULL_AFTER } from './sketchSender.ts';
 /** The page side settings of the Debug section; `depth` null: the deepest partial depth of the device. */
 export interface DebugSketch { depth: number | null; mode: DisplayMode | 'auto'; full_after: number; erase: 'auto' | 'partial' | 'full' }
 export const DEBUG_DEFAULTS: DebugSketch = { depth: null, mode: 'auto', full_after: FULL_AFTER, erase: 'auto' };
-export const TEST_NAMES = ['grays', 'lines', 'box'] as const;
+export const TEST_NAMES = ['grays', 'grays_full', 'lines', 'box'] as const;
 export type TestName = typeof TEST_NAMES[number];
 
 export type ParsedDebug =
@@ -113,12 +113,13 @@ export type TestStep = { rect: Rect; value: number } | { line: [number, number, 
  * The test patterns, the same on every try for a panel size, so results are comparable. Each step is sent by itself as
  * one partial update (after a full refresh of the blank panel). `paper` is the white level.
  *   grays: one bar for each level from black to white (the white bar changes nothing, so it is not sent)
+ *   grays_full: the same bars, all drawn first and shown with one full refresh
  *   lines: thin, medium and thick black lines, horizontal and then vertical
  *   box: a filled mid gray box, then a white box inside it
  */
 export function testPlan(name: TestName, w: number, h: number, paper: number): TestStep[] {
   const X = (f: number): number => Math.round(w * f), Y = (f: number): number => Math.round(h * f);
-  if (name === 'grays') {
+  if (name === 'grays' || name === 'grays_full') {
     const n = paper + 1, bw = Math.floor(w * 0.8 / n);
     return Array.from({ length: n }, (_, i) => ({ rect: { x: X(0.1) + i * bw, y: Y(0.25), w: bw, h: Y(0.2) }, value: i }));
   }

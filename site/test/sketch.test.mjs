@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { startSketchPage } from '../sketch-page.js';
-import { fingerprintOf } from '../sketch.js';
+import { fingerprintOf, testPlan } from '../sketch.js';
 import { inflateSync } from 'node:zlib';
 import { FakeImageData, fakeDocument, pointer } from './fake-dom.mjs';
 import { fakeDisplay } from './fake-display.mjs';
@@ -451,7 +451,19 @@ test('Debug: each test pattern sends its own partial updates after a full refres
   await run('lines', 6);
   await run('box', 2);
   await apply({ el }, { sketch: { test: 'circles' } });
-  await resultsHave({ el }, /sketch\.test: refused: grays, lines, box/);
+  await resultsHave({ el }, /sketch\.test: refused: grays, grays_full, lines, box/);
+});
+
+test('Debug: grays_full draws the same 16 bars and shows them with ONE full refresh; the report says which test ran', async () => {
+  const { dev, el } = await connected(456 + 101, XDEV);
+  const before = dev.shows.length;
+  await apply({ el }, { sketch: { test: 'grays_full' } });
+  await until('grays_full sent', () => el('debugresults').textContent.includes('sketch.test: grays_full sent'));
+  const mine = dev.shows.slice(before);
+  assert.deepEqual(mine.map((s) => s.mode), ['full', 'full'], 'the blank panel, then all bars in one full refresh');
+  assert.equal(el('debugresults').textContent.includes('one full refresh'), true);
+  assert.equal(el('report').value.includes('test=grays_full'), true);
+  assert.deepEqual(testPlan('grays_full', 1872, 1404, 15), testPlan('grays', 1872, 1404, 15), 'the same 16 bars');
 });
 
 test('Debug: the last pasted text is read back after a reload, and applying it again reproduces the try', async () => {

@@ -1271,7 +1271,7 @@ var MockDisplayDevice = class {
 
 // src/display/debug.ts
 var DEBUG_DEFAULTS = { depth: null, mode: "auto", full_after: FULL_AFTER, erase: "auto" };
-var TEST_NAMES = ["grays", "lines", "box"];
+var TEST_NAMES = ["grays", "grays_full", "lines", "box"];
 function parseDebug(text) {
   let v;
   try {
@@ -1372,7 +1372,7 @@ function tuningResults(sent, refused, tuning) {
 }
 function testPlan(name, w, h, paper) {
   const X = (f) => Math.round(w * f), Y = (f) => Math.round(h * f);
-  if (name === "grays") {
+  if (name === "grays" || name === "grays_full") {
     const n = paper + 1, bw = Math.floor(w * 0.8 / n);
     return Array.from({ length: n }, (_, i) => ({ rect: { x: X(0.1) + i * bw, y: Y(0.25), w: bw, h: Y(0.2) }, value: i }));
   }
