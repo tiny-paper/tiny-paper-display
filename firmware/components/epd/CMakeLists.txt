@@ -32,4 +32,8 @@ if(IDF_TARGET STREQUAL "esp32s3")
     endif()
     target_compile_options(${fastepd_lib} PRIVATE -Wno-missing-field-initializers -Wno-unused-function
                            -ftrivial-auto-var-init=zero)
+    # The pinned library (upstream 3d2a63a plus our fixes) uses Arduino's pinMode and digitalWrite in a panel start no
+    # board of ours takes: they come from our stand-in header, the library stays unpatched (copied from the main project).
+    # The right edge tries (X_EDGE) are not built here: no define, the check_fastepd_source.py build check wants them off.
+    target_compile_options(${fastepd_lib} PRIVATE "SHELL:-include ${CMAKE_CURRENT_LIST_DIR}/esp/fastepd_idf_standin.h")
 endif()
