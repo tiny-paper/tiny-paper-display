@@ -147,7 +147,7 @@ static void test_the_glue_asks_before_it_installs(void)
     TEST_ASSERT_EQUAL_INT(1, count(plain, "s_epd.fullUpdate(lib_clear, false, rect)"));
     /* a rectangle's full refresh is plain only, and its x goes through the mirror */
     TEST_ASSERT_EQUAL_INT_MESSAGE(1, count(s, "if (s_parts.row_hook) return EPDP_E_STATE; /* plain only */"), "rectangle");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, count(s, "BB_RECT r = {epd_driver_lib_rect_x(s_epd.width(), s_epd.mirror_x(), x, w), y, w, h};"), "rectangle x");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, count(s, "BB_RECT r = {epd_driver_lib_rect_x(s_epd.width(), MIRROR_X, x, w), y, w, h};"), "rectangle x");
     TEST_ASSERT_EQUAL_INT(1, count(plain, "s_epd.partialUpdate("));
     TEST_ASSERT_EQUAL_INT(1, count(plain, "s_epd.partialUpdate(keep, y0, y1)")); /* the changed rows, the library's keep-on */
     static const char *const ours[] = {"scan_partial", "scan_step", "scan_run", "scan_begin", "rows_begin",

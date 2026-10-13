@@ -181,13 +181,12 @@ Rule: upstream issues and pull requests are read before any panel work and at le
 
 | Library | Our pin | Upstream head | The stock firmware's X build pins | Checked |
 |---|---|---|---|---|
-| bitbank2/FastEPD | 8dc8c74 (2026-08-15; 12 commits after tag 2.2.0, 46 after 1.4.6) | 3d2a63a (2026-10-03) | 9a84c35 (2026-09-22), 6 commits after ours | 2026-10-08 |
+| tiny-paper/FastEPD (fork of bitbank2/FastEPD) | eb10f7e (branch all-fixes-edge-head: upstream 3d2a63a plus our fixes, setVCOM) | 3d2a63a (2026-10-03) | 9a84c35 (2026-09-22) | 2026-10-13 |
 
-The pin was tried at 9a84c35 on 2026-10-08 and stays: the library does not compile under ESP-IDF from 7422433 on
-(`pinMode` and `digitalWrite`, Arduino only, in its M5Paper start; still so at the head). Moving needs that fixed
-upstream or a patch of ours. What the move would change for the X is one line of its panel table (8f76e90): 26.67 MHz
-and chip select by the LCD peripheral instead of 20 MHz and chip select by software. That is the bus `ours` already
-sets up again itself, so `ours` would gain nothing and `plain` would get the same bus as `ours`.
+The pin is a full commit of the fork (the same as the main project's, copied 2026-10-13); the lock files name it.
+Rule: the pin and MIRROR_X move in one commit (esp/epd_fastepd.cpp): this fork commit has no mirrored rectangle fix, so the
+glue mirrors a rectangle's x. `firmware/tools/check_fastepd_source.py` checks pin, lock, compiled library and glue in
+the build (`firmware/tools/idf/build.sh`); X_EDGE variants must stay off.
 
 | Open upstream, touches the X | State | Us |
 |---|---|---|

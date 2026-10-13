@@ -9,7 +9,7 @@ $(VENV)/bin/pytest: python/pyproject.toml
 	$(VENV)/bin/pip -q install -e "./python[test]"
 
 test-python: $(VENV)/bin/pytest
-	$(VENV)/bin/python -m pytest -q python/tests
+	$(VENV)/bin/python -m pytest -q python/tests firmware/tools/test_check_fastepd_source.py
 
 test-site:
 	npm ci --prefix site --no-audit --no-fund

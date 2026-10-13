@@ -31,6 +31,14 @@
 #include "sdkconfig.h"
 #include <string.h>
 
+/* The X sends its rows last pixel first (BB_PANEL_FLAG_MIRROR_X in the library's TRMNL X entry). A rectangle's x is
+ * mirrored for it (epd_driver_lib_rect_x). Rule: the pin and MIRROR_X move in one commit. The pinned library (fork
+ * branch all-fixes-edge-head) applies a rectangle's column mask in sent order, so it needs the mirrored x. A library
+ * with the mirrored rectangle fix (fork commit cb95742, or upstream after such a fix) wants the true x: this constant
+ * goes false in the commit that pins it, or every gray box is driven at the mirrored place.
+ * firmware/tools/check_fastepd_source.py refuses the one without the other. */
+static const bool MIRROR_X = true;
+
 /* Same sequence as stock trmnl-firmware f5f87b7 src/display.cpp display_init(): initPanel(BB_PANEL_TRMNL_X),
  * setPasses(3, 3); FastEPD 8dc8c74 then runs EPDiyV7IOInit / EPDiyV7EinkPower (TCA9535 at 0x20 pins
  * 8..15, TPS65185 at 0x68). Differences: stock is Arduino, so FastEPD's I2C goes through Wire; here it
@@ -104,7 +112,6 @@ public:
     }
     bool soft_cs() const { return _state.panelDef.flags & BB_PANEL_FLAG_SLOW_SPH; }
     bool mirror_y() const { return _state.iFlags & BB_PANEL_FLAG_MIRROR_Y; }
-    bool mirror_x() const { return _state.iFlags & BB_PANEL_FLAG_MIRROR_X; }
     /* One FastEPD partial over the `careful` rows of a scan plan (epd_scan.h), `passes` drive frames (0: only its
      * neutral scan), rails left on. FastEPD 8dc8c74 bbepPartialUpdate and bbepClear take the rows to write and
      * their count from the state on every scan, so for the call the frames start at the first careful row and the
@@ -849,7 +856,7 @@ extern "C" int epdp_full_rect(int clear_mode, int x, int y, int w, int h)
     if (driver_sync()) return EPDP_E_IO;
     if (s_parts.row_hook) return EPDP_E_STATE; /* plain only */
     full_begin();
-    BB_RECT r = {epd_driver_lib_rect_x(s_epd.width(), s_epd.mirror_x(), x, w), y, w, h};
+    BB_RECT r = {epd_driver_lib_rect_x(s_epd.width(), MIRROR_X, x, w), y, w, h};
     return plain_full(CLEAR_MODES[clear_mode], clear_mode, &r);
 }
 
