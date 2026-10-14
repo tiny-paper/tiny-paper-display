@@ -361,6 +361,18 @@ def test_info_logging_has_the_times_of_a_show(bench, capsys):
     assert "request 0x" not in err, "debug lines are not info"
 
 
+def test_info_logging_has_the_device_steps(bench, capsys):
+    """The device's ms for each step of a show (recv, prep, inflate, ...) are in the info line and in describe()."""
+    dev = bench.devices["A"] = FakeDevice(w=16, h=8)
+    dev.steps = {"recv": 11, "prep": 2, "inflate": 31, "convert": 17, "diff": 3, "fingerprint": 5, "panel": 70, "total": 150}
+    with tpd.open("A", log="info") as d:
+        reply = d.show(tpd.Canvas(16, 8, 0))
+    err = capsys.readouterr().err
+    assert "steps recv 11, prep 2, inflate 31, convert 17, diff 3, fingerprint 5, panel 70, total 150" in err
+    assert "steps recv 11" in display_fw.describe(reply)
+    assert "steps" not in display_fw.describe({"mode": "full", "why": "asked", "depth": 1, "ms": 0}), "an old firmware has none"
+
+
 def test_debug_logging_shows_requests_without_picture_bytes(bench, capsys):
     bench.devices = {"A": FakeDevice(w=16, h=8)}
     with tpd.open("A", log="debug") as d:

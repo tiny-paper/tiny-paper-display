@@ -7,7 +7,7 @@ show_end comes after the panel's refresh. Requests go through the same link clie
 
 The device keeps what it last showed: without a mode it updates only what changed (a partial refresh, no flash) and
 does a full refresh by itself when it must. The answer says which ran and why: {"mode": .., "why": .., "x", "y", "w",
-"h", "ms", "ckv"?}.
+"h", "ms", "ckv"?, "steps"?}; steps: the device's ms for each step of the show.
 """
 from dataclasses import dataclass
 import struct
@@ -240,6 +240,15 @@ def bt(display, on=None, pair=None, forget=None):
     return request(display, BT, keys)
 
 
+STEP_KEYS = ("recv", "prep", "inflate", "convert", "diff", "fingerprint", "panel", "total")
+
+
+def steps_text(reply):
+    """The device's milliseconds of each step of a show ("steps recv 11, prep 2, ..."); empty from a firmware without them."""
+    steps = reply.get("steps")
+    return "steps " + ", ".join(f"{k} {steps[k]}" for k in STEP_KEYS if k in steps) if steps else ""
+
+
 def describe(reply):
     """One line of an answer: which refresh ran, why, where, how long, and the gate clocks the device counted."""
     if reply.get("skipped"):
@@ -251,6 +260,8 @@ def describe(reply):
     ckv = reply.get("ckv")
     if ckv:
         out += f" ckv {ckv['per']}/frame for {ckv['rows']} rows" + ("" if ckv["ok"] else " WRONG GATE CLOCK")
+    if reply.get("steps"):
+        out += f" [{steps_text(reply)}]"
     if "prepare_ms" in reply:  # the host's own time, apart from the device's ms
         out += f"; host: prepare {reply['prepare_ms']} ms, transfer {reply.get('transfer_ms')} ms"
     return out

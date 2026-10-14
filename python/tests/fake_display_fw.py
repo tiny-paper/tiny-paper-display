@@ -24,6 +24,7 @@ class FakeDevice:
         self.partial_all, self.full_every, self.board, self.fw = partial_all, full_every, board, fw_version
         self.default_every, self.every_set = full_every, False
         self.max_png = ((w * max(depths) + 7) // 8 + 1) * h + 4096
+        self.steps = dict.fromkeys(("recv", "prep", "inflate", "convert", "diff", "fingerprint", "panel", "total"), 0)
         self.ckv, self.hello_override = ckv, hello  # ckv: the gate clock map of every answer (a TRMNL X)
         self.png = None                # the open transfer: [size, bytes, target]
         self.glass = None              # what the panel shows: packed rows at glass_depth (the whole panel)
@@ -103,7 +104,7 @@ class FakeDevice:
             self.no_prev = "depth"
             self.fingerprint = fingerprint_rows(self.w, self.h, 1, self.glass)
             self.refreshes += 1
-            return self.answer(1, "full", "asked", (0, 0, self.w, self.h))
+            return self.answer(1, "full", "asked", (0, 0, self.w, self.h), steps=False)
         if cmd == fw.SET:
             if "full_every" in p and p["full_every"] is None:
                 self.full_every, self.every_set = self.default_every, False
@@ -265,7 +266,7 @@ class FakeDevice:
             self.no_prev = "depth"
         return self.answer(bits, run, why, drv, t["passes"] if run == "passes" else 0)
 
-    def answer(self, depth, mode, why, rect, passes=0):
+    def answer(self, depth, mode, why, rect, passes=0, steps=True):
         out = {"depth": depth, "ms": 0, "mode": mode, "why": why, **dict(zip("xywh", rect))}
         if mode == "none":
             out["same"] = True
@@ -273,6 +274,8 @@ class FakeDevice:
             out["passes"] = passes
         if self.ckv and mode != "none":
             out["ckv"] = self.ckv
+        if steps:  # a show_end answer; self.steps: the milliseconds of each device step (zeros: the vectors' fixed clock)
+            out["steps"] = dict(self.steps)
         return out
 
     def pixels(self):
