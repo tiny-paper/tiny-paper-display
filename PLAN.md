@@ -35,6 +35,16 @@ Work lands on `testing` first; `main` moves by promoting a state that was tried 
 | 5 Sketch in Python | a first version exists | later |
 | 6 Partial refresh | in the firmware | seen on a device per board and depth before it is offered there (table below) |
 
+### Decided 2026-10-14: Bluetooth trust by our own key, set up over the cable
+
+| Item | Decision |
+|---|---|
+| Why | system pairing needs a passkey typed into the computer: awkward on a headless PC and in Docker (the bond belongs to the host) |
+| Set up | over the USB cable only: device and host agree a random key; the host keeps it in a small file (movable, shareable between PCs) |
+| Use | every Bluetooth frame is authenticated and encrypted with that key by a standard library method (hardware AES on the ESP32), shared test vectors on both sides; no system pairing |
+| Kept | the key is stored with the other settings: survives a program update, not a fresh install; `forget` over the cable replaces it |
+| Order | first see the plain Bluetooth link working on a device, then build the key |
+
 ### Partial refresh, what has been seen on a device
 
 | Board | 1 bit | Grays |
