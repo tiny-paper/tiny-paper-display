@@ -1,0 +1,79 @@
+{
+ "about": "Bluetooth key (usb-display.md \"Bluetooth key\"). bt_key: the cable answer when the device's RNG gives `key`. auth: the handshake on Bluetooth with the device's random nonce `device_nonce`. frames: sealed, in order after it. refused: each in place of frames[2]; the link is dropped, nothing answered. Test bytes only, never a real key.",
+ "name": "tp-display-VEC0",
+ "key": "7859b929fc961b0a3f9a30075fe9b4162b66ff7cf67156d3f48ef3cd1b7c752f",
+ "kid": "62cf01d1218bf9c2",
+ "host_nonce": "415e9820bfaa6ff6c1c73e3ca8c354f4",
+ "device_nonce": "8ec98b70419e346fdcbba68e976ba4dd",
+ "key_h2d": "e225372ff353f2b5f0b66caef9cf88e7",
+ "key_d2h": "a13fe8c69851c62ca2a6703255a7d014",
+ "proof": "397c6868fe72f3068e60f7e7184a8bc8",
+ "bt_key": {
+  "tx": "a55a0100010fa0b929",
+  "rx": "a55a4d00018fa4626f6ef5646e616d656f74702d646973706c61792d56454330636b69644862cf01d1218bf9c2636b657958207859b929fc961b0a3f9a30075fe9b4162b66ff7cf67156d3f48ef3cd1b7c752fd637"
+ },
+ "auth": {
+  "tx": "a55a25000110a2636b69644862cf01d1218bf9c2656e6f6e636550415e9820bfaa6ff6c1c73e3ca8c354f4b5fa",
+  "rx": "a55a2f000190a2656e6f6e6365508ec98b70419e346fdcbba68e976ba4dd6570726f6f6650397c6868fe72f3068e60f7e7184a8bc814d4"
+ },
+ "frames": [
+  {
+   "name": "have",
+   "dir": "h2d",
+   "ctr": 0,
+   "seq": 2,
+   "cmd": 14,
+   "plain": "a16b66696e6765727072696e747030303030303030303030303030303030",
+   "wire": "a55a2e00020e325440600382a13da2824d3efa91da8ef51ab429cb3b0950c5341c8792f8abc8071b21547f8072f6b97e87e88006b0ed"
+  },
+  {
+   "name": "have_answer",
+   "dir": "d2h",
+   "ctr": 1,
+   "seq": 2,
+   "cmd": 142,
+   "plain": "a16473656e64f5",
+   "wire": "a55a1700028e87e17dcb6d61b0570b45f5aa2b533f0512657d11fa18b24dbe"
+  },
+  {
+   "name": "bt",
+   "dir": "h2d",
+   "ctr": 1,
+   "seq": 3,
+   "cmd": 13,
+   "plain": "a0",
+   "wire": "a55a1100030d775c23c0e36b174c4e2563f92875683bc4c399"
+  },
+  {
+   "name": "bt_answer",
+   "dir": "d2h",
+   "ctr": 2,
+   "seq": 3,
+   "cmd": 141,
+   "plain": "a2636572721826636d7367782a627420616e642062745f6b657920776f726b206f6e6c79206f7665722074686520555342206361626c65",
+   "wire": "a55a4700038d70e47796f6e97a95f938a52e30a5ca1d2f213de0fb439ada1df3998c3f81fe11d8547465617eb45aed2f26a1e3dafd189b9963356abb801b403923885df090087138818d0f50e9b68f"
+  }
+ ],
+ "refused": [
+  {
+   "name": "forged_tag",
+   "wire": "a55a1100030d775c23c0e36b174c4e2563f92875683bc5e289"
+  },
+  {
+   "name": "replayed_counter",
+   "wire": "a55a1100030d33f810ff8c4c97f9bdd805d95372be781532bf"
+  },
+  {
+   "name": "wrong_key",
+   "wire": "a55a1100030daa58e6aa0d84ad07979ba81928c6a1a1505e0e"
+  },
+  {
+   "name": "swapped_direction",
+   "wire": "a55a1100030d863025461daee7e0debf4d0988871320228b91"
+  },
+  {
+   "name": "plain_frame",
+   "wire": "a55a0100030da0bb21"
+  }
+ ]
+}
