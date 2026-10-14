@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "ble_conn.h"
 #include "ble_heap.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
@@ -40,6 +41,8 @@ static volatile uint16_t s_conn = BLE_HS_CONN_HANDLE_NONE;
 static volatile uint16_t s_mtu = 23;
 static volatile uint16_t s_dropped = BLE_HS_CONN_HANDLE_NONE; /* the connection hal_link_ble_drop ended: RX refuses it */
 static volatile uint32_t s_connects;
+static volatile uint32_t s_tx_nosub;  /* writes dropped for want of a subscription, this connection */
+static volatile bool s_nosub_logged;
 static uint32_t s_heap_min;
 static uint16_t s_tx_handle;
 #define ADV_ITVL 160 /* x 0.625 ms = 100 ms */
@@ -137,11 +140,16 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
     heap_sample();
     switch (ev->type) {
     case BLE_GAP_EVENT_CONNECT:
-        if (ev->connect.status == 0) {
+        hal_logf("ble connect event status=%d handle=%u", ev->connect.status, (unsigned)ev->connect.conn_handle);
+        struct ble_gap_conn_desc desc;
+        if (ble_conn_action(ev->connect.status, ble_gap_conn_find(ev->connect.conn_handle, &desc) == 0) ==
+            BLE_CONN_TAKE) {
             s_mark = s_head; /* what is in the ring now belongs to an earlier connection */
             __atomic_store_n(&s_marked, true, __ATOMIC_RELEASE);
             s_conn = ev->connect.conn_handle;
             s_mtu = 23;
+            s_tx_nosub = 0;
+            s_nosub_logged = false;
             s_connects++;
             hal_logf("ble connect n=%u", (unsigned)s_connects);
             ble_gap_set_data_len(s_conn, 251, 2120); /* longer packets when the host takes them; nothing depends on it */
@@ -157,10 +165,13 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
             adv_start();
         break;
     case BLE_GAP_EVENT_ADV_COMPLETE:
+        hal_logf("ble adv complete reason=%d conn=%u", ev->adv_complete.reason, (unsigned)s_conn);
         if (s_open && !s_closing && s_conn == BLE_HS_CONN_HANDLE_NONE)
             adv_start();
         break;
     case BLE_GAP_EVENT_SUBSCRIBE:
+        hal_logf("ble subscribe handle=%u tx=%u notify=%u->%u", (unsigned)ev->subscribe.attr_handle,
+                 (unsigned)s_tx_handle, (unsigned)ev->subscribe.prev_notify, (unsigned)ev->subscribe.cur_notify);
         if (ev->subscribe.attr_handle == s_tx_handle)
             s_subscribed = ev->subscribe.cur_notify;
         break;
@@ -323,8 +334,16 @@ long hal_ble_write(const uint8_t *buf, size_t len)
     size_t pos = 0;
     while (pos < len) {
         uint16_t conn = s_conn;
-        if (conn == BLE_HS_CONN_HANDLE_NONE || !s_subscribed)
-            break; /* no peer listening: dropped */
+        if (conn == BLE_HS_CONN_HANDLE_NONE)
+            break; /* no peer: dropped */
+        if (!s_subscribed) {
+            s_tx_nosub++;
+            if (!s_nosub_logged) {
+                s_nosub_logged = true;
+                hal_logf("W ble tx dropped: peer not subscribed (len=%u)", (unsigned)len);
+            }
+            break;
+        }
         size_t piece = len - pos, max = s_mtu > 3 ? s_mtu - 3u : 20u;
         if (piece > max)
             piece = max;
