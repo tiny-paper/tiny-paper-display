@@ -238,7 +238,7 @@ with open_port("/dev/ttyACM0") as port:
 
 `depths` are the bit depths it shows. `partial_depths` are the ones it refreshes partially (empty: none). `modes` are
 the refreshes it can do, and `depth_modes` (`{"1": [...], "2": [...]}`) which of them at which depth: on a TRMNL X only `full`
-and `partial` at 2 and 4 bit. `full_every` is the full refresh after that many partial ones (default 30; `full_every_set`
+and `partial` at 2 and 4 bit. `full_every` is the full refresh after that many partial ones (default 0, never; `clean_every`, default 15, cleans only the area the partial updates changed, `cleanup` in Python; `full_every_set`
 false while the default applies). In Python, `display_fw.capabilities(display)` returns all of it (canvas, depths,
 partial_depths, depth_modes, colors, max_png, full_every), `display_fw.full_every(display, 50)` stores a value and
 `display_fw.full_every(display, clear=True)` brings the default back. A PicPak also has `colors`.

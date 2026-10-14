@@ -74,6 +74,8 @@ be sure you can, read a backup of the whole flash before the first install: `esp
 | Sending pictures from a browser over Bluetooth | not yet; the Python package does it |
 | Colour beyond the PicPak's four inks, 8-bit gray, RGB, alpha, interlaced PNG | refused with a clear error |
 
+Ghosting in a live page: the device cleans only the area the partial updates changed, every 15 updates (`clean_every`, Python `configure(cleanup={"areas": N, "screen": M})`). Not yet seen on a real panel.
+
 ## Not proven yet
 
 Seen on a real panel so far: on the TRMNL X, the firmware starts, and a sketch over the cable works with black strokes
