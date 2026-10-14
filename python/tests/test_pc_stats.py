@@ -187,3 +187,57 @@ def test_sampler_rates_history_and_slow_cycles():
     assert [p[0] for p in sm.procs] == ["a", "b"] and sm.procs[0][1] > 0
     assert sm.sample()["procs"] == sm.procs
     assert len(sm.hist["cpu"]) <= sm.n == 60
+
+
+# ---- real drives only, idle cores visible, the full-refresh note
+MOUNTS = """sysfs /sys sysfs rw 0 0
+/dev/sda2 / ext4 rw 0 0
+/dev/sda1 /boot/efi vfat rw 0 0
+/dev/sda3 /boot ext4 rw 0 0
+/dev/loop3 /snap/core/1 squashfs ro 0 0
+/dev/sdc1 /snap/odd ext4 rw 0 0
+/dev/sdd1 /usr/src ext4 rw 0 0
+/dev/sde1 /media/x/squash squashfs ro 0 0
+overlay /var/lib/docker/overlay2/x overlay rw 0 0
+tmpfs /run tmpfs rw 0 0
+devtmpfs /dev devtmpfs rw 0 0
+/dev/sdb1 /mnt/my\\040disk ext4 rw 0 0
+/dev/nvme0n1p1 /home/data xfs rw 0 0
+"""
+
+
+def test_parse_mounts_keeps_only_real_drives():
+    assert ps.parse_mounts(MOUNTS) == [("/dev/sda2", "/"), ("/dev/sdb1", "/mnt/my disk"), ("/dev/nvme0n1p1", "/home/data")]
+
+
+@pytest.mark.parametrize("fstype,device,mount,opts,real", [
+    ("ext4", "/dev/sda2", "/", "rw", True),
+    ("squashfs", "/dev/loop1", "/snap/x", "ro", False),
+    ("overlay", "overlay", "/", "rw", False),
+    ("tmpfs", "tmpfs", "/run", "rw", False),
+    ("devtmpfs", "devtmpfs", "/dev", "rw", False),
+    ("ext4", "/dev/sdc1", "/snap/x", "rw", False),
+    ("ext4", "/dev/sdc1", "/usr/src", "rw", False),
+    ("vfat", "/dev/sdc1", "/boot/efi", "rw", False),
+    ("NTFS", "C:\\", "C:\\", "rw,fixed", True),
+    ("", "D:\\", "D:\\", "cdrom", False),
+    ("FAT32", "E:\\", "E:\\", "rw,removable", False),
+])
+def test_real_drive_filter(fstype, device, mount, opts, real):
+    assert ps.is_real_drive(fstype, device, mount, opts) is real
+
+
+def test_idle_cores_still_show_a_baseline():
+    for depth in (1, 4):
+        pg = ps.Page(200, 100, depth)
+        pg.items.append(("box", (0, 0, 200, 100), None))
+        pg.cores(0, 10, 10, 100, 40, [0.0] * 4)
+        row = pg.c.px[(10 + 40 - pg.t - 1) * 200 + 10:(10 + 40 - pg.t - 1) * 200 + 110]
+        assert row.count(pg.c.px[10 * 200 + 10]) < 100  # not all the frame colour
+        assert any(v != 15 for v in row[pg.t:-pg.t]), "idle cores draw nothing"
+
+
+def test_full_refresh_note():
+    assert "full" in ps.refresh_note({"mode": "full", "why": "every 30"})
+    assert "every 30" in ps.refresh_note({"mode": "full", "why": "every 30"})
+    assert ps.refresh_note({"mode": "partial", "why": "-"}) is None

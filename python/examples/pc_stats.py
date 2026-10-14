@@ -71,14 +71,31 @@ def parse_diskstats(text):
     return out
 
 
+SKIP_FS = {"squashfs", "overlay", "tmpfs", "devtmpfs", "ramfs", "proc", "sysfs", "cgroup", "cgroup2", "iso9660", "udf"}
+SKIP_MOUNTS = ("/snap", "/usr/src", "/boot")
+
+
+def is_real_drive(fstype, device, mount, opts=""):
+    """True for a drive worth a bar: no squashfs, overlay, tmpfs, devtmpfs, loop devices, snap, /usr/src or /boot mounts;
+    on Windows (drive letters) only fixed drives."""
+    if len(device) >= 2 and device[1] == ":":
+        return "fixed" in opts.split(",")
+    if fstype.lower() in SKIP_FS or device.startswith("/dev/loop"):
+        return False
+    m = mount.replace("\\", "/")
+    return not any(m == p or m.startswith(p + "/") for p in SKIP_MOUNTS)
+
+
 def parse_mounts(text):
-    """/proc/mounts -> [(device path, mount point)] of real block devices, each device once (no loop devices)."""
+    """/proc/mounts -> [(device path, mount point)] of real drives (is_real_drive), each device once."""
     seen, out = set(), []
     for line in text.splitlines():
         f = line.split()
-        if len(f) >= 2 and f[0].startswith("/dev/") and not f[0].startswith("/dev/loop") and f[0] not in seen:
-            seen.add(f[0])
-            out.append((f[0], f[1].replace("\\040", " ")))
+        if len(f) >= 3 and f[0].startswith("/dev/") and f[0] not in seen:
+            mount = f[1].replace("\\040", " ")
+            if is_real_drive(f[2], f[0], mount, f[3] if len(f) > 3 else ""):
+                seen.add(f[0])
+                out.append((f[0], mount))
     return out
 
 
@@ -95,6 +112,13 @@ def parse_pid_stat(text, ticks):
     a, b = text.index("("), text.rindex(")")
     f = text[b + 2:].split()
     return text[a + 1:b], (int(f[11]) + int(f[12])) / ticks
+
+
+def refresh_note(reply):
+    """A line for --verbose when the device answer reports a full refresh (and why), else None."""
+    if reply.get("mode") == "full":
+        return f"full refresh: {reply.get('why', '-')}"
+    return None
 
 
 def classify_temp(chip, label=""):
@@ -251,6 +275,8 @@ class PsutilBackend:
             io = {}
         out = []
         for part in self.ps.disk_partitions():
+            if not is_real_drive(part.fstype, part.device, part.mountpoint, part.opts):
+                continue
             try:
                 u = self.ps.disk_usage(part.mountpoint)
             except OSError:
@@ -428,7 +454,9 @@ class Page:
         for i, v in enumerate(values):
             x0, x1 = i * inner_w // n, (i + 1) * inner_w // n
             bh = round(inner_h * max(0.0, min(v, 100.0)) / 100)
-            self.c.rect(x + self.t + x0, y + self.t + inner_h - bh, max(1, x1 - x0 - (1 if x1 - x0 > 2 else 0)), bh, self.ink)
+            bw = max(1, x1 - x0 - (1 if x1 - x0 > 2 else 0))
+            self.c.rect(x + self.t + x0, y + self.t + inner_h - 1, bw, 1, self.mid)  # baseline: an idle core stays visible
+            self.c.rect(x + self.t + x0, y + self.t + inner_h - bh, bw, bh, self.ink)
         self.add("cores", (x, y, w, h), parent)
 
     def graph(self, parent, x, y, w, h, series, vmin, vmax, slots):
@@ -606,6 +634,8 @@ def main(argv=None):
                     if args.verbose:
                         print(f"prepare {r['prepare_ms']} ms, transfer {r['transfer_ms']} ms, device {r.get('ms')} ms, "
                               f"{r.get('mode')}, {r.get('why')}; drawn in {round((time.monotonic() - t0) * 1000)} ms", flush=True)
+                        if refresh_note(r):
+                            print(refresh_note(r), flush=True)
                 except tpd.DisplayError as e:
                     print(f"show failed, trying again next cycle: {e}", file=sys.stderr)
                 if args.once:
