@@ -17,6 +17,7 @@ static struct {
     uint8_t in[1 << 16], out[1 << 16];
     size_t in_len, in_pos, out_len;
     uint64_t now;
+    uint64_t tick_us; /* every reading of the clock moves it on by this much (a device whose work takes time) */
     int allocs, live, fail_at; /* fail_at: the allocation (0-based, counted from the arm) that fails; -1 none */
     uint8_t shown[MAXPIX], pending[MAXPIX];
     uint8_t depth;
@@ -89,6 +90,7 @@ static inline void f_free(void *ctx, void *p)
 static inline uint64_t f_now(void *ctx)
 {
     (void)ctx;
+    F.now += F.tick_us;
     return F.now;
 }
 

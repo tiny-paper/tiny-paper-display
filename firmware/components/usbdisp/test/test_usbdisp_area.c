@@ -721,6 +721,43 @@ static void test_gate_clocks_reported(void)
     TEST_ASSERT_FALSE(cbor_map_get(s_ans, s_ans_len, "ckv", 3, &v, &vn));
 }
 
+/* show_end's answer carries `steps`: the milliseconds of each device step and the total, the steps adding up to at most
+ * the total (docs/spec/usb-display.md "The answer"). */
+static void test_steps_in_the_answer(void)
+{
+    static const char *const KEYS[] = {"recv", "prep", "inflate", "convert", "diff", "fingerprint", "panel"};
+    device_partial(W, H, 1, 1, true, 0);
+    random_px(s_want, W * H, 1);
+    TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0)); /* the first picture: a full refresh */
+    F.tick_us = 3000;                              /* each reading of the clock costs 3 ms */
+    F.alloc_us = 5000;
+    F.refresh_us = 40000;
+    s_want[0] ^= 1;
+    TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+    const uint8_t *v;
+    size_t vn;
+    TEST_ASSERT_TRUE_MESSAGE(cbor_map_get(s_ans, s_ans_len, "steps", 5, &v, &vn), "the answer has steps");
+    uint32_t sum = 0;
+    for (size_t i = 0; i < sizeof KEYS / sizeof *KEYS; i++) {
+        int ms = map_int(v, vn, KEYS[i], -1);
+        TEST_ASSERT_TRUE_MESSAGE(ms >= 0, KEYS[i]);
+        sum += (uint32_t)ms;
+    }
+    int total = map_int(v, vn, "total", -1);
+    TEST_ASSERT_TRUE_MESSAGE(total > 0, "total");
+    TEST_ASSERT_TRUE_MESSAGE(sum <= (uint32_t)total, "the steps add up to at most the total");
+    TEST_ASSERT_EQUAL_INT(map_int(v, vn, "panel", -1), (int)map_int(s_ans, s_ans_len, "ms", -2)); /* panel is the answer's ms */
+    TEST_ASSERT_TRUE_MESSAGE(map_int(v, vn, "panel", 0) >= 40, "panel carries the refresh");
+    TEST_ASSERT_TRUE_MESSAGE(map_int(v, vn, "prep", 0) >= 5, "prep carries the frame's allocation");
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(F.log, " steps="), F.log);
+    F.tick_us = F.alloc_us = F.refresh_us = 0;
+    /* nothing driven: the steps are still there, panel 0 */
+    TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+    TEST_ASSERT_EQUAL_STRING("none", ans_str("mode"));
+    TEST_ASSERT_TRUE(cbor_map_get(s_ans, s_ans_len, "steps", 5, &v, &vn));
+    TEST_ASSERT_EQUAL_INT(0, map_int(v, vn, "panel", -1));
+}
+
 static int set_full_every(int v)
 {
     uint8_t p[32];
@@ -802,6 +839,7 @@ int main(void)
     RUN_TEST(test_alloc_fails_in_every_mode);
     RUN_TEST(test_panel_fails_mid_update);
     RUN_TEST(test_gate_clocks_reported);
+    RUN_TEST(test_steps_in_the_answer);
     RUN_TEST(test_full_every_setting);
     return UNITY_END();
 }

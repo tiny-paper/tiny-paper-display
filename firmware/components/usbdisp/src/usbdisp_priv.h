@@ -19,8 +19,13 @@ int usbdisp_png_check(const usbdisp_cfg_t *c, const uint8_t *png, size_t n, bool
  * first, 0 = black; the color panel: palette codes); only the bytes of the PNG's own width are written in a row.
  * Nothing is scaled or dithered: a pixel is its level or it is refused.
  * 0, or USBDISP_E_BAD_PNG, _DEPTH (a color that is not the panel's), _NOMEM. */
+/* The microseconds of the two parts of the decoding: the decoder (inflate and unfilter) and the conversion of each row
+ * to the panel's packed format (usbdisp_png_frame, `time` may be NULL). */
+typedef struct {
+    uint64_t inflate_us, convert_us;
+} usbdisp_png_time_t;
 int usbdisp_png_frame(const usbdisp_cfg_t *c, const uint8_t *png, size_t n, const usbdisp_pnginfo_t *pi, uint8_t *at,
-                      size_t stride, const char **why);
+                      size_t stride, const char **why, usbdisp_png_time_t *time);
 
 /* usbdisp.c */
 void usbdisp_send(usbdisp_t *d, const link_frame_t *f, const cbor_w_t *w);

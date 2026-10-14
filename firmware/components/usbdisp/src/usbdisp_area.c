@@ -124,28 +124,39 @@ int usbdisp_head_check(const usbdisp_t *d, const uint8_t *png, size_t n, usbdisp
 
 /* ------------------------------------------------------------------ answers */
 
+/* The milliseconds of each device step of a show_end (the answer's `steps`; panel is the answer's ms). */
+typedef struct {
+    uint32_t recv, prep, inflate, convert, diff, fingerprint, total;
+} usbdisp_steps_t;
+
+static uint32_t ms_between(uint64_t from, uint64_t to) { return to > from ? (uint32_t)((to - from) / 1000) : 0; }
+
 /* pre_ms: what the update took before the panel was touched (the frame, the picture into it, its fingerprint, the
  * changed rectangle); in the log line only, next to ms, the panel's part. */
 static void answer_shown(usbdisp_t *d, const link_frame_t *f, const char *what, uint8_t depth, uint32_t ms,
-                         usbdisp_mode_t ran, const char *because, const tiny_rect_t *r, uint8_t passes, uint32_t pre_ms)
+                         usbdisp_mode_t ran, const char *because, const tiny_rect_t *r, uint8_t passes, uint32_t pre_ms,
+                         const usbdisp_steps_t *st)
 {
     /* a full refresh that came back sooner than a panel can refresh: the driver said ok but the glass was not driven */
     bool fast = ran == USBDISP_MODE_FULL && d->c.fast_ms && ms < d->c.fast_ms;
     usbdisp_gates_t g = {0};
     bool gates = ran != USBDISP_MODE_NONE && d->c.panel_gates && d->c.panel_gates(d->c.ctx, &g);
-    char line[200], ck[48] = "";
+    char line[260], ck[48] = "", sl[96] = "";
     d->shown++;
     if (gates)
         snprintf(ck, sizeof ck, " ckv=%u/%u per=%u rows=%u%s", (unsigned)g.edges, (unsigned)g.frames, (unsigned)g.per,
                  (unsigned)g.rows, g.ok ? "" : " WRONG");
-    snprintf(line, sizeof line, "%s%s mode=%s why=%s area=%d,%d,%u,%u depth=%u ms=%u pre=%u n=%u%s%s",
+    if (st)
+        snprintf(sl, sizeof sl, " steps=%u/%u/%u/%u/%u/%u/%u/%u", (unsigned)st->recv, (unsigned)st->prep, (unsigned)st->inflate,
+                 (unsigned)st->convert, (unsigned)st->diff, (unsigned)st->fingerprint, (unsigned)ms, (unsigned)st->total);
+    snprintf(line, sizeof line, "%s%s mode=%s why=%s area=%d,%d,%u,%u depth=%u ms=%u pre=%u n=%u%s%s%s",
              fast || (gates && !g.ok) ? "W " : "", what, MODES[ran], because, r->x, r->y, (unsigned)r->w, (unsigned)r->h,
-             (unsigned)depth, (unsigned)ms, (unsigned)pre_ms, (unsigned)d->shown, ck,
+             (unsigned)depth, (unsigned)ms, (unsigned)pre_ms, (unsigned)d->shown, ck, sl,
              fast ? " too fast for a refresh: look at the panel" : "");
     usbdisp_log(d, line);
     cbor_w_t w;
     cbor_w_init(&w, d->tx, sizeof d->tx);
-    cbor_put_map(&w, 8u + (passes != 0) + gates + fast + (ran == USBDISP_MODE_NONE));
+    cbor_put_map(&w, 8u + (passes != 0) + gates + fast + (ran == USBDISP_MODE_NONE) + (st != NULL));
     cbor_put_str(&w, "depth");
     cbor_put_uint(&w, depth);
     cbor_put_str(&w, "ms");
@@ -187,6 +198,26 @@ static void answer_shown(usbdisp_t *d, const link_frame_t *f, const char *what, 
     if (ran == USBDISP_MODE_NONE) {
         cbor_put_str(&w, "same");
         cbor_put_bool(&w, true);
+    }
+    if (st) {
+        cbor_put_str(&w, "steps");
+        cbor_put_map(&w, 8);
+        cbor_put_str(&w, "recv");
+        cbor_put_uint(&w, st->recv);
+        cbor_put_str(&w, "prep");
+        cbor_put_uint(&w, st->prep);
+        cbor_put_str(&w, "inflate");
+        cbor_put_uint(&w, st->inflate);
+        cbor_put_str(&w, "convert");
+        cbor_put_uint(&w, st->convert);
+        cbor_put_str(&w, "diff");
+        cbor_put_uint(&w, st->diff);
+        cbor_put_str(&w, "fingerprint");
+        cbor_put_uint(&w, st->fingerprint);
+        cbor_put_str(&w, "panel");
+        cbor_put_uint(&w, ms);
+        cbor_put_str(&w, "total");
+        cbor_put_uint(&w, st->total);
     }
     usbdisp_send(d, f, &w);
 }
@@ -253,6 +284,10 @@ void usbdisp_show_end(usbdisp_t *d, const link_frame_t *f)
 {
     static char msg[LINK_MSG_CAP];
     const uint64_t t_pre = d->c.now_us(d->c.ctx);
+    usbdisp_steps_t st = {0};
+    usbdisp_png_time_t pt = {0};
+    uint64_t t_png = t_pre;
+    st.recv = ms_between(d->t_first, d->t_last);
     usbdisp_pnginfo_t pi = {0};
     const char *why = "";
     const usbdisp_mode_t mode = d->mode;
@@ -292,13 +327,17 @@ void usbdisp_show_end(usbdisp_t *d, const link_frame_t *f)
         else
             memset(next, 0xFF, bytes);
     }
-    if (!err)
-        err = usbdisp_png_frame(&d->c, d->png, d->size, &pi, next + rect_at(&r, stride, depth), stride, &why);
+    if (!err) {
+        t_png = d->c.now_us(d->c.ctx);
+        err = usbdisp_png_frame(&d->c, d->png, d->size, &pi, next + rect_at(&r, stride, depth), stride, &why, &pt);
+    }
     usbdisp_xfer_drop(d); /* the PNG is not needed during the refresh */
 
     char fingerprint[17] = "";
+    const uint64_t t_fp = d->c.now_us(d->c.ctx);
     if (!err)
         usbdisp_fingerprint(d, depth, next, fingerprint);
+    st.fingerprint = ms_between(t_fp, d->c.now_us(d->c.ctx));
     bool same = !err && d->fingerprint[0] && !strcmp(fingerprint, d->fingerprint);
     usbdisp_mode_t run = mode;
     const char *because = "asked";
@@ -325,7 +364,9 @@ void usbdisp_show_end(usbdisp_t *d, const link_frame_t *f)
     bool rect_full = false;
     tiny_rect_t fr = whole;
     if (!err && run == USBDISP_MODE_PARTIAL) {
+        const uint64_t t_diff = d->c.now_us(d->c.ctx);
         chg_found = changed_rect(d, d->prev, next, stride, depth, &chg);
+        st.diff = ms_between(t_diff, d->c.now_us(d->c.ctx));
         if (!chg_found) {
             run = USBDISP_MODE_NONE, because = "unchanged";
         } else if (!part) {
@@ -396,7 +437,11 @@ void usbdisp_show_end(usbdisp_t *d, const link_frame_t *f)
         }
     }
     memcpy(d->fingerprint, fingerprint, sizeof fingerprint);
-    answer_shown(d, f, "show", depth, ms, run, because, &drv, run == USBDISP_MODE_PASSES ? passes : 0, pre_ms);
+    st.inflate = (uint32_t)(pt.inflate_us / 1000);
+    st.convert = (uint32_t)(pt.convert_us / 1000);
+    st.prep = ms_between(t_pre, t_png); /* head check, the frame's allocation, the copy of the frame kept */
+    st.total = ms_between(d->t_first, d->c.now_us(d->c.ctx));
+    answer_shown(d, f, "show", depth, ms, run, because, &drv, run == USBDISP_MODE_PASSES ? passes : 0, pre_ms, &st);
 }
 
 void usbdisp_clear(usbdisp_t *d, const link_frame_t *f)
@@ -435,5 +480,5 @@ void usbdisp_clear(usbdisp_t *d, const link_frame_t *f)
     }
     tiny_rect_t whole = {0, 0, d->c.w, d->c.h};
     usbdisp_fingerprint(d, depth, NULL, d->fingerprint);
-    answer_shown(d, f, "clear", depth, ms, USBDISP_MODE_FULL, "asked", &whole, 0, 0);
+    answer_shown(d, f, "clear", depth, ms, USBDISP_MODE_FULL, "asked", &whole, 0, 0, NULL);
 }

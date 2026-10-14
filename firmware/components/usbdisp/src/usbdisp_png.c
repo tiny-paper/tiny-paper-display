@@ -70,6 +70,7 @@ typedef struct {
     uint32_t rows;
     int err;
     const char *why;
+    uint64_t convert_us; /* the time spent in dec_row8 */
 } dec_t;
 
 static long dec_read(void *ctx, uint8_t *buf, size_t cap)
@@ -105,9 +106,19 @@ static int bwry_code(const uint8_t *p)
     return -1;
 }
 
+static int row8_convert(dec_t *d, uint16_t y, const uint8_t *px, uint16_t w, uint8_t ch);
+
 static int dec_row8(void *ctx, uint16_t y, const uint8_t *px, uint16_t w, uint8_t ch)
 {
     dec_t *d = ctx;
+    const uint64_t t0 = d->c->now_us(d->c->ctx);
+    int rc = row8_convert(d, y, px, w, ch);
+    d->convert_us += d->c->now_us(d->c->ctx) - t0;
+    return rc;
+}
+
+static int row8_convert(dec_t *d, uint16_t y, const uint8_t *px, uint16_t w, uint8_t ch)
+{
     uint8_t depth = d->pi->depth;
     if (y >= d->pi->h || w != d->pi->w || (ch == 3) != d->pi->indexed)
         return 1;
@@ -135,13 +146,19 @@ static int dec_row8(void *ctx, uint16_t y, const uint8_t *px, uint16_t w, uint8_
 }
 
 int usbdisp_png_frame(const usbdisp_cfg_t *c, const uint8_t *png, size_t n, const usbdisp_pnginfo_t *pi, uint8_t *frame,
-                      size_t stride, const char **why)
+                      size_t stride, const char **why, usbdisp_png_time_t *time)
 {
     dec_t d = {.c = c, .pi = pi, .png = png, .n = n, .frame = frame, .stride = stride};
     imgdec_io_t io = {.read = dec_read, .info = dec_info, .row8 = dec_row8, .alloc = dec_alloc, .free = dec_free,
                       .ctx = &d, .want_rgb = true};
     imgdec_info_t in;
+    const uint64_t t0 = c->now_us(c->ctx);
     int rc = imgdec_decode(&io, &in);
+    if (time) {
+        uint64_t all = c->now_us(c->ctx) - t0;
+        time->convert_us = d.convert_us < all ? d.convert_us : all;
+        time->inflate_us = all - time->convert_us;
+    }
     if (d.err) {
         *why = d.why;
         return d.err;
