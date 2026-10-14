@@ -64,6 +64,7 @@ class Found:
     board: str
     w: int
     h: int
+    firmware: str = ""  # the device's firmware version (hello "fw")
 
     @property
     def target(self):
@@ -114,13 +115,13 @@ def devices(bluetooth=False, scan_s=5):
         if opened:
             port, _, hello = opened
             port.close()
-            out.append(Found(name, "", hello.get("board", ""), hello["w"], hello["h"]))
+            out.append(Found(name, "", hello.get("board", ""), hello["w"], hello["h"], hello.get("fw", "")))
     if bluetooth:
         from . import ble_port
         for ble_name, address in ble_port.find(scan_s):
             try:
                 with Device._connect(None, ble_name or address, defaults={}) as d:
-                    out.append(Found(None, ble_name or address, d.board, d.w, d.h))
+                    out.append(Found(None, ble_name or address, d.board, d.w, d.h, d.firmware))
             except (DisplayError, OSError):
                 continue
     return out
@@ -201,6 +202,7 @@ class Device:
     def _set_hello(self, hello):
         self.hello, self.caps = hello, display_fw.parse_capabilities(hello)
         self.board, self.w, self.h = hello.get("board", ""), hello["w"], hello["h"]
+        self.firmware = hello.get("fw", "")  # the firmware version, e.g. 0.1.0+20261014.1123.010272a
 
     def close(self):
         port, self.port = self.port, None

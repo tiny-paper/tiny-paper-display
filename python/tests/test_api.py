@@ -382,3 +382,10 @@ def test_debug_logging_shows_requests_without_picture_bytes(bench, capsys):
     tpd.log(None)
     with pytest.raises(tpd.DisplayError):
         tpd.log("loud")
+
+
+def test_firmware_version_on_found_and_open(bench):
+    bench.devices = {"A": FakeDevice(board="one", fw_version="0.1.0+20261014.1600.abc1234")}
+    assert [f.firmware for f in tpd.devices()] == ["0.1.0+20261014.1600.abc1234"]
+    with tpd.open() as d:
+        assert d.firmware == "0.1.0+20261014.1600.abc1234"
