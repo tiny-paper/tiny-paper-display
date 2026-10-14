@@ -167,3 +167,63 @@ def test_compose_file_parses():
         assert src in c["volumes"] or (DIR / src).exists(), src
     assert (DIR / "Dockerfile").read_text().startswith("# Build from") and "python:3.12-slim" in (DIR / "Dockerfile").read_text()
     json.dumps(c)
+
+
+class FakeMqtt:
+    """paho's client as far as the simulator uses it: a publish before the connection exists is dropped (as paho does
+    with no broker), a publish after it reaches the display's message handler."""
+    CallbackAPIVersion = type("V", (), {"VERSION2": 2})
+
+    def __init__(self, deliver):
+        self.deliver, self.connected, self.on_connect = deliver, False, None
+
+    def Client(self, *a):  # noqa: N802 (mirrors paho)
+        return self
+
+    def reconnect_delay_set(self, *a):
+        pass
+
+    def connect_async(self, *a):
+        pass
+
+    def loop_start(self):
+        pass
+
+    def publish(self, topic, payload, retain=False, **kw):
+        if self.connected:
+            self.deliver(topic, payload.encode() if isinstance(payload, str) else payload)
+
+    def connect_now(self):  # the broker answers some time after the simulator started
+        self.connected = True
+        if self.on_connect:
+            self.on_connect(self, None, {}, 0)
+
+
+def test_simulator_reaches_every_room_when_the_broker_comes_up_late(monkeypatch):
+    """The simulator's publishing and the display's handler on the same config: no room stays NO DATA. Seen on a PC
+    with docker compose --profile demo: all rooms NO DATA for 60 s, the first publishes were made before the connection."""
+    sspec = importlib.util.spec_from_file_location("simulator", DIR / "simulator.py")
+    pytest.importorskip("paho.mqtt.client")
+    sim = importlib.util.module_from_spec(sspec)
+    sspec.loader.exec_module(sim)
+    mq, rs = md.load_config(DIR / "config.yml", env={})
+    app = md.App(mq, rs)
+    fake = FakeMqtt(app.on_message)
+    monkeypatch.setattr(sim, "mqtt", fake)
+    calls = []
+
+    class Stop(Exception):
+        pass
+
+    def fake_sleep(_):
+        calls.append(1)
+        if len(calls) == 1:
+            fake.connect_now()
+        elif len(calls) > 2:
+            raise Stop
+
+    monkeypatch.setattr(sim.time, "sleep", fake_sleep)
+    with pytest.raises(Stop):
+        sim.main()
+    states = [s["state"] for s in app.snapshots(time.time())]
+    assert all(st is not None for st in states), states

@@ -22,17 +22,28 @@ def main():
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     except AttributeError:
         client = mqtt.Client()
+    state = {t: False for t in ROOMS}
+    nxt = {t: 0 for t in ROOMS}
+
+    def publish(topic):
+        client.publish(topic, ROOMS[topic](state[topic]), retain=True)
+
+    def on_connect(c, userdata, flags, rc, *rest):
+        # the broker may come up after this container: a publish made before the connection exists is dropped, so
+        # every (re)connect sends the current state of every room again
+        for topic in ROOMS:
+            publish(topic)
+
+    client.on_connect = on_connect
     client.reconnect_delay_set(1, 30)
     client.connect_async(HOST, PORT)
     client.loop_start()
-    state = {t: False for t in ROOMS}
-    nxt = {t: 0 for t in ROOMS}
     while True:
         now = time.time()
-        for topic, fmt in ROOMS.items():
+        for topic in ROOMS:
             if now >= nxt[topic]:
                 state[topic] = not state[topic]
-                client.publish(topic, fmt(state[topic]), retain=True)
+                publish(topic)
                 nxt[topic] = now + random.uniform(20, 120 if state[topic] else 240)
         time.sleep(1)
 

@@ -5,6 +5,7 @@
 
     python motion_display.py                       (config.yml or the ROOMS variable; first device found)
     python motion_display.py --png page.png --size 800x480 --demo      (no device, no broker: fixed fake state)
+    python motion_display.py --png page.png --listen 30                (dry run with the broker, no device; exit 1: a room had no data)
 
 Settings: config.yml (see config.yml) or the environment: MQTT_HOST, MQTT_PORT, MQTT_USER, MQTT_PASSWORD, CONFIG,
 ROOMS="Living=espectre/living/motion,Kitchen=espectre/kitchen/motion|motion" (name=topic, then "|field" for a JSON field).
@@ -352,17 +353,42 @@ class App:
                 d.close()
 
 
+def listen(args, w, h):
+    """Dry run: the broker and the handler as in the real run, the page goes to a PNG instead of a device."""
+    log = logging.getLogger("tiny_paper_display")
+    mq, rooms = load_config(args.config)
+    app = App(mq, rooms)
+    client = app.start_mqtt()
+    seen, end = {}, time.time() + args.listen
+    while time.time() < end:
+        app.wake.wait(0.5)
+        app.wake.clear()
+        for snap in app.snapshots(time.time()):
+            if seen.get(snap["name"]) != snap["state"]:
+                seen[snap["name"]] = snap["state"]
+                log.info("room %s: %s", snap["name"], {None: "NO DATA", True: "MOTION", False: "QUIET"}[snap["state"]])
+    client.loop_stop()
+    Path(args.png).write_bytes(render(app.snapshots(time.time()), w, h, time.strftime("%H:%M")).c.png(1))
+    nodata = [n for n in (r.name for r in rooms) if seen.get(n) is None]
+    print(f"wrote {args.png}; rooms without data: {nodata or 'none'}")
+    return 1 if nodata else 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--png", metavar="FILE", help="write the page to a PNG and exit (no device, no broker)")
     ap.add_argument("--size", default="800x480", help="PNG size WxH (default 800x480)")
     ap.add_argument("--demo", action="store_true", help="with --png: fixed fake state")
+    ap.add_argument("--listen", type=float, metavar="SECONDS", help="with --png: connect to the broker for SECONDS, log each "
+                    "room change, then write the page and exit (a dry run of the whole path without a device)")
     ap.add_argument("--config", help="config file (default: CONFIG or config.yml)")
     ap.add_argument("--log", default="info", help="log level (default info)")
     args = ap.parse_args(argv)
     tpd.log(args.log)
     if args.png:
         w, h = (int(v) for v in args.size.lower().split("x"))
+        if args.listen:
+            return listen(args, w, h)
         rooms = demo_rooms()
         Path(args.png).write_bytes(render(rooms, w, h, "14:32").c.png(1))
         print(f"wrote {args.png} ({w}x{h})")
