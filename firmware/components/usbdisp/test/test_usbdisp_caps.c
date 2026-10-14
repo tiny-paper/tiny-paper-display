@@ -1,5 +1,5 @@
 /* usbdisp: what hello says a board can do (docs/spec/usb-display.md hello): `depth_modes` agrees with what show
- * accepts at each depth, and `full_every` has a default of 0 that `set { full_every: null }` brings back.
+ * accepts at each depth, and `full_every` has a default of 30 that `set { full_every: null }` brings back.
  * SPDX-License-Identifier: GPL-3.0-or-later */
 #include "usbdisp_fake.h"
 
@@ -113,14 +113,13 @@ static void restart(void)
     usbdisp_init(&D, &C);
 }
 
-/* The default is 0 (clean_every does the work), hello says it and that it is the default; set stores, null clears (also over a restart). */
+/* The default is 30, hello says it and that it is the default; set stores, null clears (also over a restart). */
 static void test_full_every_default_and_clear(void)
 {
-    TEST_ASSERT_EQUAL_INT(0, USBDISP_FULL_EVERY);
-    TEST_ASSERT_EQUAL_INT(15, USBDISP_CLEAN_EVERY);
+    TEST_ASSERT_EQUAL_INT(30, USBDISP_FULL_EVERY);
     device_partial(W, H, 1, 1, true, USBDISP_FULL_EVERY);
     TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_HELLO, NULL, 0));
-    TEST_ASSERT_EQUAL_INT(0, map_int(s_ans, s_ans_len, "full_every", -1));
+    TEST_ASSERT_EQUAL_INT(30, map_int(s_ans, s_ans_len, "full_every", -1));
     TEST_ASSERT_EQUAL_INT(0, set_flag());
     TEST_ASSERT_EQUAL_INT(0, set_every_n(7));
     TEST_ASSERT_EQUAL_INT(7, map_int(s_ans, s_ans_len, "full_every", -1));
@@ -131,12 +130,12 @@ static void test_full_every_default_and_clear(void)
     TEST_ASSERT_EQUAL_INT(1, set_flag());
     const uint8_t null = 0xF6;
     TEST_ASSERT_EQUAL_INT(0, set_every(&null, 1));
-    TEST_ASSERT_EQUAL_INT(0, map_int(s_ans, s_ans_len, "full_every", -1));
+    TEST_ASSERT_EQUAL_INT(30, map_int(s_ans, s_ans_len, "full_every", -1));
     TEST_ASSERT_EQUAL_INT(0, set_flag());
     TEST_ASSERT_EQUAL_INT(-1, F.kv);
     restart();
     TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_HELLO, NULL, 0));
-    TEST_ASSERT_EQUAL_INT(0, map_int(s_ans, s_ans_len, "full_every", -1));
+    TEST_ASSERT_EQUAL_INT(30, map_int(s_ans, s_ans_len, "full_every", -1));
     TEST_ASSERT_EQUAL_INT(0, set_flag());
     /* 0 is never, and is a stored value */
     TEST_ASSERT_EQUAL_INT(0, set_every_n(0));

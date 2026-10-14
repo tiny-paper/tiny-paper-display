@@ -126,15 +126,8 @@ int usbdisp_head_check(const usbdisp_t *d, const uint8_t *png, size_t n, usbdisp
 
 /* The milliseconds of each device step of a show_end (the answer's `steps`; panel is the answer's ms). */
 typedef struct {
-    uint32_t recv, prep, inflate, convert, diff, fingerprint, clean, total;
+    uint32_t recv, prep, inflate, convert, diff, fingerprint, total;
 } usbdisp_steps_t;
-
-/* A clean of the area the partial updates touched (`clean` of the answer). */
-typedef struct {
-    tiny_rect_t r;
-    usbdisp_mode_t mode;
-    uint32_t ms;
-} usbdisp_clean_t;
 
 static uint32_t ms_between(uint64_t from, uint64_t to) { return to > from ? (uint32_t)((to - from) / 1000) : 0; }
 
@@ -142,7 +135,7 @@ static uint32_t ms_between(uint64_t from, uint64_t to) { return to > from ? (uin
  * changed rectangle); in the log line only, next to ms, the panel's part. */
 static void answer_shown(usbdisp_t *d, const link_frame_t *f, const char *what, uint8_t depth, uint32_t ms,
                          usbdisp_mode_t ran, const char *because, const tiny_rect_t *r, uint8_t passes, uint32_t pre_ms,
-                         const usbdisp_steps_t *st, const usbdisp_clean_t *cl)
+                         const usbdisp_steps_t *st)
 {
     /* a full refresh that came back sooner than a panel can refresh: the driver said ok but the glass was not driven */
     bool fast = ran == USBDISP_MODE_FULL && d->c.fast_ms && ms < d->c.fast_ms;
@@ -163,7 +156,7 @@ static void answer_shown(usbdisp_t *d, const link_frame_t *f, const char *what, 
     usbdisp_log(d, line);
     cbor_w_t w;
     cbor_w_init(&w, d->tx, sizeof d->tx);
-    cbor_put_map(&w, 8u + (passes != 0) + gates + fast + (ran == USBDISP_MODE_NONE) + (st != NULL) + (cl != NULL));
+    cbor_put_map(&w, 8u + (passes != 0) + gates + fast + (ran == USBDISP_MODE_NONE) + (st != NULL));
     cbor_put_str(&w, "depth");
     cbor_put_uint(&w, depth);
     cbor_put_str(&w, "ms");
@@ -206,25 +199,9 @@ static void answer_shown(usbdisp_t *d, const link_frame_t *f, const char *what, 
         cbor_put_str(&w, "same");
         cbor_put_bool(&w, true);
     }
-    if (cl) {
-        cbor_put_str(&w, "clean");
-        cbor_put_map(&w, 6);
-        cbor_put_str(&w, "x");
-        cbor_put_uint(&w, (uint64_t)cl->r.x);
-        cbor_put_str(&w, "y");
-        cbor_put_uint(&w, (uint64_t)cl->r.y);
-        cbor_put_str(&w, "w");
-        cbor_put_uint(&w, cl->r.w);
-        cbor_put_str(&w, "h");
-        cbor_put_uint(&w, cl->r.h);
-        cbor_put_str(&w, "mode");
-        cbor_put_str(&w, MODES[cl->mode]);
-        cbor_put_str(&w, "ms");
-        cbor_put_uint(&w, cl->ms);
-    }
     if (st) {
         cbor_put_str(&w, "steps");
-        cbor_put_map(&w, 9);
+        cbor_put_map(&w, 8);
         cbor_put_str(&w, "recv");
         cbor_put_uint(&w, st->recv);
         cbor_put_str(&w, "prep");
@@ -239,8 +216,6 @@ static void answer_shown(usbdisp_t *d, const link_frame_t *f, const char *what, 
         cbor_put_uint(&w, st->fingerprint);
         cbor_put_str(&w, "panel");
         cbor_put_uint(&w, ms);
-        cbor_put_str(&w, "clean");
-        cbor_put_uint(&w, st->clean);
         cbor_put_str(&w, "total");
         cbor_put_uint(&w, st->total);
     }
@@ -303,75 +278,6 @@ static int inverse(usbdisp_t *d, const tiny_rect_t *r, const uint8_t *next, size
         rc = usbdisp_panel_area(d, 1, r, neg, next + at, stride, false, ms, why);
     d->c.free(d->c.ctx, neg);
     return rc ? USBDISP_E_IO : 0;
-}
-
-static void rect_union(tiny_rect_t *a, const tiny_rect_t *b)
-{
-    if (!a->w || !a->h) {
-        *a = *b;
-        return;
-    }
-    int x1 = a->x + a->w > b->x + b->w ? a->x + a->w : b->x + b->w, y1 = a->y + a->h > b->y + b->h ? a->y + a->h : b->y + b->h;
-    a->x = a->x < b->x ? a->x : b->x;
-    a->y = a->y < b->y ? a->y : b->y;
-    a->w = (uint16_t)(x1 - a->x);
-    a->h = (uint16_t)(y1 - a->y);
-}
-
-/* The strongest area mode the depth takes: inverse drives every pixel of the area through the opposite value and back (both
- * directions, so black turns white fully), then passes, then partial_all. NONE: the depth offers none of them. */
-static usbdisp_mode_t clean_mode(const usbdisp_t *d, uint8_t depth)
-{
-    static const usbdisp_mode_t ORDER[] = {USBDISP_MODE_INVERSE, USBDISP_MODE_PASSES, USBDISP_MODE_PARTIAL_ALL};
-    const char *why;
-    for (size_t i = 0; i < sizeof ORDER / sizeof *ORDER; i++)
-        if (!usbdisp_mode_check(d, ORDER[i], false, depth, &why))
-            return ORDER[i];
-    return USBDISP_MODE_NONE;
-}
-
-/* After an update that left the frame kept in d->prev: the counters of the clean. A full refresh of the whole panel starts
- * them again; a partial update adds its rectangle, and `clean_every` of them clean the union once, redrawing the frame
- * there. When a full refresh is due as well, it does the work (the next update). 0, or USBDISP_E_IO (the panel may show
- * either). A clean that cannot run (no memory, no mode at this depth) is skipped and tried again by the next update. */
-static int clean_after(usbdisp_t *d, uint8_t depth, size_t stride, bool whole_full, const tiny_rect_t *drv, usbdisp_clean_t *cl,
-                       bool *done, const char **why)
-{
-    *done = false;
-    if (whole_full) {
-        d->since_clean = 0, d->clean_area = (tiny_rect_t){0, 0, 0, 0};
-        return 0;
-    }
-    if (drv->w && drv->h) {
-        rect_union(&d->clean_area, drv);
-        if (d->since_clean < UINT8_MAX)
-            d->since_clean++;
-    }
-    if (!d->clean_every || d->since_clean < d->clean_every || !d->clean_area.w || (d->full_every && d->since_full >= d->full_every))
-        return 0;
-    const usbdisp_mode_t m = clean_mode(d, depth);
-    if (m == USBDISP_MODE_NONE) { /* left to full_every */
-        d->since_clean = 0, d->clean_area = (tiny_rect_t){0, 0, 0, 0};
-        return 0;
-    }
-    const tiny_rect_t u = d->clean_area;
-    const size_t at = rect_at(&u, stride, depth);
-    uint32_t ms = 0;
-    int rc = 0;
-    if (m == USBDISP_MODE_INVERSE) {
-        rc = inverse(d, &u, d->prev, stride, &ms, why);
-        if (rc == USBDISP_E_NOMEM)
-            return 0;
-    } else {
-        for (uint8_t k = 0; !rc && k < (m == USBDISP_MODE_PASSES ? 2 : 1); k++)
-            rc = usbdisp_panel_area(d, depth, &u, d->prev + at, d->prev + at, stride, true, &ms, why) ? USBDISP_E_IO : 0;
-    }
-    if (rc)
-        return rc;
-    d->since_clean = 0, d->clean_area = (tiny_rect_t){0, 0, 0, 0};
-    *cl = (usbdisp_clean_t){u, m, ms};
-    *done = true;
-    return 0;
 }
 
 void usbdisp_show_end(usbdisp_t *d, const link_frame_t *f)
@@ -509,8 +415,6 @@ void usbdisp_show_end(usbdisp_t *d, const link_frame_t *f)
                 err = USBDISP_E_IO;
     }
     /* the request's payload is gone by now (requests were fed during the refresh): seq and cmd were copied by value */
-    usbdisp_clean_t cl = {{0, 0, 0, 0}, USBDISP_MODE_NONE, 0};
-    bool cleaned = false;
     if (err) {
         if (next)
             d->c.free(d->c.ctx, next);
@@ -533,21 +437,11 @@ void usbdisp_show_end(usbdisp_t *d, const link_frame_t *f)
         }
     }
     memcpy(d->fingerprint, fingerprint, sizeof fingerprint);
-    if (run != USBDISP_MODE_NONE && d->prev && d->prev_depth == depth) {
-        const uint64_t t_clean = d->c.now_us(d->c.ctx);
-        int rc = clean_after(d, depth, stride, run == USBDISP_MODE_FULL && !rect_full, &drv, &cl, &cleaned, &why);
-        st.clean = ms_between(t_clean, d->c.now_us(d->c.ctx));
-        if (rc) { /* the panel may show either picture */
-            usbdisp_refuse(d, f, rc, why, NULL, 0);
-            return;
-        }
-    }
     st.inflate = (uint32_t)(pt.inflate_us / 1000);
     st.convert = (uint32_t)(pt.convert_us / 1000);
     st.prep = ms_between(t_pre, t_png); /* head check, the frame's allocation, the copy of the frame kept */
     st.total = ms_between(d->t_first, d->c.now_us(d->c.ctx));
-    answer_shown(d, f, "show", depth, ms, run, because, &drv, run == USBDISP_MODE_PASSES ? passes : 0, pre_ms, &st,
-                 cleaned ? &cl : NULL);
+    answer_shown(d, f, "show", depth, ms, run, because, &drv, run == USBDISP_MODE_PASSES ? passes : 0, pre_ms, &st);
 }
 
 void usbdisp_clear(usbdisp_t *d, const link_frame_t *f)
@@ -572,7 +466,6 @@ void usbdisp_clear(usbdisp_t *d, const link_frame_t *f)
         return;
     }
     d->since_full = 0;
-    d->since_clean = 0, d->clean_area = (tiny_rect_t){0, 0, 0, 0};
     /* a white frame is what the panel shows now: the next 1 bit picture needs no full refresh */
     if (!d->c.bwry && (usbdisp_pdepths(d) & 1)) {
         if (tiny_size_mul(stride, d->c.h, &bytes) && (d->prev = d->c.alloc(d->c.ctx, bytes))) {
@@ -587,5 +480,5 @@ void usbdisp_clear(usbdisp_t *d, const link_frame_t *f)
     }
     tiny_rect_t whole = {0, 0, d->c.w, d->c.h};
     usbdisp_fingerprint(d, depth, NULL, d->fingerprint);
-    answer_shown(d, f, "clear", depth, ms, USBDISP_MODE_FULL, "asked", &whole, 0, 0, NULL, NULL);
+    answer_shown(d, f, "clear", depth, ms, USBDISP_MODE_FULL, "asked", &whole, 0, 0, NULL);
 }

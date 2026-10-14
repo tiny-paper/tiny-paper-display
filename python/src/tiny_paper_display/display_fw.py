@@ -190,44 +190,11 @@ def clear(display):
 
 
 def full_every(display, n=None, clear=False):
-    """The device's setting: a full refresh after this many partial ones (0: never; the default is 0, clean_every does the work).
+    """The device's setting: a full refresh after this many partial ones (0: never; the default is 30).
     n: store a new value. clear=True: remove the stored value, the default applies again. Returns the value in use."""
     if clear and n is not None:
         raise DisplayError("full_every: n or clear, not both")
     return request(display, SET, {"full_every": None} if clear else {} if n is None else {"full_every": n})["full_every"]
-
-
-CLEANUP_KEYS = {"areas": "clean_every", "screen": "full_every"}  # the setting's keys and the protocol's
-
-
-def cleanup_payload(value):
-    """`cleanup` as the keys of a set request. None: both null (clear the stored values, the defaults apply). A dict
-    {"areas": N, "screen": M}: only the keys given (0..250, 0 never); the others keep their value."""
-    if value is None:
-        return {"clean_every": None, "full_every": None}
-    if not isinstance(value, dict):
-        raise DisplayError('cleanup: None or a dict like {"areas": 15, "screen": 0}')
-    unknown = set(value) - set(CLEANUP_KEYS)
-    if unknown:
-        raise DisplayError(f"cleanup: unknown key {', '.join(sorted(map(str, unknown)))} (areas, screen)")
-    out = {}
-    for k, v in value.items():
-        if type(v) is not int or not 0 <= v <= 250:
-            raise DisplayError(f"cleanup: {k} is a whole number 0 to 250 (0 never), not {v!r}")
-        out[CLEANUP_KEYS[k]] = v
-    return out
-
-
-def cleanup_of(full_every, clean_every):
-    """The `cleanup` dict for the device's two values; None while the firmware reports no full_every."""
-    if full_every is None:
-        return None
-    return {"areas": 0 if clean_every is None else clean_every, "screen": full_every}  # no clean_every: an older firmware
-
-
-def set_cleanup(display, value):
-    """Store `cleanup` (cleanup_payload) on the device in one request. Returns the device's answer."""
-    return request(display, SET, cleanup_payload(value))
 
 
 @dataclass(frozen=True)
@@ -244,13 +211,6 @@ class Capabilities:
     full_every: int
     full_every_set: bool = None
     modes: list = None
-    clean_every: int = None
-    clean_every_set: bool = None
-
-    @property
-    def cleanup(self):
-        """The one setting for ghosting, {"areas": N, "screen": M} (None: unknown); see Device.configure."""
-        return cleanup_of(self.full_every, self.clean_every)
 
 
 def capabilities(display):
@@ -265,8 +225,7 @@ def parse_capabilities(h):
         w=h["w"], h=h["h"], depths=list(h["depths"]), partial_depths=list(h.get("partial_depths") or []),
         depth_modes=None if dm is None else {int(k): list(v) for k, v in dm.items()},
         colors=list(h.get("colors") or []), max_png=h["max_png"], full_every=h.get("full_every"),
-        full_every_set=h.get("full_every_set"), modes=list(h["modes"]) if "modes" in h else None,
-        clean_every=h.get("clean_every"), clean_every_set=h.get("clean_every_set"))
+        full_every_set=h.get("full_every_set"), modes=list(h["modes"]) if "modes" in h else None)
 
 
 def bluetooth(hello):

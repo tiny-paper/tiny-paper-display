@@ -122,8 +122,8 @@ for dev in tpd.devices():                    # USB ports that answer as the disp
     print(dev.port, dev.board, dev.w, dev.h)
 
 with tpd.open() as d:                        # the first device; tpd.open(&quot;COM5&quot;), tpd.open(bluetooth=&quot;NAME&quot;)
-    print(d.caps.depths, d.caps.cleanup)  # what the board can do
-    d.configure(cleanup={&quot;screen&quot;: 30})      # stored on the device; None brings the defaults back
+    print(d.caps.depths, d.caps.full_every)  # what the board can do
+    d.configure(full_every=30)               # stored on the device; None brings the default back
     d.show(&quot;picture.png&quot;, fit=&quot;fit&quot;, dither=&quot;floyd&quot;)
     box = tpd.Canvas(8, 4, 0)                # drawn in code: gray levels 0 (black) to 15
     d.area(box, 8, 0)                        # a rectangle; x and its width multiples of 8
@@ -161,8 +161,8 @@ with tpd.open() as d:                        # the first device; tpd.open(&quot;
 <td>a rectangle at its own size; refused before sending when <code>x</code> or the width is not a multiple of 8 or it leaves the panel</td>
 </tr>
 <tr>
-<td><code>d.configure(cleanup=...)</code></td>
-<td>ghosting clean-up, stored on the device: <code>{&quot;areas&quot;: N, &quot;screen&quot;: M}</code>; returns the new <code>d.caps</code> (<code>d.caps.cleanup</code>)</td>
+<td><code>d.configure(full_every=...)</code></td>
+<td>a setting that lives on the device; returns the new <code>d.caps</code></td>
 </tr>
 <tr>
 <td><code>d.clear()</code></td>

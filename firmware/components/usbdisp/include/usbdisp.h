@@ -40,13 +40,10 @@
 #define USBDISP_FRAME_IDLE_US 2000000ull /* half a frame without a further byte for this long is forgotten */
 #define USBDISP_RETRY_MS 2000            /* BUSY detail retry_ms */
 #define USBDISP_ALIGN 8                  /* x and the width of a rectangle are multiples of this (hal_panel_write) */
-#define USBDISP_FULL_EVERY 0             /* default of `full_every`: never (clean_every does the work; a full refresh still comes when it must) */
+#define USBDISP_FULL_EVERY 30            /* default of `full_every`: a full refresh after this many partial ones */
 #define USBDISP_FULL_EVERY_MAX 250
-#define USBDISP_CLEAN_EVERY 15           /* default of `clean_every`: the changed area is cleaned after this many partial updates */
-#define USBDISP_CLEAN_EVERY_MAX 250
 #define USBDISP_PASSES_MAX 4             /* mode passes: drives of the rectangle */
 #define USBDISP_KV_FULL_EVERY "dfull"    /* the setting's key (one byte) */
-#define USBDISP_KV_CLEAN_EVERY "dclean"  /* the setting's key (one byte) */
 #define USBDISP_KV_BT "dbt"              /* the Bluetooth setting's key (one byte: 1 on, anything else off) */
 #define USBDISP_BT_PAIR_S 120            /* the pairing window */
 #define USBDISP_BT_QUIET_US 60000000ull  /* a connection without a request for this long keeps nobody awake */
@@ -130,7 +127,6 @@ typedef struct {
      * this many pixels (0: no limit). A larger change is a full refresh (`why: "large"`), or with `partial` named a refusal. */
     uint32_t gray_partial_max_px;
     uint8_t full_every;         /* a full refresh after this many partial ones (0: never); the setting replaces it */
-    uint8_t clean_every;        /* the area of the partial updates is cleaned after this many of them (0: never); the setting replaces it */
     bool bwry;                  /* black, white, red, yellow panel: gray 1-bit, or an indexed PNG of these colors */
     bool rows_bottom_up;        /* hal_board_t rows_bottom_up: bands are written bottom first */
     uint16_t band_rows;         /* rows per panel write (0: the whole frame at once) */
@@ -224,9 +220,6 @@ typedef struct {
     const char *no_prev;        /* why prev is NULL: the `why` of that full refresh */
     uint8_t full_every, since_full;
     bool full_every_set;        /* full_every comes from the stored setting, not from the board default */
-    uint8_t clean_every, since_clean;
-    bool clean_every_set;
-    tiny_rect_t clean_area;     /* the union of the partial updates since the last clean or full refresh; w == 0: none */
     bool in_panel;              /* a panel call is running: requests fed from usbdisp_busy get BUSY */
     uint32_t shown, refused;    /* pictures shown (clear counts), requests refused */
 } usbdisp_t;

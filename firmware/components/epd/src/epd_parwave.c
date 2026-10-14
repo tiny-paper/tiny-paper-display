@@ -201,7 +201,8 @@ int epd_rle_dec(const uint8_t *in, size_t len, uint8_t *out, size_t n)
     while (i < len) {
         size_t v = 0;
         for (int sh = 0;; sh += 7) {
-            if (i >= len || sh > 35)
+            /* 5 bytes carry 35 bits: a 32-bit size_t cannot shift by more than 28 (found by make test32 in tiny-paper-write) */
+            if (i >= len || sh > 28)
                 return -1;
             uint8_t b = in[i++];
             v |= (size_t)(b & 0x7f) << sh;
