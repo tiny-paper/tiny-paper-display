@@ -1,6 +1,6 @@
 # ESP-IDF component. The host build (firmware/host) globs src/ instead.
 # SPDX-License-Identifier: GPL-3.0-or-later
-idf_component_register(SRCS src/usbdisp.c src/usbdisp_area.c src/usbdisp_panel.c src/usbdisp_png.c src/usbdisp_hal.c
+idf_component_register(SRCS src/usbdisp.c src/usbdisp_area.c src/usbdisp_tiles.c src/usbdisp_panel.c src/usbdisp_png.c src/usbdisp_hal.c
                             src/usbdisp_bt.c src/usbdisp_bt_screen.c
                        INCLUDE_DIRS include ../../include
                        REQUIRES link common imgdec )

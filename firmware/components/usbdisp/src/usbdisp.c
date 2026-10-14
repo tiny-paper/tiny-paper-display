@@ -41,6 +41,7 @@ void usbdisp_init(usbdisp_t *d, const usbdisp_cfg_t *cfg)
     d->clean_every = d->c.clean_every;
     if (d->c.kv_get && d->c.kv_get(d->c.ctx, USBDISP_KV_CLEAN_EVERY, &v, 1) == 1 && v <= USBDISP_CLEAN_EVERY_MAX)
         d->clean_every = v, d->clean_every_set = true;
+    usbdisp_tiles_init(d);
     link_parser_init(&d->usb.parser);
     usbdisp_bt_init(d);
 }
@@ -62,7 +63,7 @@ void usbdisp_prev_drop(usbdisp_t *d, const char *why)
     d->prev = NULL;
     d->fingerprint[0] = 0;
     d->no_prev = why;
-    d->since_clean = 0, d->clean_area = (tiny_rect_t){0, 0, 0, 0}; /* the next update is a full one */
+    usbdisp_tiles_reset(d); /* the next update is a full one */
 }
 
 void usbdisp_reset(usbdisp_t *d)

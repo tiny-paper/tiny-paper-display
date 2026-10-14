@@ -838,76 +838,143 @@ static void flip(int x, int y, const char *mode)
     TEST_ASSERT_EQUAL_INT(0, show_want(mode, 0));
 }
 
-/* The answer's `clean` as x,y,w,h; false: none. */
-static bool clean_of(int *x, int *y, int *w, int *h, const char **mode)
+/* The answer's `clean`: a list of tiles. s_ncl entries in s_cl (x, y, w, h, mode passes = 1 else 0). */
+static int s_ncl, s_cl[8][5];
+static int clean_list(void)
 {
     const uint8_t *v;
     size_t vn;
+    s_ncl = 0;
     if (!cbor_map_get(s_ans, s_ans_len, "clean", 5, &v, &vn))
+        return 0;
+    cbor_r_t r;
+    cbor_item_t it;
+    cbor_r_init(&r, v, vn);
+    TEST_ASSERT_TRUE(cbor_read(&r, &it) && it.type == CBOR_ARRAY && it.u <= 3);
+    for (uint64_t k = 0; k < it.u; k++) {
+        const uint8_t *e = r.p;
+        TEST_ASSERT_TRUE(cbor_skip(&r));
+        size_t en = (size_t)(r.p - e);
+        const uint8_t *m;
+        size_t mn;
+        s_cl[k][0] = (int)map_int(e, en, "x", -1), s_cl[k][1] = (int)map_int(e, en, "y", -1);
+        s_cl[k][2] = (int)map_int(e, en, "w", -1), s_cl[k][3] = (int)map_int(e, en, "h", -1);
+        TEST_ASSERT_TRUE(cbor_map_get(e, en, "mode", 4, &m, &mn));
+        s_cl[k][4] = mn == 1 + 6 && !memcmp(m + 1, "passes", 6);
+        TEST_ASSERT_TRUE(map_int(e, en, "ms", -1) >= 0);
+    }
+    return s_ncl = (int)it.u;
+}
+
+/* The first tile of `clean` as x,y,w,h; false: none. */
+static bool clean_of(int *x, int *y, int *w, int *h, const char **mode)
+{
+    if (!clean_list())
         return false;
-    *x = (int)map_int(v, vn, "x", -1), *y = (int)map_int(v, vn, "y", -1);
-    *w = (int)map_int(v, vn, "w", -1), *h = (int)map_int(v, vn, "h", -1);
-    *mode = NULL;
-    const uint8_t *m;
-    size_t mn;
-    if (cbor_map_get(v, vn, "mode", 4, &m, &mn))
-        *mode = (mn == 1 + 7 && !memcmp(m + 1, "inverse", 7)) ? "inverse" : "other";
-    TEST_ASSERT_TRUE(map_int(v, vn, "ms", -1) >= 0);
+    *x = s_cl[0][0], *y = s_cl[0][1], *w = s_cl[0][2], *h = s_cl[0][3];
+    *mode = s_cl[0][4] ? "passes" : "other";
     return true;
 }
 
-/* clean_every: after N partial updates the Nth answer carries `clean` with the union of their rectangles, drawn again as
- * inverse; the next union starts empty. */
-static void test_clean_union_and_restart(void)
+static void expect_tile(int k, int x, int y, int w, int h)
 {
-    int x, y, w, h;
-    const char *mode;
+    TEST_ASSERT_EQUAL_INT(x, s_cl[k][0]);
+    TEST_ASSERT_EQUAL_INT(y, s_cl[k][1]);
+    TEST_ASSERT_EQUAL_INT(w, s_cl[k][2]);
+    TEST_ASSERT_EQUAL_INT(h, s_cl[k][3]);
+}
+
+/* The panel is 48 x 32: tiles of 8 x 8, 6 columns by 4 rows. A change confined to one tile marks only that tile: after
+ * clean_every of them that tile alone is cleaned (passes, no inversion, no full refresh), the others keep their counts. */
+static void test_clean_one_tile(void)
+{
     clean_device(3, 0);
-    flip(1, 2, NULL);
-    TEST_ASSERT_FALSE(clean_of(&x, &y, &w, &h, &mode));
-    flip(20, 10, NULL);
-    TEST_ASSERT_FALSE(clean_of(&x, &y, &w, &h, &mode));
     int fulls = F.fulls;
-    flip(40, 20, NULL);
-    TEST_ASSERT_TRUE(clean_of(&x, &y, &w, &h, &mode));
-    TEST_ASSERT_EQUAL_INT(0, x);
-    TEST_ASSERT_EQUAL_INT(2, y);
-    TEST_ASSERT_EQUAL_INT(48, w);
-    TEST_ASSERT_EQUAL_INT(19, h);
-    TEST_ASSERT_EQUAL_STRING("inverse", mode);
-    TEST_ASSERT_EQUAL_INT(fulls, F.fulls); /* no whole-screen flash */
+    flip(1, 2, NULL);
+    flip(41, 30, NULL);
+    flip(1, 2, NULL);
+    flip(41, 30, NULL);
+    TEST_ASSERT_EQUAL_INT(0, clean_list());
+    flip(1, 2, NULL);
+    TEST_ASSERT_EQUAL_INT(1, clean_list());
+    expect_tile(0, 0, 0, 8, 8);
+    TEST_ASSERT_EQUAL_INT(1, s_cl[0][4]); /* passes */
+    TEST_ASSERT_EQUAL_INT(fulls, F.fulls);
     expect_shown(1, "after a clean");
-    /* the next union starts empty: three flips at one place give exactly that place */
-    flip(9, 5, NULL);
-    flip(9, 5, NULL);
-    TEST_ASSERT_FALSE(clean_of(&x, &y, &w, &h, &mode));
-    flip(9, 5, NULL);
-    TEST_ASSERT_TRUE(clean_of(&x, &y, &w, &h, &mode));
-    TEST_ASSERT_EQUAL_INT(8, x);
-    TEST_ASSERT_EQUAL_INT(5, y);
-    TEST_ASSERT_EQUAL_INT(8, w);
-    TEST_ASSERT_EQUAL_INT(1, h);
+    flip(41, 30, NULL); /* its third: only its tile, the first starts again from zero */
+    TEST_ASSERT_EQUAL_INT(1, clean_list());
+    expect_tile(0, 40, 24, 8, 8);
+    flip(1, 2, NULL);
+    flip(1, 2, NULL);
+    TEST_ASSERT_EQUAL_INT(0, clean_list());
     expect_shown(1, "after the second clean");
 }
 
-/* A full refresh resets both counters: the clean after it counts from it and holds nothing from before. */
+/* The tiles come from the changed pixels, not from the bounding rectangle: two far corners changed together mark two
+ * tiles, not the 24 between them. */
+static void test_clean_tiles_not_bounding_rect(void)
+{
+    clean_device(3, 0);
+    for (int i = 0; i < 3; i++) {
+        s_want[2 * W + 1] ^= 1;
+        s_want[30 * W + 41] ^= 1;
+        TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+    }
+    TEST_ASSERT_EQUAL_INT(2, clean_list());
+    expect_tile(0, 0, 0, 8, 8);
+    expect_tile(1, 40, 24, 8, 8);
+}
+
+/* Due tiles over the bound of USBDISP_CLEAN_TILES wait for the next update. */
+static void test_clean_spills_over_bound(void)
+{
+    clean_device(2, 0);
+    for (int i = 0; i < 2; i++) {
+        for (int t = 0; t < 5; t++)
+            s_want[2 * W + 8 * t + 1] ^= 1;
+        TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+    }
+    TEST_ASSERT_EQUAL_INT(3, clean_list());
+    expect_tile(0, 0, 0, 8, 8);
+    expect_tile(1, 8, 0, 8, 8);
+    expect_tile(2, 16, 0, 8, 8);
+    flip(41, 30, NULL); /* a change far from the due ones: the other two are cleaned now */
+    TEST_ASSERT_EQUAL_INT(2, clean_list());
+    expect_tile(0, 24, 0, 8, 8);
+    expect_tile(1, 32, 0, 8, 8);
+    flip(41, 30, NULL);
+    TEST_ASSERT_EQUAL_INT(1, clean_list()); /* its own tile, due now, and nothing left over */
+    expect_tile(0, 40, 24, 8, 8);
+}
+
+/* The clean of one update stops starting tiles after USBDISP_CLEAN_MS. */
+static void test_clean_time_bound(void)
+{
+    clean_device(1, 0);
+    F.tick_us = 2000000; /* every reading of the clock is two seconds on */
+    for (int t = 0; t < 3; t++)
+        s_want[2 * W + 8 * t + 1] ^= 1;
+    TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
+    TEST_ASSERT_EQUAL_INT(1, clean_list());
+    F.tick_us = 0;
+    flip(41, 30, NULL);
+    TEST_ASSERT_EQUAL_INT(3, clean_list()); /* the two left over and the new one */
+}
+
+/* A full refresh resets all the counters: the clean after it counts from it and holds nothing from before. */
 static void test_full_resets_clean(void)
 {
-    int x, y, w, h;
-    const char *mode;
     clean_device(3, 0);
     flip(1, 2, NULL);
-    flip(41, 30, NULL);
+    flip(1, 2, NULL);
     s_want[0] ^= 1;
     TEST_ASSERT_EQUAL_INT(0, show_want("full", 0));
-    flip(9, 5, NULL);
-    flip(9, 5, NULL);
-    TEST_ASSERT_FALSE(clean_of(&x, &y, &w, &h, &mode)); /* 2 since the full, not 3 */
-    flip(9, 5, NULL);
-    TEST_ASSERT_TRUE(clean_of(&x, &y, &w, &h, &mode));
-    TEST_ASSERT_EQUAL_INT(8, x);
-    TEST_ASSERT_EQUAL_INT(5, y);
-    TEST_ASSERT_EQUAL_INT(1, h);
+    flip(1, 2, NULL);
+    flip(1, 2, NULL);
+    TEST_ASSERT_EQUAL_INT(0, clean_list()); /* 2 since the full, not 4 */
+    flip(1, 2, NULL);
+    TEST_ASSERT_EQUAL_INT(1, clean_list());
+    expect_tile(0, 0, 0, 8, 8);
 }
 
 /* clean_every 0 never cleans; a full refresh due at the same time wins; a depth with no area mode is left to full_every. */
@@ -1012,7 +1079,10 @@ int main(void)
     RUN_TEST(test_gate_clocks_reported);
     RUN_TEST(test_steps_in_the_answer);
     RUN_TEST(test_full_every_setting);
-    RUN_TEST(test_clean_union_and_restart);
+    RUN_TEST(test_clean_one_tile);
+    RUN_TEST(test_clean_tiles_not_bounding_rect);
+    RUN_TEST(test_clean_spills_over_bound);
+    RUN_TEST(test_clean_time_bound);
     RUN_TEST(test_full_resets_clean);
     RUN_TEST(test_clean_off_full_wins_no_mode);
     RUN_TEST(test_clean_every_setting);

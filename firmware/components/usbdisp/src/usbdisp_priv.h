@@ -75,3 +75,29 @@ int usbdisp_target(usbdisp_t *d, const link_frame_t *f, const char **why);
 int usbdisp_head_check(const usbdisp_t *d, const uint8_t *png, size_t n, usbdisp_pnginfo_t *pi, const char **why);
 void usbdisp_show_end(usbdisp_t *d, const link_frame_t *f);
 void usbdisp_clear(usbdisp_t *d, const link_frame_t *f);
+
+/* usbdisp_tiles.c: the dirty map and the clean of the tiles that are due. */
+typedef struct {
+    tiny_rect_t r;
+    usbdisp_mode_t mode;
+    uint32_t ms;
+} usbdisp_clean_t; /* one tile cleaned (an entry of the answer's `clean`) */
+/* The byte of a rectangle's first pixel in a frame (x is a multiple of 8: a whole byte). */
+static inline size_t usbdisp_rect_at(const tiny_rect_t *r, size_t stride, uint8_t depth)
+{
+    return (size_t)r->y * stride + (size_t)r->x * depth / 8;
+}
+/* The tile grid from the panel (about 8 columns by 6 rows); usbdisp_init. */
+void usbdisp_tiles_init(usbdisp_t *d);
+/* All counters to zero (a full refresh of the whole panel, the frame kept forgotten). */
+void usbdisp_tiles_reset(usbdisp_t *d);
+/* Bit i set: the tile i (row * tile_cols + column) holds a byte that differs between the frames a and b. */
+uint64_t usbdisp_tiles_diff(const usbdisp_t *d, const uint8_t *a, const uint8_t *b, size_t stride, uint8_t depth);
+/* After an update that left the frame kept in d->prev: count it in the tiles of `mask` (or, whole_full, start all again) and
+ * clean the tiles that reached clean_every: at most USBDISP_CLEAN_TILES, each as its own rectangle, none started after
+ * USBDISP_CLEAN_MS; the rest stay due for the next update. cl: room for USBDISP_CLEAN_TILES; *n the tiles cleaned. 0, or
+ * USBDISP_E_IO (the panel may show either). */
+int usbdisp_clean_after(usbdisp_t *d, uint8_t depth, size_t stride, bool whole_full, uint64_t mask, usbdisp_clean_t *cl,
+                        size_t *n, const char **why);
+/* usbdisp_area.c: the negative of `next` through a rectangle and back. 0, USBDISP_E_NOMEM or USBDISP_E_IO. */
+int usbdisp_inverse(usbdisp_t *d, const tiny_rect_t *r, const uint8_t *next, size_t stride, uint32_t *ms, const char **why);

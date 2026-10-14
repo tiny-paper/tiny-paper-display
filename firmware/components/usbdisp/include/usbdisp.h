@@ -44,6 +44,9 @@
 #define USBDISP_FULL_EVERY_MAX 250
 #define USBDISP_CLEAN_EVERY 15           /* default of `clean_every`: the changed area is cleaned after this many partial updates */
 #define USBDISP_CLEAN_EVERY_MAX 250
+#define USBDISP_TILES_MAX 48             /* the dirty map: at most 8 columns by 6 rows of tiles (tile edges are multiples of USBDISP_ALIGN) */
+#define USBDISP_CLEAN_TILES 3            /* tiles cleaned in one update; the rest of the due ones wait for the next */
+#define USBDISP_CLEAN_MS 1500            /* no further tile is started once a clean took this long in one update */
 #define USBDISP_PASSES_MAX 4             /* mode passes: drives of the rectangle */
 #define USBDISP_KV_FULL_EVERY "dfull"    /* the setting's key (one byte) */
 #define USBDISP_KV_CLEAN_EVERY "dclean"  /* the setting's key (one byte) */
@@ -224,9 +227,11 @@ typedef struct {
     const char *no_prev;        /* why prev is NULL: the `why` of that full refresh */
     uint8_t full_every, since_full;
     bool full_every_set;        /* full_every comes from the stored setting, not from the board default */
-    uint8_t clean_every, since_clean;
+    uint8_t clean_every;
     bool clean_every_set;
-    tiny_rect_t clean_area;     /* the union of the partial updates since the last clean or full refresh; w == 0: none */
+    uint16_t tile_w, tile_h;    /* the dirty map's tiles (multiples of 8 px; the last column and row may be cut by the panel) */
+    uint8_t tile_cols, tile_rows;
+    uint8_t tile_cnt[USBDISP_TILES_MAX]; /* partial updates whose changed pixels touched the tile since its last clean or a full refresh */
     bool in_panel;              /* a panel call is running: requests fed from usbdisp_busy get BUSY */
     uint32_t shown, refused;    /* pictures shown (clear counts), requests refused */
 } usbdisp_t;
