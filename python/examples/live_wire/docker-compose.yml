@@ -1,0 +1,16 @@
+# Live feeds on a TRMNL X over USB. Start:  docker compose up -d     Stop:  docker compose down
+# The display is passed through as /dev/ttyACM0; change the left side if yours has another name.
+services:
+  live-wire:
+    build:
+      context: ../../..
+      dockerfile: python/examples/live_wire/Dockerfile
+    restart: unless-stopped
+    devices:
+      - "/dev/ttyACM0:/dev/ttyACM0"
+    environment:
+      TZ: Europe/Brussels              # the clock follows this; set your own
+      LIVE_WIRE_WIKIS: "enwiki,nlwiki" # wikis whose titles are listed (the edit rate counts all wikis)
+      LIVE_WIRE_EMSC: "0"              # 1: also EMSC earthquakes by websocket
+      LIVE_WIRE_BLUESKY: "0"           # 1: Bluesky posts per second (a count, no content)
+      LIVE_WIRE_CONTACT: ""            # optional: an e-mail or URL for the User-Agent, as Wikimedia asks
