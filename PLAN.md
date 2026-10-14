@@ -55,6 +55,8 @@ or darker beside it, nothing above or below, a clean edge.
 | What | Result |
 |---|---|
 | Cable, 2026-10-14, build 010272a | full 1 bit picture 1.9 s panel, 5.7 s whole; 4 bit wedge in 16 steps in order; partial rectangles at 4 and 1 bit in place; clear 1.1 s; a partial at an x not a multiple of 8 is refused |
+| Release build t20261014.1 (710f84f), cable | flashed from the GitHub release, reports `0.1.0+20261014.1620.710f84f`; test page: every mode at 1 bit, full and partial at 2 and 4 bit, no refusal; a small change in a whole page refreshes only its box (440x96, 1.8 s) |
+| Long runs, 2026-10-14 | PC stats every 2 s: 437 updates in 14 min, no failure; Bitcoin ticker over WebSocket: partial updates 1.9 s for 30 min |
 | Partial 1 bit | crisp, about 1.45 s whatever the area; full 1.93 s |
 | Partial and full grays | partial 2.57 s, full 2.59 s; a gray stroke is drawn black first, then lightens; grays even and in order, lighter than on a screen (accepted) |
 | Clear | a full refresh leaves the panel clean |
