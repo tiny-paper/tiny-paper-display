@@ -25,35 +25,41 @@ int img_idat_byte(infl_t *z)
     return img_src_byte(z->s);
 }
 
-static int getbit(infl_t *z)
+/* At least n (<= 24) bits in the buffer; past the end of the data zero bytes, counted in `over`. */
+static inline void need(infl_t *z, uint32_t n)
 {
-    if (!z->nbits) {
+    while (z->nbits < n) {
         int c = img_idat_byte(z);
         if (c < 0) {
-            z->err = IMGDEC_E_CORRUPT;
-            return 0;
+            c = 0;
+            z->over++;
         }
-        z->bits = (uint32_t)c;
-        z->nbits = 8;
+        z->bits |= (uint32_t)c << z->nbits;
+        z->nbits += 8;
     }
-    int b = (int)(z->bits & 1);
-    z->bits >>= 1;
-    z->nbits--;
-    return b;
 }
 
-static uint32_t getbits(infl_t *z, int n)
+static inline void consume(infl_t *z, uint32_t n)
 {
-    uint32_t v = 0;
-    for (int i = 0; i < n; i++)
-        v |= (uint32_t)getbit(z) << i;
+    z->bits >>= n;
+    z->nbits -= n;
+    if (z->nbits < z->over * 8)
+        z->err = IMGDEC_E_CORRUPT; /* bits from beyond the end of the data */
+}
+
+static uint32_t getbits(infl_t *z, uint32_t n)
+{
+    need(z, n);
+    uint32_t v = z->bits & ((1u << n) - 1);
+    consume(z, n);
     return v;
 }
 
 static bool build(huff_t *t, const uint8_t *lens, int n)
 {
-    uint16_t offs[16];
+    uint16_t offs[16], next[16];
     memset(t->counts, 0, sizeof t->counts);
+    memset(t->fast, 0, sizeof t->fast);
     for (int i = 0; i < n; i++)
         t->counts[lens[i]]++;
     t->counts[0] = 0;
@@ -67,38 +73,71 @@ static bool build(huff_t *t, const uint8_t *lens, int n)
     offs[1] = 0;
     for (int i = 1; i < 15; i++)
         offs[i + 1] = (uint16_t)(offs[i] + t->counts[i]);
-    for (int i = 0; i < n; i++)
-        if (lens[i])
-            t->symbols[offs[lens[i]]++] = (uint16_t)i;
+    uint32_t code = 0;
+    next[0] = 0;
+    for (int i = 1; i < 16; i++) {
+        code = (code + t->counts[i - 1]) << 1;
+        next[i] = (uint16_t)code;
+    }
+    for (int i = 0; i < n; i++) {
+        uint32_t len = lens[i];
+        if (!len)
+            continue;
+        t->symbols[offs[len]++] = (uint16_t)i;
+        uint32_t c = next[len]++;
+        if (len > INFL_FAST)
+            continue;
+        uint32_t r = 0; /* the code is sent MSB first, the bits arrive LSB first */
+        for (uint32_t k = 0; k < len; k++)
+            r |= ((c >> k) & 1u) << (len - 1 - k);
+        for (; r < (1u << INFL_FAST); r += 1u << len)
+            t->fast[r] = (uint16_t)(len << 9 | (uint32_t)i);
+    }
     return true;
 }
 
 static int decode_sym(infl_t *z, const huff_t *t)
 {
+    need(z, 15);
+    uint32_t e = t->fast[z->bits & ((1u << INFL_FAST) - 1)];
+    if (e) {
+        consume(z, e >> 9);
+        return z->err ? -1 : (int)(e & 511);
+    }
     int code = 0, first = 0, index = 0;
-    for (int len = 1; len < 16; len++) {
-        code |= getbit(z);
+    uint32_t b = z->bits;
+    for (uint32_t len = 1; len < 16; len++) {
+        code |= (int)(b & 1);
+        b >>= 1;
         int count = t->counts[len];
-        if (code - count < first)
-            return t->symbols[index + (code - first)];
+        if (code - count < first) {
+            consume(z, len);
+            return z->err ? -1 : t->symbols[index + (code - first)];
+        }
         index += count;
         first += count;
         first <<= 1;
         code <<= 1;
-        if (z->err)
-            return -1;
     }
     z->err = IMGDEC_E_CORRUPT;
     return -1;
 }
 
-
-static int put(infl_t *z, uint8_t b, emit_fn emit, void *ectx)
+/* The bytes written since the last flush to emit; at the end of the ring, back to its start. */
+static int flush(infl_t *z, emit_fn emit, void *ectx)
 {
-    z->win[z->wpos] = b;
-    z->wpos = (z->wpos + 1) & (z->wsize - 1);
+    int rc = z->wpos > z->fpos ? emit(ectx, z->win + z->fpos, z->wpos - z->fpos) : 0;
+    z->fpos = z->wpos;
+    if (z->wpos == z->wsize)
+        z->wpos = z->fpos = 0;
+    return rc;
+}
+
+static inline int put(infl_t *z, uint8_t b, emit_fn emit, void *ectx)
+{
+    z->win[z->wpos++] = b;
     z->total++;
-    return emit(ectx, b);
+    return z->wpos == z->wsize ? flush(z, emit, ectx) : 0;
 }
 
 static int inflate_block(infl_t *z, emit_fn emit, void *ectx)
@@ -109,6 +148,7 @@ static int inflate_block(infl_t *z, emit_fn emit, void *ectx)
     static const uint16_t dbase[30] = {1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193,
                                        257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577};
     static const uint8_t dext[30] = {0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13};
+    const uint32_t mask = z->wsize - 1;
     for (;;) {
         int sym = decode_sym(z, &z->lit);
         if (z->err || sym < 0)
@@ -135,32 +175,47 @@ static int inflate_block(infl_t *z, emit_fn emit, void *ectx)
             return IMGDEC_E_CORRUPT;
         if (d > z->wsize)
             return IMGDEC_E_NOMEM; /* further back than the window we could allocate */
-        for (uint32_t i = 0; i < len; i++) {
-            int rc = put(z, z->win[(z->wpos - d) & (z->wsize - 1)], emit, ectx);
-            if (rc)
-                return rc;
+        z->total += len;
+        uint32_t src = (z->wpos - d) & mask;
+        while (len) {
+            /* a piece that neither ring end cuts and, when the source is behind, no longer than the distance: the
+             * bytes it reads are written before it (a repeat of a short run goes piece by piece) */
+            uint32_t k = len;
+            if (k > d)
+                k = d;
+            if (k > z->wsize - z->wpos)
+                k = z->wsize - z->wpos;
+            if (k > z->wsize - src)
+                k = z->wsize - src;
+            memmove(z->win + z->wpos, z->win + src, k); /* a source ahead (wrapped) may overlap: memmove copies it forward */
+            z->wpos += k;
+            src = (src + k) & mask;
+            len -= k;
+            if (z->wpos == z->wsize) {
+                int rc = flush(z, emit, ectx);
+                if (rc)
+                    return rc;
+            }
         }
     }
 }
 
 static int inflate_stored(infl_t *z, emit_fn emit, void *ectx)
 {
-    z->nbits = 0; /* to a byte boundary */
-    uint8_t h[4];
-    for (int i = 0; i < 4; i++) {
-        int c = img_idat_byte(z);
-        if (c < 0)
-            return IMGDEC_E_CORRUPT;
-        h[i] = (uint8_t)c;
-    }
-    uint16_t len = le16(h), nlen = le16(h + 2);
+    consume(z, z->nbits & 7); /* to a byte boundary */
+    uint16_t len = (uint16_t)getbits(z, 16), nlen = (uint16_t)getbits(z, 16);
     uint16_t inv = (uint16_t)~nlen;
-    if (inv != len)
+    if (z->err || inv != len)
         return IMGDEC_E_CORRUPT;
     for (uint32_t i = 0; i < len; i++) {
-        int c = img_idat_byte(z);
-        if (c < 0)
+        int c;
+        if (z->nbits >= 8) { /* bytes already in the bit buffer first */
+            c = (int)getbits(z, 8);
+            if (z->err)
+                return IMGDEC_E_CORRUPT;
+        } else if ((c = img_idat_byte(z)) < 0) {
             return IMGDEC_E_CORRUPT;
+        }
         int rc = put(z, (uint8_t)c, emit, ectx);
         if (rc)
             return rc;
@@ -226,8 +281,7 @@ static int dynamic_tables(infl_t *z)
 int img_inflate_all(infl_t *z, emit_fn emit, void *ectx)
 {
     for (;;) {
-        int final = getbit(z);
-        uint32_t type = getbits(z, 2);
+        uint32_t final = getbits(z, 1), type = getbits(z, 2);
         if (z->err)
             return z->err;
         int rc;
@@ -246,6 +300,6 @@ int img_inflate_all(infl_t *z, emit_fn emit, void *ectx)
         if (rc)
             return rc;
         if (final)
-            return IMGDEC_OK;
+            return flush(z, emit, ectx);
     }
 }

@@ -110,6 +110,9 @@ typedef struct {
      * decoded). PNG, BMP, GIF: with want_rgb and info.color RGB (alpha over white), else gray levels x 17, ch 1. */
     int (*row8)(void *ctx, uint16_t y, const uint8_t *px, uint16_t w, uint8_t ch);
     bool want_rgb;
+    /* Optional, PNG gray (color type 0) at 1, 2 or 4 bits: when set, such rows go here instead of row or row8, as
+     * stored (unfiltered): ceil(w * bits / 8) bytes, MSB first, the padding bits of the last byte as in the file. */
+    int (*row_packed)(void *ctx, uint16_t y, const uint8_t *packed, uint16_t w, uint8_t bits);
     /* JPEG with row8: the smallest rows wanted; the largest scale s (0..3) with ceil(w / 2^s) >= min_w and
      * ceil(h / 2^s) >= min_h is taken (0, 0: full size). */
     uint16_t min_w, min_h;

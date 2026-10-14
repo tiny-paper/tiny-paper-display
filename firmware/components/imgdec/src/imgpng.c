@@ -31,20 +31,47 @@ static uint8_t paeth(uint8_t a, uint8_t b, uint8_t c)
 
 static uint8_t over_white(uint8_t c, uint8_t a) { return (uint8_t)((c * a + 255u * (255u - a) + 127u) / 255u); }
 
+/* Undo the row's filter in place (cur against prev), one loop a filter type. */
+static int png_unfilter(png_t *g)
+{
+    uint8_t *c = g->cur + 1, *p = g->prev + 1;
+    uint32_t bpp = g->bpp, n = g->stride, i;
+    switch (g->cur[0]) {
+    case 0: break;
+    case 1:
+        for (i = bpp; i < n; i++)
+            c[i] = (uint8_t)(c[i] + c[i - bpp]);
+        break;
+    case 2:
+        for (i = 0; i < n; i++)
+            c[i] = (uint8_t)(c[i] + p[i]);
+        break;
+    case 3:
+        for (i = 0; i < n && i < bpp; i++)
+            c[i] = (uint8_t)(c[i] + (p[i] >> 1));
+        for (; i < n; i++)
+            c[i] = (uint8_t)(c[i] + ((c[i - bpp] + p[i]) >> 1));
+        break;
+    case 4:
+        for (i = 0; i < n && i < bpp; i++)
+            c[i] = (uint8_t)(c[i] + p[i]); /* paeth(0, b, 0) is b */
+        for (; i < n; i++)
+            c[i] = (uint8_t)(c[i] + paeth(c[i - bpp], p[i], p[i - bpp]));
+        break;
+    default: return IMGDEC_E_CORRUPT;
+    }
+    return IMGDEC_OK;
+}
+
 static int png_row(png_t *g)
 {
-    uint8_t *c = g->cur + 1, *p = g->prev + 1, f = g->cur[0];
-    uint32_t bpp = g->bpp;
-    for (uint32_t i = 0; i < g->stride; i++) {
-        uint8_t a = i >= bpp ? c[i - bpp] : 0, b = p[i], d = i >= bpp ? p[i - bpp] : 0;
-        switch (f) {
-        case 0: break;
-        case 1: c[i] = (uint8_t)(c[i] + a); break;
-        case 2: c[i] = (uint8_t)(c[i] + b); break;
-        case 3: c[i] = (uint8_t)(c[i] + ((a + b) >> 1)); break;
-        case 4: c[i] = (uint8_t)(c[i] + paeth(a, b, d)); break;
-        default: return IMGDEC_E_CORRUPT;
-        }
+    if (png_unfilter(g))
+        return IMGDEC_E_CORRUPT;
+    uint8_t *c = g->cur + 1;
+    if (g->ct == 0 && g->bd < 8 && g->io->row_packed) { /* gray at 1, 2, 4 bits: the packed row as it is */
+        if (g->io->row_packed(g->io->ctx, g->y, c, g->info.w, g->bd))
+            return IMGDEC_E_ABORT;
+        goto next;
     }
     uint16_t w = g->info.w;
     uint8_t bd = g->bd;
@@ -100,6 +127,7 @@ static int png_row(png_t *g)
     }
     if (g->rgbrow ? g->io->row8(g->io->ctx, g->y, g->rgbrow, w, 3) : img_emit_row(g->io, g->y, g->gray, w))
         return IMGDEC_E_ABORT;
+next:;
     uint8_t *t = g->prev;
     g->prev = g->cur;
     g->cur = t;
@@ -109,15 +137,23 @@ static int png_row(png_t *g)
     return IMGDEC_OK;
 }
 
-static int png_emit(void *ctx, uint8_t b)
+static int png_emit(void *ctx, const uint8_t *b, size_t n)
 {
     png_t *g = ctx;
-    if (g->done)
-        return IMGDEC_E_CORRUPT; /* more data than the image holds */
-    g->cur[g->pos++] = b;
-    if (g->pos == g->stride + 1) {
-        g->pos = 0;
-        return png_row(g);
+    while (n) {
+        if (g->done)
+            return IMGDEC_E_CORRUPT; /* more data than the image holds */
+        size_t k = g->stride + 1 - g->pos;
+        if (k > n)
+            k = n;
+        memcpy(g->cur + g->pos, b, k);
+        g->pos += (uint32_t)k, b += k, n -= k;
+        if (g->pos == g->stride + 1) {
+            g->pos = 0;
+            int rc = png_row(g);
+            if (rc)
+                return rc;
+        }
     }
     return IMGDEC_OK;
 }
