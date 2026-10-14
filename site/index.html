@@ -84,7 +84,7 @@ and send it a picture. <a href="api.html">The guide</a> shows a picture in three
   <h2>How to go back</h2>
   <ul>
     <li>Use "Back up this device" before the first install, keep the file, and later "Restore a backup" writes it back
-    and the device is as it was.</li>
+    and the device is as it was. The file holds the WiFi password and the TRMNL key the device had: keep it private.</li>
     <li>Without this page: <code>esptool read_flash 0 ALL backup.bin</code> reads the backup, and writing that file
     back at 0 restores the device.</li>
   </ul>
@@ -154,7 +154,7 @@ $('backup').onclick = async () => {
     const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([out.data], { type: 'application/octet-stream' })), download: out.name });
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 60000);
-    bsay(`Saved as ${out.name}. Keep it: it is the only copy of what was on the device.`, 'ok');
+    bsay(`Saved as ${out.name}. Keep it private and safe: it is the only copy of what was on the device, and it holds the device's WiFi password and its TRMNL key.`, 'ok');
   } catch (e) {
     bsay(e && e.message ? e.message : String(e), 'warn');
   }
