@@ -150,6 +150,11 @@ def test_show_command_over_bluetooth(monkeypatch, tmp_path, capsys):
     dev.key = None
     assert show.main(["--bluetooth", NAME, "--clear"]) == 1
     assert "refused the key" in capsys.readouterr().err
+    moved = tmp_path / "elsewhere.json"
+    (bt_key.key_dir() / f"{NAME}.json").rename(moved)
+    dev.key = bt_key.load(NAME, key_file=moved)["key"]
+    assert show.main(["--bluetooth", NAME, "--clear"]) == 1  # not in the key folder
+    assert show.main(["--bluetooth", NAME, "--key-file", str(moved), "--clear"]) == 0
 
 
 def test_bt_over_bluetooth_is_cable(monkeypatch):

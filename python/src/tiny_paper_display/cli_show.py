@@ -34,8 +34,8 @@ def display_firmware(display, hello, png, started, mode=None, passes=None, at=No
     return 0
 
 
-def show_on_display_firmware(name, png, started, bluetooth=None):
-    with open_port(name, bluetooth) as port:
+def show_on_display_firmware(name, png, started, bluetooth=None, key_file=None):
+    with open_port(name, bluetooth, key_file=key_file) as port:
         display = Display(port)
         hello = display.hello()
         if not display_fw.is_display_firmware(hello):
@@ -50,8 +50,9 @@ def main(argv=None):
     parser.add_argument("picture", type=Path, nargs="?")
     parser.add_argument("--bluetooth", metavar="NAME_OR_ADDRESS",
                         help="display firmware only: over Bluetooth to the device with this name (tp-display-XXXX) or "
-                             "address instead of a port; needs pip install tiny-paper-display[bluetooth] and a pairing "
-                             "made with tiny-paper-display setup")
+                             "address instead of a port; needs pip install tiny-paper-display[bluetooth] and the key "
+                             "made with tiny-paper-display setup --key")
+    parser.add_argument("--key-file", metavar="PATH", help="with --bluetooth: the key file, if not in the key folder")
     parser.add_argument("--clear", action="store_true", help="display firmware only: a white panel instead of a picture")
     parser.add_argument("--force", action="store_true", help="upload even when the picture is unchanged")
     parser.add_argument("--mode", choices=display_fw.MODES,
@@ -76,14 +77,14 @@ def main(argv=None):
     started = time.monotonic()
     try:
         if args.clear:
-            return show_on_display_firmware(args.port, None, started, args.bluetooth)
+            return show_on_display_firmware(args.port, None, started, args.bluetooth, args.key_file)
         if args.picture.stat().st_size > 16 * 1024 * 1024:
             raise DisplayError("PNG exceeds 16 MiB")
         with args.picture.open("rb") as image:
             png = image.read(16 * 1024 * 1024 + 1)
         if len(png) > 16 * 1024 * 1024:
             raise DisplayError("PNG exceeds 16 MiB")
-        with open_port(args.port, args.bluetooth) as port:
+        with open_port(args.port, args.bluetooth, key_file=args.key_file) as port:
             display = Display(port)
             hello = display.hello()
             if display_fw.is_display_firmware(hello):

@@ -44,6 +44,7 @@ Work lands on `testing` first; `main` moves by promoting a state that was tried 
 | Use | every Bluetooth frame is authenticated and encrypted with that key by a standard library method (hardware AES on the ESP32), shared test vectors on both sides; no system pairing |
 | Kept | the key is stored with the other settings: survives a program update, not a fresh install; `forget` over the cable replaces it |
 | Order | first see the plain Bluetooth link working on a device, then build the key |
+| Built 2026-10-14 | branch `bt-key`: spec "Bluetooth key", `bt_key` over the cable, handshake and AES-CCM frames (mbedtls / `cryptography`), shared vectors; not yet tried on a device |
 
 ### Partial refresh, what has been seen on a device
 

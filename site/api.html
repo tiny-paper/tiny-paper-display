@@ -141,7 +141,7 @@ with tpd.open() as d:                        # the first device; tpd.open(&quot;
 <td>list of <code>Found(port, address, board, w, h)</code></td>
 </tr>
 <tr>
-<td><code>tpd.open(target=None, bluetooth=None, **defaults)</code></td>
+<td><code>tpd.open(target=None, bluetooth=None, key_file=None, **defaults)</code></td>
 <td>a <code>Device</code>; no target: the first found</td>
 </tr>
 <tr>
@@ -355,15 +355,20 @@ and the battery cost is an estimate that has not been measured.</p>
 <p>Bluetooth is off by default, and you switch it on only over the cable. Install the extra part, then set it up:</p>
 <pre><code class="language-sh">.venv/bin/pip install &quot;tiny-paper-display[bluetooth] @ git+https://github.com/tiny-paper/tiny-paper-display#subdirectory=python&quot;
 </code></pre>
-<pre><code class="language-sh">tiny-paper-display setup --port /dev/ttyACM0 --on --pair
+<pre><code class="language-sh">tiny-paper-display setup --port /dev/ttyACM0 --key
 </code></pre>
-<p>For 2 minutes the panel shows <code>BLUETOOTH PAIRING</code> and 6 digits. Type them where your computer asks for them. Outside that
-window nothing can pair. Then send, using the name shown on the pairing screen (<code>tp-display-</code> and 4 characters):</p>
+<p>This switches Bluetooth on and makes a key: the device creates it and your computer saves it in
+<code>~/.config/tiny-paper-display/keys/tp-display-XXXX.json</code> (only you can read it). There is no system pairing, so this
+works the same on a computer without a screen or in a container. Then send, using the name setup printed
+(<code>tp-display-</code> and 4 characters):</p>
 <pre><code class="language-sh">tiny-paper-display show --bluetooth tp-display-XXXX picture.png
 </code></pre>
+<p>In Python: <code>tpd.open(bluetooth=&quot;tp-display-XXXX&quot;)</code> finds the key file by that name; in a container give the file:
+<code>tpd.open(bluetooth=&quot;tp-display-XXXX&quot;, key_file=&quot;/keys/tp-display-XXXX.json&quot;)</code>. To use the device from another computer,
+copy the key file there. <code>setup --key</code> again makes a new key and locks out every copy of the old one.</p>
 <p><code>python -c &quot;from tiny_paper_display.ble_port import find; print(find())&quot;</code> lists the devices in range. On battery the device
 is only listening now and then, so finding it can take up to about 22 seconds. <code>setup --off</code> switches Bluetooth off and
-<code>setup --forget</code> removes every pairing.</p>
+<code>setup --forget</code> erases the key.</p>
 <h2 id="what-kind-of-picture-to-give-it">What kind of picture to give it</h2>
 <table>
 <thead>
