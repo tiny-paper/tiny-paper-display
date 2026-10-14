@@ -3047,7 +3047,7 @@
   }
  ],
  "bluetooth": {
-  "about": "A device with Bluetooth (panel as session gray, name as given). link: usb or ble; secure: the Bluetooth link is bonded and encrypted. Replayed in order.",
+  "about": "A device with Bluetooth and no key (panel as session gray, name as given). link: usb or ble; each ble step is a new connection, dropped after its refusal. Replayed in order.",
   "name": "tp-display-VEC0",
   "panel": {
    "board": "vec_gray",
@@ -3122,43 +3122,39 @@
     "cmd": 13,
     "seq": 2,
     "tx": "a55a0100020da08b16",
-    "rx": "a55a2300028da3626f6ef46770616972696e6700646e616d656f74702d646973706c61792d564543307784",
+    "rx": "a55a1a00028da2626f6ef4646e616d656f74702d646973706c61792d56454330ad86",
     "req": {},
     "resp": {
      "on": false,
-     "pairing": 0,
      "name": "tp-display-VEC0"
     },
     "link": "usb"
    },
    {
-    "name": "pair_while_off",
-    "cmd": 13,
+    "name": "auth_over_usb",
+    "cmd": 16,
     "seq": 3,
-    "tx": "a55a0700030da16470616972f5de44",
-    "rx": "a55a3400038da2636572721824636d73677827426c7565746f6f7468206973206f66663a206274207b206f6e3a2074727565207d206669727374d3d5",
-    "req": {
-     "pair": true
-    },
+    "tx": "a55a01000310a09454",
+    "rx": "a55a29000390a26365727202636d7367781d62745f6175746820697320666f7220426c7565746f6f7468206f6e6c7950f8",
+    "req": {},
     "resp": {
-     "err": 36,
-     "msg": "Bluetooth is off: bt { on: true } first"
+     "err": 2,
+     "msg": "bt_auth is for Bluetooth only"
     },
     "link": "usb",
-    "err": 36
+    "err": 2
    },
    {
     "name": "on",
     "cmd": 13,
     "seq": 4,
     "tx": "a55a0500040da1626f6ef571f4",
-    "rx": "a55a2300048da3626f6ef56770616972696e6700646e616d656f74702d646973706c61792d56454330a613",
+    "rx": "a55a1a00048da2626f6ef5646e616d656f74702d646973706c61792d564543300d30",
     "req": {
      "on": true
     },
     "resp": {
      "on": true,
-     "pairing": 0,
      "name": "tp-display-VEC0"
     },
     "link": "usb"
@@ -3214,131 +3210,65 @@
     "link": "usb"
    },
    {
-    "name": "unbonded_hello",
+    "name": "unauthenticated_hello",
     "cmd": 1,
     "seq": 6,
     "tx": "a55a01000601a0268f",
-    "rx": "a55a39000681a2636572720c636d7367782d706169722066697273743a207468697320426c7565746f6f7468206c696e6b206973206e6f7420626f6e646564d0dc",
+    "rx": "a55a4c000681a2636572720c636d7367784061757468656e7469636174652066697273743a2062745f61757468207769746820746865206b6579206d616465206f7665722074686520555342206361626c659ccd",
     "req": {},
     "resp": {
      "err": 12,
-     "msg": "pair first: this Bluetooth link is not bonded"
+     "msg": "authenticate first: bt_auth with the key made over the USB cable"
     },
     "link": "ble",
-    "secure": false,
     "err": 12
    },
    {
-    "name": "unbonded_clear",
+    "name": "unauthenticated_clear",
     "cmd": 11,
     "seq": 7,
     "tx": "a55a0100070ba0dd57",
-    "rx": "a55a3900078ba2636572720c636d7367782d706169722066697273743a207468697320426c7565746f6f7468206c696e6b206973206e6f7420626f6e64656437bd",
+    "rx": "a55a4c00078ba2636572720c636d7367784061757468656e7469636174652066697273743a2062745f61757468207769746820746865206b6579206d616465206f7665722074686520555342206361626c65c7ab",
     "req": {},
     "resp": {
      "err": 12,
-     "msg": "pair first: this Bluetooth link is not bonded"
+     "msg": "authenticate first: bt_auth with the key made over the USB cable"
     },
     "link": "ble",
-    "secure": false,
     "err": 12
    },
    {
-    "name": "pair",
-    "cmd": 13,
+    "name": "auth_without_key",
+    "cmd": 16,
     "seq": 8,
-    "tx": "a55a0700080da16470616972f56540",
-    "rx": "a55a2400088da3626f6ef56770616972696e671878646e616d656f74702d646973706c61792d564543301e95",
+    "tx": "a55a25000810a2636b6964480000000000000000656e6f6e636550000000000000000000000000000000007ecc",
+    "rx": "a55a4c000890a2636572720c636d7367784061757468656e7469636174652066697273743a2062745f61757468207769746820746865206b6579206d616465206f7665722074686520555342206361626c653d02",
     "req": {
-     "pair": true
-    },
-    "resp": {
-     "on": true,
-     "pairing": 120,
-     "name": "tp-display-VEC0"
-    },
-    "link": "usb"
-   },
-   {
-    "name": "bonded_hello",
-    "cmd": 1,
-    "seq": 9,
-    "tx": "a55a01000901a017a3",
-    "rx": "a55a22010981b16570726f746f016770726f6a65637467646973706c617962667769302e302e302b76656365626f617264687665635f67726179617710616808666465707468738201026b6d61785f7061796c6f6164191800676d61785f706e67191028656368756e6b1910006e7061727469616c5f6465707468738101656d6f646573856466756c6c677061727469616c6b7061727469616c5f616c6c67696e7665727365667061737365736b64657074685f6d6f646573a26131856466756c6c677061727469616c6b7061727469616c5f616c6c67696e7665727365667061737365736132816466756c6c6a66756c6c5f6576657279146e66756c6c5f65766572795f736574f47066696e6765727072696e745f6861736867666e7631613634626274626f6e66f7",
-    "req": {},
-    "resp": {
-     "proto": 1,
-     "project": "display",
-     "fw": "0.0.0+vec",
-     "board": "vec_gray",
-     "w": 16,
-     "h": 8,
-     "depths": [
-      1,
-      2
-     ],
-     "max_payload": 6144,
-     "max_png": 4136,
-     "chunk": 4096,
-     "partial_depths": [
-      1
-     ],
-     "modes": [
-      "full",
-      "partial",
-      "partial_all",
-      "inverse",
-      "passes"
-     ],
-     "depth_modes": {
-      "1": [
-       "full",
-       "partial",
-       "partial_all",
-       "inverse",
-       "passes"
-      ],
-      "2": [
-       "full"
-      ]
+     "kid": {
+      "hex": "0000000000000000"
      },
-     "full_every": 20,
-     "full_every_set": false,
-     "fingerprint_hash": "fnv1a64",
-     "bt": "on"
-    },
-    "link": "ble",
-    "secure": true
-   },
-   {
-    "name": "bonded_bt",
-    "cmd": 13,
-    "seq": 10,
-    "tx": "a55a05000a0da1626f6ef4d8d6",
-    "rx": "a55a2d000a8da2636572721826636d73677820627420776f726b73206f6e6c79206f7665722074686520555342206361626c65d43e",
-    "req": {
-     "on": false
+     "nonce": {
+      "hex": "00000000000000000000000000000000"
+     }
     },
     "resp": {
-     "err": 38,
-     "msg": "bt works only over the USB cable"
+     "err": 12,
+     "msg": "authenticate first: bt_auth with the key made over the USB cable"
     },
     "link": "ble",
-    "secure": true,
-    "err": 38
+    "err": 12
    },
    {
     "name": "forget",
     "cmd": 13,
-    "seq": 11,
-    "tx": "a55a09000b0da166666f72676574f50618",
-    "rx": "a55a23000b8da3626f6ef56770616972696e6700646e616d656f74702d646973706c61792d56454330aa2c",
+    "seq": 9,
+    "tx": "a55a0900090da166666f72676574f5b5b8",
+    "rx": "a55a1a00098da2626f6ef5646e616d656f74702d646973706c61792d5645433048b2",
     "req": {
      "forget": true
     },
     "resp": {
      "on": true,
-     "pairing": 0,
      "name": "tp-display-VEC0"
     },
     "link": "usb"
@@ -3346,15 +3276,14 @@
    {
     "name": "off",
     "cmd": 13,
-    "seq": 12,
-    "tx": "a55a05000c0da1626f6ef4fd77",
-    "rx": "a55a23000c8da3626f6ef46770616972696e6700646e616d656f74702d646973706c61792d56454330304f",
+    "seq": 10,
+    "tx": "a55a05000a0da1626f6ef4d8d6",
+    "rx": "a55a1a000a8da2626f6ef4646e616d656f74702d646973706c61792d564543302cb2",
     "req": {
      "on": false
     },
     "resp": {
      "on": false,
-     "pairing": 0,
      "name": "tp-display-VEC0"
     },
     "link": "usb"

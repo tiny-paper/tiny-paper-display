@@ -57,8 +57,8 @@ and send it a picture. <a href="api.html">The guide</a> shows a picture in three
         <option value="off">off (default)</option>
         <option value="on">on</option>
       </select></label>
-      <button id="btpair">Pair a device now</button>
-      <button id="btforget">Forget all paired devices</button>
+      <button id="btkey">Make a key (saves a file)</button>
+      <button id="btforget">Erase the key</button>
     </div>
     <ul id="btwords" class="mut"></ul>
   </div>
@@ -136,14 +136,14 @@ $('install').onclick = async () => {
 let lastPort = null;
 let setup = null;
 const btsay = (text, cls) => { $('btstate').textContent = text; $('btstate').className = cls || 'mut'; };
-const btbusy = (on) => { for (const id of ['btopen', 'bt', 'btpair', 'btforget']) $(id).disabled = on; };
+const btbusy = (on) => { for (const id of ['btopen', 'bt', 'btkey', 'btforget']) $(id).disabled = on; };
 const btshow = () => {
   const has = setup.state.bt !== null;
   $('btnone').hidden = has;
   $('btnone').textContent = BT_WORDS.none;
   $('btrow').hidden = !has;
   $('btwords').innerHTML = '';
-  if (has) for (const w of [BT_WORDS.cost, BT_WORDS.pairing, BT_WORDS.cable]) $('btwords').append(Object.assign(document.createElement('li'), { textContent: w }));
+  if (has) for (const w of [BT_WORDS.cost, BT_WORDS.key, BT_WORDS.cable]) $('btwords').append(Object.assign(document.createElement('li'), { textContent: w }));
   if (has) $('bt').value = setup.state.bt;
   $('btctl').hidden = false;
 };
@@ -170,7 +170,7 @@ $('btopen').onclick = async () => {
     }
     setup = await openBtSetup(port);
     btshow();
-    btsay(setup.state.bt === null ? '' : `Bluetooth is ${setup.state.bt}.`, 'ok');
+    btsay(setup.state.bt === null ? '' : `Bluetooth is ${setup.state.bt}, ${setup.state.kid ? 'with a key' : 'no key yet'}.`, 'ok');
   } catch (e) {
     lastPort = null;
     btsay(e && e.message ? e.message : String(e), 'warn');
@@ -179,8 +179,16 @@ $('btopen').onclick = async () => {
   if (!setup) $('btopen').disabled = !!note;
 };
 $('bt').onchange = () => btdo(() => setup.setOn($('bt').value === 'on'), () => `Bluetooth is ${setup.state.bt}.`);
-$('btpair').onclick = () => btdo(() => setup.pair(), () => 'Look at the panel: it shows 6 digits for 2 minutes. Type them on the computer or phone.');
-$('btforget').onclick = () => btdo(() => setup.forget(), () => 'All paired devices are forgotten.');
+// the key leaves the page only as the saved file
+const save = (f) => {
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([f.text], { type: 'application/json' })), download: f.filename });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  return f.filename;
+};
+let saved = '';
+$('btkey').onclick = () => btdo(async () => { saved = save(await setup.makeKey()); }, () => `Bluetooth is on. The key is saved as ${saved}: put it in ~/.config/tiny-paper-display/keys/ on each computer that sends.`);
+$('btforget').onclick = () => btdo(() => setup.forget(), () => 'The key is erased: no computer can use Bluetooth until a new key is made.');
 if (note) $('btopen').disabled = true;
 </script>
 </body>

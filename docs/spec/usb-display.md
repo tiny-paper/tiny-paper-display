@@ -3,7 +3,8 @@
 The byte-level reference of the display firmware: a board as a plain display driven over its USB cable (and over
 Bluetooth). It is for people writing their own client. To use the display, read [the guide](../site/api.html).
 
-Commands: `hello`, `have`, `show` (a whole picture or a rectangle, with a refresh mode), `clear`, `set`, `bt`.
+Commands: `hello`, `have`, `show` (a whole picture or a rectangle, with a refresh mode), `clear`, `set`, `bt`, `bt_key`,
+`bt_auth`.
 Vectors: `vectors/usb-display.json` (`gen_usb_display.py`), replayed by the firmware's host test and by
 `python/tests/test_display_fw.py`. The corpus also has codec-only fault replies (`refusals`) for IO and NOMEM.
 Code: `firmware/components/usbdisp`.
@@ -35,15 +36,17 @@ cache: after a lost answer send `hello` and start the picture again.
 | 0x0A | show_end | `{}` | `{ depth: uint, ms: uint, mode: tstr, why: tstr, x: uint, y: uint, w: uint, h: uint, passes?: uint, ckv?: map, warn?: tstr, same?: true, steps: map }` after the refresh ("The answer") |
 | 0x0B | clear | `{}` | as show_end: the panel white, `mode: "full"`, `why: "asked"` |
 | 0x0C | set | `{ full_every?: uint or null, tuning?: map or "defaults" }` `full_every` 0 (never) .. 250, null: remove the stored value, the default (30) applies again; "Tuning"; without a key nothing changes | `{ full_every: uint, full_every_set: bool, tuning?: map, refused?: map }` `full_every` as in use (`full_every_set` as in hello), stored on the device, kept over power-off; the others under "Tuning" |
-| 0x0D | bt | `{ on?: bool, pair?: bool, forget?: bool }`, over the USB cable only ("Bluetooth") | `{ on: bool, pairing: uint, name: tstr }`: the setting, the seconds the pairing window stays open (0: closed), the advertised name |
+| 0x0D | bt | `{ on?: bool, forget?: bool }`, over the USB cable only ("Bluetooth") | `{ on: bool, name: tstr, kid?: bstr }`: the setting, the advertised name, the stored key's id (absent: no key) |
 | 0x0E | have | `{ fingerprint: tstr }` | `{ same: true }` when known and equal, else `{ send: true }`; no PNG bytes, refresh or counter change |
+| 0x0F | bt_key | `{}`, over the USB cable only ("Bluetooth key") | `{ on: true, name: tstr, kid: bstr, key: bstr }`: a new key, the only time it leaves the device |
+| 0x10 | bt_auth | `{ kid: bstr, nonce: bstr }`, over Bluetooth only ("Bluetooth key") | `{ nonce: bstr, proof: bstr }` |
 
 `project: "display"` tells this firmware from the app, whose hello has no `project` and which answers 0x08..0x0B with
 `UNKNOWN_CMD`. `board`: `trmnl_og`, `picpak`, `trmnl_x`. `depths`: the gray bit depths taken. `colors`
 (`["black","white","red","yellow"]`, PicPak): the panel's own colors. `warn`: the driver reported a refresh in less
 time than the panel needs (SPI panels: under 300 ms): look at the panel. `partial_depths`: the depths the board
 refreshes partially now (empty: none; the tuning key `driver` takes the gray depths away while it is `plain`). `modes`: the modes it does at some depth. `depth_modes`: `{ "1": [tstr], "2": [tstr], "4": [tstr] }`, a key for each of `depths` (text keys), the modes a `show` of a whole picture at that depth is accepted with, from the same check that refuses the others with MODE 36 (a TRMNL X at 2 and 4 bit lists `full` and `partial` only, `partial_all`, `inverse` and `passes` need a 1 bit picture; a firmware from before this field lacks it: try the mode and read the refusal). `full_every`: the setting in use (default 30); `full_every_set`: true when it is a stored value, false while the default applies (`set` with `full_every: null` makes it false again). `bt`: `"off"` or
-`"on"`, the Bluetooth setting; absent on a build without Bluetooth, which answers `bt` with `UNKNOWN_CMD`.
+`"on"`, the Bluetooth setting; absent on a build without Bluetooth, which answers `bt`, `bt_key` and `bt_auth` with `UNKNOWN_CMD`.
 
 Example (vector session `gray`, a 16 x 8 test panel, partial at 1 bit):
 
@@ -278,11 +281,11 @@ drives only the pixels that changed, so there is no such step.
 | err | Name | When |
 |---|---|---|
 | 1 | UNKNOWN_CMD | any other cmd 0x01..0x3F |
-| 2 | BAD_REQUEST | payload not one CBOR map, a key missing or of the wrong type, a first chunk under 29 bytes, `passes` without the mode `passes` or outside 1..4, `full_every` over 250 |
+| 2 | BAD_REQUEST | `bt_auth` over USB; payload not one CBOR map, a key missing or of the wrong type, a first chunk under 29 bytes, `passes` without the mode `passes` or outside 1..4, `full_every` over 250 |
 | 3 | BUSY | the panel is refreshing: `detail { retry_ms: 2000 }`; `hello` is still answered. `trmnl_x`: requests wait for the refresh instead |
 | 10 | IO | the panel driver failed (`msg` says at which step; the panel may show the old or the new picture), or `set` could not store |
 | 11 | SEQUENCE | no transfer open, `off` not the next offset, or show_end before all bytes: `detail { next: uint }` |
-| 12 | AUTH | a request over Bluetooth on a link that is not encrypted with a bonded, passkey-checked key: every command, `hello` too; no `detail` |
+| 12 | AUTH | over Bluetooth before the handshake: any request but `bt_auth`, or a `bt_auth` with no key stored or another `kid`; the link is dropped after it; no `detail` |
 | 13 | TOO_LARGE | `size` over `max_png`, or more bytes than `size` (the transfer is dropped) |
 | 14 | NOMEM | no memory for the PNG, the frame, the decoder or the negative of `inverse` |
 | 32 | NOT_PNG | no PNG signature, or under 57 bytes |
@@ -291,7 +294,7 @@ drives only the pixels that changed, so there is no such step.
 | 35 | BAD_PNG | damaged or cut short |
 | 36 | MODE | an unknown `mode`; a mode or a rectangle the board cannot do, or not at this depth (`msg` says which) |
 | 37 | RECT | `x` without `y`, `x` not a multiple of 8, outside the panel; the PNG's width not a multiple of 8, or part of it outside |
-| 38 | CABLE | `bt` over Bluetooth: the setting, the pairing window and the bonds change only over the USB cable |
+| 38 | CABLE | `bt` or `bt_key` over Bluetooth: the setting and the key change only over the USB cable |
 
 ## Bounds
 
@@ -329,9 +332,9 @@ Radio behaviour is unproven until a person has tried it on a device; every numbe
 | Item | Value |
 |---|---|
 | Stored | one byte under the key `dbt` (0 off, 1 on), kept over power-off; missing or any other value: off |
-| Changed | `bt { on }` over the USB cable only; over Bluetooth `bt` is refused `CABLE`. Read: `hello.bt`, `bt {}` |
-| Off | the Bluetooth stack is never started: no controller init, no advertising, no radio calibration. Sleep and wake are exactly those of a build without Bluetooth. A button press does nothing more than wake the device |
-| Switched off | the connection is dropped and the stack stopped after the answer; the bonds stay (`forget` deletes them) |
+| Changed | `bt { on }` or `bt_key` over the USB cable only; over Bluetooth both are refused `CABLE`. Read: `hello.bt`, `bt {}` |
+| Off | the Bluetooth stack is never started: no controller init, no advertising, no radio calibration. Sleep and wake are exactly those of a build without Bluetooth |
+| Switched off | the connection is dropped and the stack stopped after the answer; the key stays (`forget` erases it) |
 | Boards | `trmnl_x`, `trmnl_og`, `picpak` |
 
 ### Transport
@@ -339,32 +342,44 @@ Radio behaviour is unproven until a person has tried it on a device; every numbe
 | Item | Value |
 |---|---|
 | Service | `48770001-4516-40a8-8cc6-57e06fe2ff0d` in the advertising data; the name (`tp-display-` and 4 hex digits of the device's address) in the scan response |
-| RX `48770002-...` (same suffix) | write, host to device: the next 1..MTU-3 bytes of the host's stream of frames. Takes only an encrypted, passkey-checked link (else ATT error 0x05 or 0x0F, which makes the host's system pair) |
+| RX `48770002-...` (same suffix) | write, host to device: the next 1..MTU-3 bytes of the host's stream of frames. No link encryption asked: the frames are sealed ("Bluetooth key") |
 | TX `48770003-...` | notify, device to host: the next <= MTU-3 bytes of the device's frames (no log text) |
-| Pair `48770004-...` | read, value `01`, needs the same link: a host reads it to make its system pair |
-| Frames, commands | as over USB, the same `seq`, CRC, bounds and `chunk`. A frame is split over writes and notifications at any byte |
+| Frames, commands | as over USB, the same `seq`, CRC, bounds and `chunk`, sealed after the handshake. A frame is split over writes and notifications at any byte |
 | ATT MTU | the device offers 247 and works down to 23 (20 bytes a write) |
 | Data length | the device asks for 251 bytes (2120 us) after the connection; the host may refuse, nothing depends on it |
 | PHY | 1M. The device does not ask for 2M or coded |
 | Connection interval | the host's choice; the device asks for no change |
 | Flow, host to device | one request at a time, the next after its answer. The device buffers 8191 bytes, more than one frame (6152), so a request never overruns it; writes without response are taken (faster), the last write of a frame should be one with response. A write with response the device has no room for fails with ATT error 0x11: send it again |
 | Flow, device to host | notifications as the stack takes them; an answer that cannot leave within 5 s is dropped |
-| Lost bytes | either way the CRC or the missing answer shows it: no answer within the host's timeout, then the same request again. A repeated `show_chunk` whose first copy arrived answers `SEQUENCE` with `next`: go on there. No retransmit cache |
+| Lost bytes | either way the CRC or the missing answer shows it ("Bluetooth key": the same sealed bytes again, or a new connection) |
 | Both links | USB and Bluetooth are served together; an answer goes where its request came from. One transfer: a `show_begin` on either replaces an open one |
 | Quiet connection | dropped after 60 s without a request while no USB host is attached |
 
-### Safety
+### Bluetooth key
 
-| Rule | How |
+No system pairing and no bond: the host proves it holds a key the device made, set up over the cable. Every frame of
+the link after the handshake is encrypted and authenticated. Vectors: `vectors/bt-key.json` (`gen_bt_key.py`), checked
+by `components/btseal` and `components/usbdisp` host tests and by `python/tests/test_bt_key.py`.
+
+| Item | Value |
 |---|---|
-| Bonded hosts only | every request over Bluetooth, `hello` too, is refused `AUTH` unless the link is encrypted with a bonded key of 16 bytes made by passkey entry. An unbonded host reads nothing and draws nothing: RX refuses its writes, and a frame that got in any other way gets only `AUTH` |
-| Pairing | LE Secure Connections only, passkey entry (the device shows 6 random digits, new for every window), bonding. No Just Works, no legacy pairing |
-| Pairing window | pairing is taken only while the window is open: 120 s, opened by a press of the device's button (while the setting is on) or by `bt { pair: true }` over the cable. Outside it a pairing attempt ends the connection and stores nothing |
-| The panel | while the window is open: `BLUETOOTH PAIRING`, the name and the passkey. When it closes (a host paired, the time ran out, `bt { pair: false }`, the setting off): `PAIRED` or `PAIRING ENDED`. Both are full refreshes; the picture before is gone and the next `show` is a full refresh (`why: "first"`) |
-| Bonds | up to 3, the oldest replaced. `bt { forget: true }` (cable only) deletes all, drops the connection and closes the window |
-| The cable | USB is trusted as before: who holds the cable holds the device |
+| Key | 32 random bytes from the hardware RNG, made by `bt_key` while the radio runs (its entropy source); `bt_key` switches the setting on first. A second `bt_key` replaces the key |
+| Stored | under the settings key `dbtk` (32 bytes; any other length: no key): kept over power-off and a program update, gone on a full erase; `bt { forget: true }` erases it |
+| Key id `kid` | HKDF-SHA256(ikm = key, salt = empty, info = `tpd-bt-kid-1`), 8 bytes |
+| Host file | JSON `{ "name": tstr, "kid": hex, "key": hex }`, mode 0600, by default `~/.config/tiny-paper-display/keys/<name>.json` (`$XDG_CONFIG_HOME` if set). Copy it to give another host the device |
+| Handshake | host `bt_auth { kid, nonce: 16 random bytes }`; device answers `{ nonce: 16 random bytes, proof: 16 bytes }` |
+| Session keys | HKDF-SHA256(ikm = key, salt = host nonce \|\| device nonce, info = `tpd-bt-session-1`), 32 bytes: 0..15 host to device, 16..31 device to host |
+| AEAD | AES-128-CCM (mbedtls on the device, the ESP32's AES; `cryptography` on the host), tag 16 bytes, nonce 13 bytes: direction (`48` host to device, `44` device to host), 4 zero bytes, the direction's counter u64 big endian |
+| Proof | the tag of an empty message, device to host key and counter 0, AAD `tpd-bt-auth-1` \|\| kid \|\| host nonce \|\| device nonce. A host whose check fails has the wrong key |
+| Sealed frame | as "Frames": `seq` and `cmd` in clear, `payload` = CCM(the plain CBOR payload) \|\| tag, AAD `seq` \|\| `cmd`, `len` the sealed length, CRC over the sealed bytes. The plain payload is at most 6128 bytes |
+| Counters | not on the wire. Host to device from 0, device to host from 1 (0 is the proof); +1 per frame. A new connection needs a new handshake |
+| Refused | any frame that does not open with the next counter (a forged or changed byte, a replay, a frame out of order, a frame sealed for the other direction or with another key, a plain frame): the device drops the link without an answer; the host closes it |
+| Before the handshake | the device takes only `bt_auth`. Anything else, no key stored, another `kid`: a plain `AUTH` refusal, then the link is dropped. Over USB `bt_auth` is refused `BAD_REQUEST` |
+| Lost bytes | a frame whose CRC fails does not count. No answer: send the same sealed bytes again, never sealed anew. If the first copy did arrive, the copy is a replay: the link drops, connect again |
+| Cable only | `bt`, `bt_key`: over Bluetooth refused `CABLE` (sealed). Who holds the cable holds the device |
 
-`bt` keys are applied in the order `forget`, `on`, `pair`; `pair: true` while the setting is off is refused `MODE`.
+`bt` keys are applied in the order `forget`, `on`. `forget` erases the key, the bonds of an older firmware that paired,
+and drops the connection.
 
 ### Cost
 
@@ -378,4 +393,3 @@ more). Measure before telling anyone a battery life.
 | Average current, estimate | about 0.9 mA | about 2.9 mA: about three times today's, a third of the battery life |
 | Finding it | not there | a host must scan or try to connect for up to 22 s |
 | Connected on battery | not there | awake (about 25 mA) until the host leaves or 60 s pass without a request |
-| Pairing window | not there | awake for up to 120 s, two full refreshes |

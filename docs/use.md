@@ -89,7 +89,7 @@ with tpd.open() as d:                        # the first device; tpd.open("COM5"
 | Call | What |
 |---|---|
 | `tpd.devices(bluetooth=False)` | list of `Found(port, address, board, w, h)` |
-| `tpd.open(target=None, bluetooth=None, **defaults)` | a `Device`; no target: the first found |
+| `tpd.open(target=None, bluetooth=None, key_file=None, **defaults)` | a `Device`; no target: the first found |
 | `tpd.open_all()` | a `Group` of every device found; `show`, `area`, `clear`, `configure` return one result per device |
 | `tpd.show(picture)` | open the first device, show, close |
 | `d.show(picture, fit, border, dither, depth, threshold, rotate, mode)` | any picture: a path, bytes or a `Canvas` |
@@ -255,19 +255,25 @@ Bluetooth is off by default, and you switch it on only over the cable. Install t
 ```
 
 ```sh test
-tiny-paper-display setup --port /dev/ttyACM0 --on --pair
+tiny-paper-display setup --port /dev/ttyACM0 --key
 ```
 
-For 2 minutes the panel shows `BLUETOOTH PAIRING` and 6 digits. Type them where your computer asks for them. Outside that
-window nothing can pair. Then send, using the name shown on the pairing screen (`tp-display-` and 4 characters):
+This switches Bluetooth on and makes a key: the device creates it and your computer saves it in
+`~/.config/tiny-paper-display/keys/tp-display-XXXX.json` (only you can read it). There is no system pairing, so this
+works the same on a computer without a screen or in a container. Then send, using the name setup printed
+(`tp-display-` and 4 characters):
 
 ```sh
 tiny-paper-display show --bluetooth tp-display-XXXX picture.png
 ```
 
+In Python: `tpd.open(bluetooth="tp-display-XXXX")` finds the key file by that name; in a container give the file:
+`tpd.open(bluetooth="tp-display-XXXX", key_file="/keys/tp-display-XXXX.json")`. To use the device from another computer,
+copy the key file there. `setup --key` again makes a new key and locks out every copy of the old one.
+
 `python -c "from tiny_paper_display.ble_port import find; print(find())"` lists the devices in range. On battery the device
 is only listening now and then, so finding it can take up to about 22 seconds. `setup --off` switches Bluetooth off and
-`setup --forget` removes every pairing.
+`setup --forget` erases the key.
 
 ## What kind of picture to give it
 

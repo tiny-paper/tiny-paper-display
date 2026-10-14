@@ -6,12 +6,12 @@
 CONFIG_TINY_NO_WIFI=y
 
 # Bluetooth Low Energy behind the stored setting, off by default (docs/spec/usb-display.md "Bluetooth"): the NimBLE
-# peripheral of hal_esp esp/ble_link.c, started only by main/bt.c when the setting is on. Gated: bonded hosts only,
-# pairing only in the window. Sizes as the app's optional config mode (app/sdkconfig.ble).
+# peripheral of hal_esp esp/ble_link.c, started only by main/bt.c when the setting is on. No pairing and no bonds: the
+# NimBLE security manager is left out, every frame is sealed with the key made over the cable (usb-display.md
+# "Bluetooth key", components/btseal on mbedtls: HKDF and AES-CCM on the hardware AES).
 CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=y
 CONFIG_TINY_BLE=y
-CONFIG_TINY_BLE_GATED=y
 CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_INTERNAL=y
 CONFIG_BT_NIMBLE_LOG_LEVEL_NONE=y
 CONFIG_BT_NIMBLE_PRINT_ERR_NAME=n
@@ -19,12 +19,12 @@ CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
 CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
 CONFIG_BT_NIMBLE_GATT_CLIENT=n
 CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
-CONFIG_BT_NIMBLE_MAX_BONDS=3
 CONFIG_BT_NIMBLE_MAX_CCCDS=4
-CONFIG_BT_NIMBLE_NVS_PERSIST=y
-CONFIG_BT_NIMBLE_SM_LEGACY=n
-CONFIG_BT_NIMBLE_SM_SC=y
-CONFIG_BT_NIMBLE_SM_SC_ONLY=1
+CONFIG_BT_NIMBLE_NVS_PERSIST=n
+CONFIG_BT_NIMBLE_SECURITY_ENABLE=n
+CONFIG_MBEDTLS_HKDF_C=y
+CONFIG_MBEDTLS_CCM_C=y
+CONFIG_MBEDTLS_HARDWARE_AES=y
 CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=247
 CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=4096
 CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=12

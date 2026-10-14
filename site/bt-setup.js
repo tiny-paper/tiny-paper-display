@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: MIT
 // The link to the display firmware over the cable (DisplayLink, also the Sketch page's), and the Bluetooth setup step
 // of the flash page: talk to the device over the cable (Web Serial), read what `hello` says
-// about Bluetooth, switch it, open the pairing window, forget the pairs (docs/spec/usb-display.md "Bluetooth").
+// about Bluetooth, switch it, make its key (saved as a file for the computers that send), erase the key
+// (docs/spec/usb-display.md "Bluetooth", "Bluetooth key").
 // Every failure ends as an Error whose message is plain words for the person; nothing else is thrown.
 import { FrameReader, decodeMap, encodeFrame, encodeMap } from './frame.js';
 
 const CMD_HELLO = 0x01;
 const CMD_BT = 0x0d;
+const CMD_BT_KEY = 0x0f;
 
 /** The words next to the choice. Estimates are marked as such: nobody has measured the battery yet. */
 export const BT_WORDS = {
   cost: 'On, the battery lasts about a third as long (an estimate, nobody has measured it yet). Off, nothing changes.',
-  pairing: 'To pair: press the device\'s button or use "Pair a device now" here. The panel shows 6 digits for 2 minutes; type them on the computer or phone. Only paired devices can show pictures.',
-  cable: 'This setting can only be changed over the cable.',
+  key: 'No pairing: "Make a key" creates a key on the device and saves it here as a file. Put the file in ~/.config/tiny-paper-display/keys/ on each computer that should send pictures (or give it to a container). Only those can show pictures; a new key locks out the old file.',
+  cable: 'This setting and the key can only be changed over the cable.',
   none: 'This firmware has no Bluetooth.',
 };
 
@@ -131,10 +133,24 @@ export class DisplayLink {
   }
 }
 
+const hex = (b) => [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+
+/**
+ * The key file of a `bt_key` answer, as the Python package saves it (bt_key.save): { filename, text }. The key is in
+ * the text only; nothing else keeps it.
+ */
+export function keyFile(answer) {
+  if (!(answer.key instanceof Uint8Array) || answer.key.length !== 32 || !(answer.kid instanceof Uint8Array)
+      || answer.kid.length !== 8 || typeof answer.name !== 'string') throw new Error('The device\'s key answer could not be read.');
+  const text = `${JSON.stringify({ name: answer.name, kid: hex(answer.kid), key: hex(answer.key) }, null, 1)}\n`;
+  return { filename: `${answer.name}.json`, text };
+}
+
 /**
  * Open `port`, ask `hello` until it answers (the device restarts after flashing: for up to `waitMs`), and return the
- * setup: { link, state: { bt: 'off' | 'on' | null, name, pairing }, setOn, pair, forget, close }.
- * `bt: null` means the firmware has no Bluetooth. Throws an Error with plain words.
+ * setup: { link, state: { bt: 'off' | 'on' | null, name, kid }, setOn, makeKey, forget, close }. `kid`: the stored
+ * key's id (hex), null without a key. makeKey() resolves to keyFile(answer). `bt: null` means the firmware has no
+ * Bluetooth. Throws an Error with plain words.
  */
 export async function openBtSetup(port, { waitMs = 8000, tryMs = 1000, timeoutMs = 3000 } = {}) {
   if (!port) throw new Error(MSG.noPort);
@@ -155,19 +171,20 @@ export async function openBtSetup(port, { waitMs = 8000, tryMs = 1000, timeoutMs
       await sleep(Math.min(250, Math.max(0, end - Date.now())));
     }
   }
-  const state = { bt: hello.bt === 'on' || hello.bt === 'off' ? hello.bt : null, name: null, pairing: 0 };
-  const call = async (req) => {
-    const a = await link.request(CMD_BT, req);
+  const state = { bt: hello.bt === 'on' || hello.bt === 'off' ? hello.bt : null, name: null, kid: null };
+  const take = (a) => {
     state.bt = a.on === true ? 'on' : a.on === false ? 'off' : state.bt;
     if (typeof a.name === 'string') state.name = a.name;
-    if (typeof a.pairing === 'number') state.pairing = a.pairing;
-    return state;
+    state.kid = a.kid instanceof Uint8Array ? hex(a.kid) : null;
+    return a;
   };
+  const call = async (req) => { take(await link.request(CMD_BT, req)); return state; };
+  if (state.bt !== null) await call({});
   return {
     link,
     state,
     setOn: (on) => call({ on: !!on }),
-    pair: () => call({ pair: true }),
+    makeKey: async () => keyFile(take(await link.request(CMD_BT_KEY, {}))),
     forget: () => call({ forget: true }),
     close: () => link.close(),
   };

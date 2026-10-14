@@ -5,6 +5,7 @@
     for dev in tpd.devices():          # USB ports whose hello says: display firmware
         print(dev.port, dev.board, dev.w, dev.h)
     with tpd.open() as d:              # the first device; tpd.open("COM5"), tpd.open(bluetooth="NAME")
+                                       # Bluetooth: the key from `tiny-paper-display setup --key`, or key_file=
         d.configure(full_every=30)     # stored on the device
         d.show("photo.png", fit="fit", dither="floyd")
         d.area(canvas, 8, 16)          # a rectangle, x a multiple of 8
@@ -127,17 +128,20 @@ def devices(bluetooth=False, scan_s=5):
     return out
 
 
-def open(target=None, bluetooth=None, log=None, **defaults):  # noqa: A001 (the API's own name)
+def open(target=None, bluetooth=None, log=None, key_file=None, **defaults):  # noqa: A001 (the API's own name)
     """A Device. target: a port ("COM5", "/dev/ttyACM0"); bluetooth: a device name or address; neither: the first
-    device found. Keyword arguments are the connection's picture defaults (fit, border, dither, depth, threshold,
-    rotate). log: "debug", "info", "warning" shortcut for tpd.log(level). Use it in a with block: it is closed at the end,
-    also after an exception."""
+    device found. Over Bluetooth the frames are sealed with the device's key, made over the cable (tiny-paper-display
+    setup --key): the key folder's file of that name, or key_file= (a path, e.g. in a container). Keyword arguments
+    are the connection's picture defaults (fit, border, dither, depth, threshold, rotate). log: "debug", "info",
+    "warning" shortcut for tpd.log(level). Use it in a with block: it is closed at the end, also after an exception."""
     if log is not None:
         set_log(log)
     if target and bluetooth:
         raise DisplayError("a port or bluetooth, not both")
+    if key_file and not bluetooth:
+        raise DisplayError("key_file is for bluetooth=")
     if target or bluetooth:
-        return Device._connect(target, bluetooth, defaults)
+        return Device._connect(target, bluetooth, defaults, key_file)
     for name in _candidates():
         opened = _try_serial(name)
         if opened:
@@ -167,17 +171,18 @@ def open_all(bluetooth=False, log=None, **defaults):
     return Group(opened)
 
 
-def show(picture_, target=None, *, bluetooth=None, **options):
+def show(picture_, target=None, *, bluetooth=None, key_file=None, **options):
     """Open the first device (or target / bluetooth), show the picture (Device.show options), close; returns the answer."""
-    with open(target, bluetooth) as d:
+    with open(target, bluetooth, key_file=key_file) as d:
         return d.show(picture_, **options)
 
 
 class Device:
     """An open display. d.caps (display_fw.Capabilities), d.hello (the raw answer), d.board, d.w, d.h, d.defaults."""
 
-    def __init__(self, port, display, hello, name="", defaults=None, bluetooth=False):
+    def __init__(self, port, display, hello, name="", defaults=None, bluetooth=False, key_file=None):
         self.port, self.display, self.name, self.bluetooth = port, display, name, bluetooth
+        self._key_file = key_file
         self._stale = False  # the last call failed: the next one reconnects first and sends the whole picture
         display.timeout = 3
         self.defaults = {**DEFAULTS, **{k: v for k, v in (defaults or {}).items()}}
@@ -188,13 +193,14 @@ class Device:
         self._set_hello(hello)
 
     @classmethod
-    def _connect(cls, target, bluetooth, defaults):
-        port = usb_display.open_port(target, bluetooth)
+    def _connect(cls, target, bluetooth, defaults, key_file=None):
+        port = usb_display.open_port(target, bluetooth, key_file=key_file)
         try:
             found = _probe(port)
             if found is None:
                 raise DisplayError(f"{target or bluetooth} does not run the display firmware (hello has no project: display)")
-            return cls(port, *found, name=target or bluetooth, defaults=defaults, bluetooth=bool(bluetooth))
+            return cls(port, *found, name=target or bluetooth, defaults=defaults, bluetooth=bool(bluetooth),
+                       key_file=key_file)
         except BaseException:
             port.close()
             raise
@@ -227,7 +233,8 @@ class Device:
         except Exception:  # the old port is gone anyway
             pass
         try:
-            port = usb_display.open_port(None if self.bluetooth else self.name, self.name if self.bluetooth else None)
+            port = usb_display.open_port(None if self.bluetooth else self.name, self.name if self.bluetooth else None,
+                                         key_file=self._key_file)
         except (DisplayError, OSError, ValueError, usb_display.codec.PortError) as exc:
             raise Disconnected(f"cannot reconnect to {self.name}: {exc}") from exc
         found = None

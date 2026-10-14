@@ -31,3 +31,13 @@ class FakePort:
         part = bytes(self.rx[:3])  # every reply fragmented, including its sync/header
         del self.rx[:3]
         return part
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def key_folder(tmp_path, monkeypatch):
+    """Bluetooth key files go to a folder of the test, never to the real ~/.config."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    return tmp_path / "config" / "tiny-paper-display" / "keys"

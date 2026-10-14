@@ -672,24 +672,20 @@ void hal_link_close(hal_link_t t);
  * subscribed peer the bytes are dropped (returns len). */
 long hal_link_read(hal_link_t t, uint8_t *buf, size_t cap, uint32_t timeout_ms);
 long hal_link_write(hal_link_t t, const uint8_t *buf, size_t len);
-/* BLE config mode: advertised name (config `name`) and the 6-digit passkey (0..999999) the device answers
- * pairing with (LE Secure Connections, passkey entry, bonding). Before hal_link_open(HAL_LINK_BLE); the
- * passkey may be changed while open (a new one after a failed pairing). */
-void hal_link_ble_setup(const char *name, uint32_t passkey);
+/* BLE: the advertised name, before hal_link_open(HAL_LINK_BLE). No pairing and no bonds: the link carries frames sealed
+ * by the core (usb-display.md "Bluetooth key"). */
+void hal_link_ble_setup(const char *name);
 typedef struct {
     bool open;              /* stack up: advertising or connected */
     bool connected;
-    bool secure;            /* hal_link_ble_secure() */
     uint16_t mtu;           /* ATT MTU of the connection (23 until exchanged) */
-    uint16_t pair_fails;    /* failed pairings since open */
     uint32_t connects;      /* connections since open */
     uint32_t heap_min;      /* minimum free heap in bytes since open (0 = unknown); kept after close */
 } hal_ble_state_t;
 void hal_link_ble_state(hal_ble_state_t *out);
-/* BLE link encrypted with an authenticated (passkey) LE Secure Connections key and bonded: commands
- * other than hello allowed. */
-bool hal_link_ble_secure(void);
-/* Delete all BLE bonds (factory reset). */
+/* End the connection (the stack keeps advertising); the bytes of it not read yet are dropped. */
+void hal_link_ble_drop(void);
+/* Delete the BLE bonds an older firmware stored when hosts paired. */
 void hal_link_ble_forget(void);
 
 /* Raw console text on USB (log lines, already formatted with the "# " prefix). */

@@ -19,7 +19,7 @@ import logging
 from .usb_display import Disconnected, DisplayError, convert, refusal_error
 from .display_fingerprint import fingerprint
 
-HELLO, SHOW_BEGIN, SHOW_CHUNK, SHOW_END, CLEAR, SET, BT, HAVE = 0x01, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E
+HELLO, SHOW_BEGIN, SHOW_CHUNK, SHOW_END, CLEAR, SET, BT, HAVE, BT_KEY = 0x01, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F
 BUSY, SEQUENCE = 3, 11
 NAMES = {1: "UNKNOWN_CMD", 2: "BAD_REQUEST", 3: "BUSY", 10: "IO", 11: "SEQUENCE", 12: "AUTH", 13: "TOO_LARGE", 14: "NOMEM",
          32: "NOT_PNG", 33: "WRONG_SIZE", 34: "DEPTH", 35: "BAD_PNG", 36: "MODE", 37: "RECT", 38: "CABLE"}
@@ -233,11 +233,24 @@ def bluetooth(hello):
     return hello.get("bt")
 
 
-def bt(display, on=None, pair=None, forget=None):
+def bt(display, on=None, forget=None):
     """The `bt` command, over the USB cable only (over Bluetooth the device refuses it, CableOnly): the keys given
-    are applied as forget, on, pair. Answer: {"on", "pairing" (seconds the pairing window stays open), "name"}."""
-    keys = {k: v for k, v in (("on", on), ("pair", pair), ("forget", forget)) if v is not None}
+    are applied as forget (erases the Bluetooth key), on. Answer: {"on", "name", "kid"?: the stored key's id}."""
+    keys = {k: v for k, v in (("on", on), ("forget", forget)) if v is not None}
     return request(display, BT, keys)
+
+
+def bt_key(display, key_file=None):
+    """A new Bluetooth key, over the USB cable only: the device switches Bluetooth on, makes the key and answers it
+    once; it is saved to key_file or the key folder (bt_key.save, mode 0600). Hosts with the old key lose access.
+    Returns (answer without the key, path)."""
+    from . import bt_key as keys
+    reply = request(display, BT_KEY, {})
+    key, kid = reply.get("key"), reply.get("kid")
+    if not isinstance(key, bytes) or len(key) != keys.KEY_LEN or not isinstance(kid, bytes) or keys.kid(key) != kid:
+        raise DisplayError("the device's key answer is not valid")
+    path = keys.save(reply.get("name", ""), kid, key, key_file)
+    return {k: v for k, v in reply.items() if k != "key"}, path
 
 
 STEP_KEYS = ("recv", "prep", "inflate", "convert", "diff", "fingerprint", "panel", "total")

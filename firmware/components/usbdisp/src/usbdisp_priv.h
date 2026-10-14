@@ -55,15 +55,21 @@ int usbdisp_panel_area(usbdisp_t *d, uint8_t depth, const tiny_rect_t *r, const 
 
 /* usbdisp_bt.c: Bluetooth behind the setting */
 void usbdisp_bt_init(usbdisp_t *d);
-/* Start the stack when the setting is on and it does not run; close the pairing window when a host paired or its
- * time ran out. From usbdisp_poll. */
+/* Start the stack when the setting is on and it does not run; end the session of a connection that is gone. From
+ * usbdisp_poll. */
 void usbdisp_bt_poll(usbdisp_t *d);
-/* A request that came over Bluetooth may run: false, and it was refused (AUTH: not bonded; CABLE: bt). */
+/* A frame that came over Bluetooth, before anything else reads it: true, and *f is the opened request (its payload in
+ * d->bt->plain); false, and it was dealt with: the handshake answered, or refused (AUTH) or not opened, the link
+ * dropped. */
+bool usbdisp_bt_unseal(usbdisp_t *d, link_frame_t *f);
+/* An opened request over Bluetooth may run: false, and it was refused (CABLE: bt, bt_key). */
 bool usbdisp_bt_allowed(usbdisp_t *d, const link_frame_t *f);
+/* The answer frame (out, n bytes, its payload from out + 6) to the Bluetooth link, sealed when a session is up. */
+void usbdisp_bt_send(usbdisp_t *d, uint8_t *out, size_t cap, uint8_t seq, uint8_t cmd, const uint8_t *payload, size_t n);
 void usbdisp_bt_cmd(usbdisp_t *d, const link_frame_t *f);
-/* usbdisp_bt_screen.c: a full refresh with up to three lines of capitals, digits and '-' (the pairing screens);
- * `big` is the large middle line. 0 = shown. The frame kept is forgotten. */
-int usbdisp_bt_screen(usbdisp_t *d, const char *title, const char *big, const char *small);
+void usbdisp_bt_key_cmd(usbdisp_t *d, const link_frame_t *f);
+/* bt_auth over USB: refused */
+void usbdisp_bt_auth_cmd(usbdisp_t *d, const link_frame_t *f);
 
 /* usbdisp_area.c */
 const char *usbdisp_mode_name(usbdisp_mode_t m);

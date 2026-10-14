@@ -11,13 +11,15 @@ dependency, pyserial. `pip install tiny-paper-display` works after the first rel
 | `tiny-paper-display show PORT picture.png` | one picture; returns when the panel has refreshed |
 | `tiny-paper-display clear PORT` | a white panel |
 | `tiny-paper-display movie PORT film.mp4 --every 5 --duration 60` | frames of a video (needs `ffmpeg`) |
-| `tiny-paper-display setup --port PORT` | the Bluetooth setting (off by default), asked; `--on`, `--off`, `--pair`, `--forget` without questions. Cable only |
+| `tiny-paper-display setup --port PORT` | the Bluetooth setting (off by default) and key, asked; `--on`, `--off`, `--key` (`--key-file PATH`), `--forget` without questions. Cable only |
 | `tiny-paper-display show --bluetooth NAME_OR_ADDRESS picture.png` | the same over Bluetooth (also `clear`, `movie`) |
 
-Bluetooth: `pip install "tiny-paper-display[bluetooth]"` (adds `bleak`). Turn it on with the cable (`setup`, about three
-times the battery use, an unmeasured estimate), open the pairing window (120 s), type the passkey the panel shows on the
-computer, then use the device name (`tp-display-XXXX`) or address. A refusal `AUTH` reads "not paired: run setup with the
-cable and press the device's button". On battery the device is found within about 22 s. Radio behaviour on real hardware
+Bluetooth: `pip install "tiny-paper-display[bluetooth]"` (adds `bleak` and `cryptography`). Make a key with the cable
+(`setup --key`: Bluetooth on, about three times the battery use, an unmeasured estimate); the key is saved in
+`~/.config/tiny-paper-display/keys/<name>.json` (mode 0600), no system pairing. Then use the device name
+(`tp-display-XXXX`) or address; `tpd.open(bluetooth=NAME, key_file=PATH)` takes a key file from elsewhere (a container).
+Every frame is sealed (AES-CCM); a device without that key answers `AUTH` (`bt_key.NoKey`). On battery the device is
+found within about 22 s. Radio behaviour on real hardware
 is unproven until a person has tried it.
 
 ```python
@@ -31,7 +33,7 @@ with tpd.open() as d:                                        # the first device 
 | Call | What |
 |---|---|
 | `tpd.devices(bluetooth=False)` | the devices running the display firmware: port or address, board, w, h |
-| `tpd.open(target=None, bluetooth=None, **defaults)` | a `Device` (`caps`, `firmware`, `defaults`, `show`, `area`, `clear`, `configure`) |
+| `tpd.open(target=None, bluetooth=None, key_file=None, **defaults)` | a `Device` (`caps`, `firmware`, `defaults`, `show`, `area`, `clear`, `configure`) |
 | `tpd.open_all()` | a `Group` of every device; calls return a list of results |
 | `tpd.show(picture)` | open, show, close |
 | `tpd.Canvas(w, h)` | draw in 16 grays: `rect`, `frame`, `text`, `checker`, `crop` |
@@ -68,6 +70,7 @@ PNG under 0.05 s, PNG decode 0.03 s (filter none) to 3 s (Paeth rows; install Pi
 | `tiny_paper_display.display_fw` | `panel_png` (fit any PNG to the panel), `show_png`, `clear` |
 | `tiny_paper_display.usb_display` | `Display` (the link: `hello`, requests), `convert` |
 | `tiny_paper_display.ble_port` | `BlePort` (a port over Bluetooth), `find()` |
+| `tiny_paper_display.bt_key` | the key file (`save`, `load`), `SealedPort` (the handshake and sealed frames), `NoKey`, `WrongKey` |
 | `tiny_paper_display.codec` | framing, CBOR, the serial port |
 
 Tests, no hardware: `pip install -e "./python[test]"`, then `pytest python/tests`. They replay

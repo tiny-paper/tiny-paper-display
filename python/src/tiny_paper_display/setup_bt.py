@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# Turn the display's Bluetooth on or off and open its pairing window, over the USB cable.
-"""tiny-paper-display setup: the Bluetooth setting of a display firmware (docs/spec/usb-display.md "Bluetooth").
+# Turn the display's Bluetooth on or off and make its key, over the USB cable.
+"""tiny-paper-display setup: the Bluetooth setting and key of a display firmware (docs/spec/usb-display.md "Bluetooth").
 
-Over the cable it shows the setting, says what on costs and how pairing works, asks, and applies. For unattended
-use: --on, --off, --pair, --forget (no questions). It runs over the cable only: the device refuses it over Bluetooth.
+Over the cable it shows the setting, says what on costs, asks, and applies. With a key made here a computer uses
+Bluetooth without any system pairing: the key is saved to ~/.config/tiny-paper-display/keys/<name>.json (mode 0600);
+copy that file to give another computer (or a container: key_file=) the device. For unattended use: --on, --off,
+--key, --forget (no questions). It runs over the cable only: the device refuses it over Bluetooth.
 
   setup_bt.py --port /dev/ttyACM0
-  setup_bt.py --port /dev/ttyACM0 --on --pair
+  setup_bt.py --port /dev/ttyACM0 --key                  # Bluetooth on, a new key saved
+  setup_bt.py --port /dev/ttyACM0 --key --key-file k.json
 """
 import argparse
 import sys
@@ -18,16 +21,14 @@ from .usb_display import Display, DisplayError, codec, open_port
 COST = """Bluetooth on: the device also takes pictures over Bluetooth Low Energy.
   Cost: about three times the battery use on battery (an unmeasured estimate), and it is found only within about 22 s
         (it advertises for 2 s in every 20 s). On the cable there is no extra cost.
-  Pairing: a pairing window of 120 s opens when you press the device's button or answer yes below. The panel shows a
-        6 digit passkey; type it on the computer when it asks. Only a paired computer can use Bluetooth.
+  Key: the device makes a key now and this computer saves it in a file; only a computer with that file can use
+        Bluetooth (no system pairing). A new key locks out the computers with the old one.
   Radio behaviour on real hardware is unproven until a person has tried it."""
 
 
 def describe(state):
-    out = f"Bluetooth is {'on' if state['on'] else 'off'}, the device is called {state['name']}"
-    if state["pairing"]:
-        out += f"; the pairing window is open for {state['pairing']} s: the panel shows the passkey, type it on the computer"
-    return out
+    key = f"a key (id {state['kid'].hex()})" if state.get("kid") else "no key"
+    return f"Bluetooth is {'on' if state['on'] else 'off'}, the device is called {state['name']}, it has {key}"
 
 
 def ask(prompt, answers, default, input_fn):
@@ -48,19 +49,22 @@ def run(display, args, input_fn=input):
     now = display_fw.bluetooth(hello)
     if now is None:
         raise DisplayError("this display firmware has no Bluetooth: update it")
-    unattended = args.on or args.off or args.pair or args.forget
+    if args.key and args.off:
+        raise DisplayError("--key and --off do not go together (a key switches Bluetooth on)")
+    unattended = args.on or args.off or args.key or args.forget
     print(f"Bluetooth: {now}{' (default)' if now == 'off' else ''}")
-    on, pair = True if args.on else False if args.off else None, True if args.pair else None
-    if args.pair and now == "off" and not args.on:
-        raise DisplayError("--pair needs Bluetooth on: add --on")
+    on, make_key = True if args.on else False if args.off else None, args.key
     if not unattended:
         print(COST)
         on = ask("Bluetooth: off (default) / on", ("off", "on"), now, input_fn) == "on"
-        if on and ask("Open the pairing window now (120 s)? yes / no", ("yes", "no"), "no", input_fn) == "yes":
-            pair = True
-    if pair and on is False:
-        raise DisplayError("--pair and --off do not go together")
-    state = display_fw.bt(display, on=on, pair=pair, forget=True if args.forget else None)
+        if on:
+            has = display_fw.bt(display).get("kid")
+            make_key = ask("Make a new key and save it here? yes / no" + (" (the old key stops working)" if has else ""),
+                           ("yes", "no"), "no" if has else "yes", input_fn) == "yes"
+    state = display_fw.bt(display, on=on, forget=True if args.forget else None)
+    if make_key:
+        state, path = display_fw.bt_key(display, args.key_file)
+        print(f"The key is saved in {path} (keep it private; copy it to use the device from another computer)")
     print(describe(state))
     return 0
 
@@ -71,8 +75,9 @@ def main(argv=None):
     p.add_argument("--bluetooth", metavar="NAME_OR_ADDRESS", help="refused: setup runs over the cable only")
     p.add_argument("--on", action="store_true", help="Bluetooth on, without asking")
     p.add_argument("--off", action="store_true", help="Bluetooth off, without asking")
-    p.add_argument("--pair", action="store_true", help="open the pairing window (120 s; needs on)")
-    p.add_argument("--forget", action="store_true", help="delete every pairing, drop the connection")
+    p.add_argument("--key", action="store_true", help="Bluetooth on and a new key, saved here (the old one stops working)")
+    p.add_argument("--key-file", metavar="PATH", help="save the key there instead of the key folder")
+    p.add_argument("--forget", action="store_true", help="erase the device's key, drop the connection")
     args = p.parse_args(argv)
     if args.on and args.off:
         p.error("--on or --off")

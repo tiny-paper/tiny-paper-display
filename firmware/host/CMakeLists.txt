@@ -67,6 +67,20 @@ FetchContent_Declare(unity
 FetchContent_MakeAvailable(unity)
 target_compile_definitions(unity PUBLIC UNITY_INCLUDE_DOUBLE UNITY_SUPPORT_64)
 
+# mbedtls for components/btseal (the Bluetooth key: HKDF-SHA256, AES-CCM), the 3.6 line ESP-IDF 5.5 ships; the release
+# tarball has the generated files. Only the crypto library is built, without -Werror (not our code).
+FetchContent_Declare(mbedtls
+  URL https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.4/mbedtls-3.6.4.tar.bz2
+  URL_HASH SHA256=ec35b18a6c593cf98c3e30db8b98ff93e8940a8c4e690e66b41dfc011d678110
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+set(GEN_FILES OFF CACHE BOOL "" FORCE)
+set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+set(USE_SHARED_MBEDTLS_LIBRARY OFF CACHE BOOL "" FORCE)
+set(USE_STATIC_MBEDTLS_LIBRARY ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(mbedtls)
+
 # Warnings are errors for our code (issue #23); set after Unity so only targets declared below get it.
 option(TINY_WERROR "-Werror for our own targets" ON)
 if(TINY_WERROR)
@@ -81,7 +95,7 @@ target_compile_definitions(tiny_core PUBLIC TINY_PHOTO_PART=1)
 if(TINY_BLE)
   target_compile_definitions(tiny_core PUBLIC TINY_BLE=1)
 endif()
-target_link_libraries(tiny_core PUBLIC m)
+target_link_libraries(tiny_core PUBLIC m mbedcrypto)
 
 add_library(tiny_hal_sim ${TINY_LIB_TYPE})
 target_link_libraries(tiny_hal_sim PUBLIC tiny_core)
@@ -140,7 +154,7 @@ if(TINY_SHARED)
       endif()
     endforeach()
   endforeach()
-  target_link_libraries(tiny_core_static PUBLIC m)
+  target_link_libraries(tiny_core_static PUBLIC m mbedcrypto)
   get_target_property(_hl tiny_hal_sim INTERFACE_LINK_LIBRARIES)
   list(TRANSFORM _hl REPLACE "^tiny_core$" "tiny_core_static")
   target_link_libraries(tiny_hal_sim_static PUBLIC ${_hl})

@@ -53,10 +53,10 @@ yet: everything here is unproven until a person has, and the battery numbers are
 |---|---|
 | Switch on or off | only over the cable: the flash page's "Bluetooth setup" step, or `tiny-paper-display setup --port PORT` |
 | What on costs | on battery about three times the use (the battery lasts about a third as long); on the cable nothing |
-| Pairing | press the device's button (or use setup): for 2 minutes the panel shows `BLUETOOTH PAIRING` and 6 digits; type them on the computer or phone. Outside that window nothing can pair |
-| Who can send pictures | paired devices only; anyone else gets nothing and changes nothing |
-| Forget all paired devices | setup, over the cable |
-| Send | install the extra (`bleak`, see the guide), then `tiny-paper-display show --bluetooth tp-display-XXXX picture.png` (the name is on the pairing screen); on battery the device is found within about 22 s |
+| Key | no system pairing: `tiny-paper-display setup --port PORT --key` makes a key on the device and saves it on the computer in a small file (copy it to use another computer, or give it to a container) |
+| Who can send pictures | computers with the key file only; every frame is encrypted and checked. Anyone else gets a short refusal and changes nothing |
+| Lock everyone out | setup `--key` again (a new key) or `--forget`, over the cable |
+| Send | install the extra (`bleak`, `cryptography`, see the guide), then `tiny-paper-display show --bluetooth tp-display-XXXX picture.png` (the name setup prints); on battery the device is found within about 22 s |
 
 ## Going back
 

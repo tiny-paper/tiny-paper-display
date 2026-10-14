@@ -22,7 +22,7 @@ test:
 test32:
 	cmake -S host -B $(BUILD)32 -G Ninja -DCMAKE_BUILD_TYPE=Debug -DTINY_M32=ON
 	cmake --build $(BUILD)32
-	ctest --test-dir $(BUILD)32 --output-on-failure -R '^(epd|usbdisp|imgdec)_'
+	ctest --test-dir $(BUILD)32 --output-on-failure -R '^(epd|usbdisp|imgdec|btseal)_'
 
 # One-time: build the image and fetch ESP-IDF and its tools into the cache.
 esp-setup:

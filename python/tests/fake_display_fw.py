@@ -2,14 +2,17 @@
 """A display firmware in Python for the tests: the area and mode rules of docs/spec/usb-display.md on a gray panel,
 with the glass it would show. test_display_fw.py holds it to the vectors (every answer of the gray session), so the
 bench and movie tests run against the firmware's own behaviour, not a guess."""
+import os
 import struct
 import zlib
 
+from tiny_paper_display import bt_key
 from tiny_paper_display import display_fw as fw
 from tiny_paper_display.display_fingerprint import fingerprint_rows
 from tiny_paper_display.usb_display import codec
 
 SIG = b"\x89PNG\r\n\x1a\n"
+AUTH = {"err": 12, "msg": "authenticate first: bt_auth with the key made over the USB cable"}
 
 
 class Refuse(Exception):
@@ -33,18 +36,27 @@ class FakeDevice:
         self.no_prev, self.since_full = "first", 0
         self.fingerprint = None
         self.requests, self.answers, self.refreshes = [], [], 0
-        self.bt, self.name, self.pairing, self.bonded = bt, name, 0, False  # bt: "off", "on", None (no Bluetooth)
-        self.auth_refused = 0
+        self.bt, self.name = bt, name  # bt: "off", "on", None (no Bluetooth)
+        self.key = None                # the Bluetooth key (bt_key)
+        self.channel = None            # the session of the Bluetooth connection, after bt_auth
+        self.drop = False              # the last Bluetooth frame ended the link (the air drops it)
+        self.auth_refused, self.broken = 0, 0  # plain AUTH refusals; sealed frames that did not open
+        self.next_random = []          # what the RNG gives next (bt_key's key, bt_auth's nonce); else os.urandom
 
     # ---------------------------------------------------------------- the link
-    def respond(self, wire, link="usb", secure=False):
-        """The answer frame to one request frame. link "ble": over Bluetooth, `secure` says the link is bonded and
-        encrypted; a link that is not gets AUTH for everything and nothing is looked at, let alone drawn."""
+    def random(self, n):
+        return self.next_random.pop(0) if self.next_random else os.urandom(n)
+
+    def new_connection(self):
+        self.channel, self.drop = None, False
+
+    def respond(self, wire, link="usb"):
+        """The answer frame to one request frame. link "ble": over Bluetooth, where only bt_auth is taken before the
+        handshake (else AUTH, and .drop: the link ends) and every frame after it is sealed; a frame that does not open
+        ends the link without an answer (b"")."""
         seq, cmd = wire[4:6]
-        if link == "ble" and not secure:
-            self.auth_refused += 1
-            reply = {"err": 12, "msg": "pair first: this Bluetooth link is not bonded"}
-            return codec.build_frame(seq, cmd | 0x80, reply)
+        if link == "ble":
+            return self.respond_ble(wire)
         self.link = link
         payload = codec.cbor_decode(wire[6:-2]) if len(wire) > 8 else {}
         self.requests.append((cmd, payload))
@@ -56,6 +68,29 @@ class FakeDevice:
                 self.forget("failed" if reply["err"] == 10 else "refused")
         self.answers.append((cmd, reply))
         return codec.build_frame(seq, cmd | 0x80, reply)
+
+    def respond_ble(self, wire):
+        seq, cmd, sealed = wire[4], wire[5], wire[6:-2]
+        self.drop = False
+        if self.channel is None:
+            if cmd == bt_key.BT_AUTH and self.key:
+                p = codec.cbor_decode(sealed) if sealed else {}
+                if isinstance(p, dict) and p.get("kid") == bt_key.kid(self.key) and isinstance(p.get("nonce"), bytes) \
+                        and len(p["nonce"]) == 16:
+                    dn = self.random(16)
+                    self.channel, proof = bt_key.device_channel(self.key, p["nonce"], dn)
+                    return codec.build_frame(seq, cmd | 0x80, {"nonce": dn, "proof": proof})
+            self.auth_refused += 1
+            self.drop = True
+            return codec.build_frame(seq, cmd | 0x80, AUTH)
+        try:
+            plain = self.channel.open(seq, cmd, sealed)
+        except bt_key.LinkBroken:
+            self.channel, self.drop = None, True
+            self.broken += 1
+            return b""
+        answer = self.respond(codec.build_frame(seq, cmd, plain), link="ble_sealed")
+        return codec.build_frame(seq, cmd | 0x80, self.channel.seal(seq, cmd | 0x80, answer[6:-2]))
 
     def modes(self):
         one = 1 in self.partial_depths
@@ -115,24 +150,28 @@ class FakeDevice:
             return {"full_every": self.full_every, "full_every_set": self.every_set}
         if cmd == fw.BT and self.bt:
             return self.set_bt(p)
+        if cmd == fw.BT_KEY and self.bt:
+            if self.link != "usb":
+                raise Refuse(38, "bt and bt_key work only over the USB cable")
+            self.bt, self.key, self.channel = "on", self.random(32), None
+            return {**self.bt_state(), "key": self.key}
+        if cmd == bt_key.BT_AUTH and self.bt:
+            raise Refuse(2, "bt_auth is for Bluetooth only" if self.link == "usb" else
+                         "bt_auth: this link is authenticated already")
         raise Refuse(1, "this is the display firmware: hello, show, clear, set")
 
+    def bt_state(self):
+        return {"on": self.bt == "on", "name": self.name, **({"kid": bt_key.kid(self.key)} if self.key else {})}
+
     def set_bt(self, p):
-        """bt: over the cable only; the keys apply as forget, on, pair."""
-        if self.link == "ble":
-            raise Refuse(38, "bt works only over the USB cable")
+        """bt: over the cable only; the keys apply as forget, on."""
+        if self.link != "usb":
+            raise Refuse(38, "bt and bt_key work only over the USB cable")
         if p.get("forget"):
-            self.bonded, self.pairing = False, 0
+            self.key, self.channel = None, None
         if "on" in p:
             self.bt = "on" if p["on"] else "off"
-            self.pairing = self.pairing if p["on"] else 0
-        if p.get("pair"):
-            if self.bt != "on":
-                raise Refuse(36, "Bluetooth is off: bt { on: true } first")
-            self.pairing = 120
-        elif "pair" in p:
-            self.pairing = 0
-        return {"on": self.bt == "on", "pairing": self.pairing, "name": self.name}
+        return self.bt_state()
 
     # ---------------------------------------------------------------- show
     def check_mode(self, mode, area, depth):

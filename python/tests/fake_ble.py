@@ -1,20 +1,20 @@
 # SPDX-License-Identifier: MIT
 """A fake `bleak` for the tests (the real one is not needed): the air between the host and a FakeDevice. Writes to RX
 are the host's stream; whole request frames go to the fake firmware, and its answers come back as notifications split
-at the sizes given (any byte), or are lost."""
+at the sizes given (any byte), or are lost. When the firmware drops the link (a refusal, a frame that did not open),
+the host's disconnect callback runs and nothing more of that connection arrives."""
 import struct
 import types
 
-from tiny_paper_display.ble_port import PAIR, RX, SERVICE, TX
+from tiny_paper_display.ble_port import RX, SERVICE, TX
 
 # made-up addresses (locally administered), put together here so that no file holds a device address
 FAKE_ADDRESS, OTHER_ADDRESS = ":".join(["02"] * 6), ":".join(["06"] * 6)
 
 
 class Air:
-    def __init__(self, device, name="tp-display-VEC0", address=FAKE_ADDRESS, mtu=247, secure=True,
-                 notify_sizes=(20,)):
-        self.dev, self.name, self.address, self.mtu, self.secure = device, name, address, mtu, secure
+    def __init__(self, device, name="tp-display-VEC0", address=FAKE_ADDRESS, mtu=247, notify_sizes=(20,)):
+        self.dev, self.name, self.address, self.mtu = device, name, address, mtu
         self.notify_sizes, self.sizes_at = notify_sizes, 0
         self.stream = bytearray()
         self.writes = []            # (piece, response) as the host wrote them
@@ -23,8 +23,12 @@ class Air:
         self.no_room = 0            # that many writes with response fail with ATT error 0x11
         self.client = None
         self.advertises = True
+        self.gone = False           # the device dropped this connection
+        self.tamper = None          # a function of an answer frame's bytes: what arrives instead
 
     def write(self, piece, response):
+        if self.gone:
+            raise RuntimeError("not connected")
         if response and self.no_room:
             self.no_room -= 1
             raise RuntimeError("ATT error 0x11: insufficient resources")
@@ -42,15 +46,20 @@ class Air:
         if self.lose_requests.get(cmd):
             self.lose_requests[cmd] -= 1
             return
-        answer = self.dev.respond(wire, link="ble", secure=self.secure)
+        answer = self.dev.respond(wire, link="ble")
         if self.lose_answers.get(cmd):
             self.lose_answers[cmd] -= 1
-            return
+            answer = b""
+        if answer and self.tamper:
+            answer = self.tamper(answer)
         while answer:
             n = self.notify_sizes[self.sizes_at % len(self.notify_sizes)]
             self.sizes_at += 1
             self.client.notify(answer[:n])
             answer = answer[n:]
+        if self.dev.drop:
+            self.gone, self.stream = True, bytearray()
+            self.client.drop_link()
 
     def frames(self):
         """The writes grouped as the frames they made: [[(piece, response), ...], ...]; a frame ends at the write with
@@ -95,16 +104,12 @@ def install(monkeypatch, air):
             air.client = self
 
         async def connect(self):
+            air.gone = False
+            air.dev.new_connection()
             return True
 
         async def disconnect(self):
             return True
-
-        async def read_gatt_char(self, char):
-            assert str(char).lower() == PAIR
-            if not air.secure:
-                raise RuntimeError("ATT error 0x05: insufficient authentication")
-            return b"\x01"
 
         async def start_notify(self, char, callback):
             assert str(char).lower() == TX

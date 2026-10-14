@@ -155,7 +155,7 @@ def main():
     p.add_argument("video", type=Path, nargs="?")
     p.add_argument("--bluetooth", metavar="NAME_OR_ADDRESS",
                    help="over Bluetooth to the device with this name (tp-display-XXXX) or address instead of a port "
-                        "(pip install tiny-paper-display[bluetooth], paired with tiny-paper-display setup)")
+                        "(pip install tiny-paper-display[bluetooth], the key made with tiny-paper-display setup --key)")
     p.add_argument("--every", type=float, default=5, help="seconds between frames on the display (default 5)")
     p.add_argument("--duration", type=float, default=60, help="how long to play, in seconds (default 60)")
     p.add_argument("--step", type=float, help="seconds of film between frames (default: spread over the whole film)")

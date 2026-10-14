@@ -14,9 +14,9 @@
  * tiny/hal.h, tests plug their own.
  *
  * Bluetooth (spec "Bluetooth", usbdisp_bt.c): the same frames over a second link, behind the stored setting `bt`
- * (off by default, changed over USB only). Off, no bt_* call of the configuration is ever made. On, every request
- * of that link needs bt_secure() (a bonded host), and pairing is taken only in a window opened by the button or
- * over the cable, with the panel saying so.
+ * (off by default, changed over USB only). Off, no bt_* call of the configuration is ever made. On, a host first
+ * proves it holds the key made over the cable (bt_key, bt_auth), then every frame both ways is sealed (btseal.h);
+ * anything else drops the link.
  * C11. SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef TINY_USBDISP_H
@@ -27,6 +27,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "btseal.h"
 #include "link_frame.h"
 #include "tiny/types.h"
 
@@ -45,7 +46,7 @@
 #define USBDISP_PASSES_MAX 4             /* mode passes: drives of the rectangle */
 #define USBDISP_KV_FULL_EVERY "dfull"    /* the setting's key (one byte) */
 #define USBDISP_KV_BT "dbt"              /* the Bluetooth setting's key (one byte: 1 on, anything else off) */
-#define USBDISP_BT_PAIR_S 120            /* the pairing window */
+#define USBDISP_KV_BTKEY "dbtk"         /* the Bluetooth key (BTSEAL_KEY bytes; any other length: no key) */
 #define USBDISP_BT_QUIET_US 60000000ull  /* a connection without a request for this long keeps nobody awake */
 #define USBDISP_BT_RX_MS 20              /* wait on the Bluetooth link per poll while a host is connected */
 
@@ -59,6 +60,8 @@ enum {
     USBDISP_CMD_SET = 0x0C,
     USBDISP_CMD_BT = 0x0D,
     USBDISP_CMD_HAVE = 0x0E,
+    USBDISP_CMD_BT_KEY = 0x0F,  /* cable only: a new Bluetooth key */
+    USBDISP_CMD_BT_AUTH = 0x10, /* Bluetooth only: the handshake */
 };
 
 /* Reason codes (`err`): 1..14 as the link protocol's, 32.. this protocol's own. */
@@ -68,7 +71,7 @@ enum {
     USBDISP_E_BUSY = 3,         /* the panel is refreshing: detail { retry_ms } */
     USBDISP_E_IO = 10,          /* the panel driver failed */
     USBDISP_E_SEQUENCE = 11,    /* detail { next }: the offset the device expects */
-    USBDISP_E_AUTH = 12,        /* a request over Bluetooth from a host that is not bonded */
+    USBDISP_E_AUTH = 12,        /* over Bluetooth before the handshake, or a handshake with no or another key */
     USBDISP_E_TOO_LARGE = 13,   /* more bytes than hello.max_png, or than show_begin announced */
     USBDISP_E_NOMEM = 14,
     USBDISP_E_NOT_PNG = 32,
@@ -77,7 +80,7 @@ enum {
     USBDISP_E_BAD_PNG = 35,     /* damaged or truncated PNG data */
     USBDISP_E_MODE = 36,        /* a refresh mode, or an area, this board or depth cannot do; an unknown mode */
     USBDISP_E_RECT = 37,        /* x, y or the PNG's size: not aligned, outside the panel, one of x, y missing */
-    USBDISP_E_CABLE = 38,       /* bt over Bluetooth: only over the USB cable */
+    USBDISP_E_CABLE = 38,       /* bt, bt_key over Bluetooth: only over the USB cable */
 };
 
 /* Refresh modes of show (`mode`). Without one (AUTO) the device takes partial when it can, else full. */
@@ -165,21 +168,21 @@ typedef struct {
     int (*kv_erase)(void *ctx, const char *key); /* optional: removes a key (set full_every null: the default applies again) */
     void (*log)(void *ctx, const char *line); /* optional */
     /* optional, all or none: Bluetooth (bt_open NULL: a build without it). Called only while the setting is on,
-     * bt_forget also when off (the bonds in the store).
+     * bt_forget also when off (the bonds of an older firmware in the store).
      * bt_open: start the stack and advertise as bt_name; 0 = ok. bt_close: stop it, the radio off.
-     * bt_read / bt_write: as read / write. bt_connected: a host is connected. bt_secure: and its link is encrypted
-     * with a bonded, passkey-checked key. bt_pairing: open (with the passkey the panel shows) or close the pairing
-     * window; closed, the link layer refuses to pair. bt_forget: delete all bonds. rand32: a random number. */
+     * bt_read / bt_write: as read / write. bt_connected: 0 no host, else the connection's number, new for every
+     * connection (a session belongs to one). bt_drop: end the connection (the stack keeps advertising), unread bytes
+     * of it are dropped. bt_forget: delete the bonds of an older firmware that paired. random: n random bytes from the
+     * hardware RNG (true random while the radio runs: the key and the nonces are made only then). */
     const char *bt_name;
     int (*bt_open)(void *ctx, const char *name);
     void (*bt_close)(void *ctx);
     long (*bt_read)(void *ctx, uint8_t *buf, size_t cap, uint32_t timeout_ms);
     long (*bt_write)(void *ctx, const uint8_t *buf, size_t len);
-    bool (*bt_connected)(void *ctx);
-    bool (*bt_secure)(void *ctx);
-    void (*bt_pairing)(void *ctx, bool open, uint32_t passkey);
+    uint32_t (*bt_connected)(void *ctx);
+    void (*bt_drop)(void *ctx);
     void (*bt_forget)(void *ctx);
-    uint32_t (*rand32)(void *ctx);
+    void (*random)(void *ctx, void *buf, size_t n);
     void *ctx;
 } usbdisp_cfg_t;
 
@@ -191,17 +194,23 @@ typedef struct {
     uint64_t rx_us;             /* the last link bytes */
 } usbdisp_rx_t;
 
+/* The Bluetooth link while the stack runs: its receiving side and its session */
+typedef struct {
+    usbdisp_rx_t rx;
+    btseal_t seal;              /* up after bt_auth on connection `conn` */
+    uint32_t conn;              /* the connection the session (or the last refusal) belongs to; 0 none */
+    uint8_t plain[LINK_MAX_PAYLOAD - BTSEAL_TAG]; /* the opened payload of the request being handled */
+} usbdisp_bt_t;
+
 typedef struct {
     usbdisp_cfg_t c;
     usbdisp_rx_t usb;
     uint8_t tx[2048]; /* the largest answer: hello with the tuning, a set that refuses keys */
     /* Bluetooth */
-    usbdisp_rx_t *bt;           /* the Bluetooth link's receiving side: allocated while the stack runs, else NULL */
+    usbdisp_bt_t *bt;           /* the Bluetooth link: allocated while the stack runs, else NULL */
     bool via_bt;                /* the request being answered came over Bluetooth */
     bool bt_on;                 /* the setting */
     bool bt_failed;             /* the stack did not start: not tried again before the next bt { on: true } */
-    bool bt_was_connected;
-    uint64_t bt_pair_until;     /* the pairing window's end; 0: closed */
     uint64_t bt_last_us;        /* the connection's start or its last request */
     /* the transfer */
     uint8_t *png;
@@ -245,16 +254,10 @@ const uint8_t *usbdisp_prev(const usbdisp_t *d, uint8_t *depth);
 
 /* Bluetooth. The setting is on (stored; hello `bt`). */
 bool usbdisp_bt_on(const usbdisp_t *d);
-/* A press of the device's button: opens the pairing window when the setting is on (and draws the pairing screen).
- * true when it opened. */
-bool usbdisp_bt_button(usbdisp_t *d);
-/* Bluetooth needs the device awake: the pairing window is open, or a host is connected and was not quiet for
- * USBDISP_BT_QUIET_US. */
+/* Bluetooth needs the device awake: a host is connected and was not quiet for USBDISP_BT_QUIET_US. */
 bool usbdisp_bt_awake(const usbdisp_t *d);
-/* Stop the stack (before sleep): the connection ends, the window closes without a screen. The setting stays; the
- * next usbdisp_poll starts it again. */
+/* Stop the stack (before sleep): the connection and its session end. The setting stays; the next usbdisp_poll starts
+ * it again. */
 void usbdisp_bt_stop(usbdisp_t *d);
-/* The seconds the pairing window stays open (0: closed). */
-uint32_t usbdisp_bt_pairing(const usbdisp_t *d);
 
 #endif

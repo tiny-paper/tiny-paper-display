@@ -1,22 +1,22 @@
 # SPDX-License-Identifier: MIT
 """The display firmware over Bluetooth with a fake bleak and a fake firmware behind it: frames split over writes and
-notifications, lost bytes, an unbonded peer, `bt` only over the cable, and the vectors' "bluetooth" session."""
+notifications, lost bytes, a host without the key, `bt` only over the cable, and the vectors' "bluetooth" session.
+The sealing itself: test_bt_key.py."""
 import json
 import random
 import sys
 
 import pytest
 
-from tiny_paper_display import ble_port
+from tiny_paper_display import ble_port, bt_key
 from tiny_paper_display import display_fw as fw
 from tiny_paper_display import cli_show as show
 from fake_ble import Air, install
 from fake_display_fw import FakeDevice
 from test_display_fw import V, plain
-from tiny_paper_display.usb_display import CableOnly, Display, DisplayError, NotPaired, codec, open_port
+from tiny_paper_display.usb_display import CableOnly, Display, DisplayError, codec, open_port
 
 NAME = "tp-display-VEC0"
-NOT_PAIRED = "not paired: run setup with the cable and press the device's button"
 
 
 def noisy(w, h, bits, seed=1):
@@ -26,8 +26,12 @@ def noisy(w, h, bits, seed=1):
     return fw.write_png(w, h, bits, rows), rows
 
 
-def make(monkeypatch, w=16, h=8, bt="on", **air):
+def make(monkeypatch, w=16, h=8, bt="on", key=True, **air):
+    """A device with Bluetooth `bt` and, with key, the key made over the cable and saved where open_port looks."""
     dev = FakeDevice(w, h, (1, 2), (1,), True, 20, "vec_gray", "0.0.0+vec", bt=bt, name=NAME)
+    if key:
+        dev.key = bytes(range(32))
+        bt_key.save(NAME, bt_key.kid(dev.key), dev.key)
     return dev, install(monkeypatch, Air(dev, name=NAME, **air))
 
 
@@ -48,7 +52,7 @@ def test_frame_is_split_at_mtu_minus_3_and_only_the_last_piece_has_a_response(mo
         reply = fw.show_png(display, png, hello)
     assert reply["mode"] == "full" and dev.glass == rows
     assert max(len(p) for p, _ in air.writes) == mtu - 3  # a long frame fills the pieces
-    frames = air.frames()
+    frames = air.frames()[1:]  # after the handshake
     assert len(frames) == 4 and all(not r for f in frames for _, r in f[:-1]) and all(f[-1][1] for f in frames)
     assert all(len(p) <= mtu - 3 for p, _ in air.writes) and max(len(f) for f in frames) > 1
     assert all(len(b"".join(p for p, _ in f)) == 8 + int.from_bytes(f[0][0][2:4], "little") for f in frames)
@@ -65,37 +69,41 @@ def test_answer_split_over_notifications_at_odd_places(monkeypatch):
     assert dev.glass == rows
 
 
-def test_lost_answer_is_asked_again_once(monkeypatch):
+def test_lost_answer_the_copy_is_a_replay_and_the_link_drops(monkeypatch):
+    """The request arrived, its answer did not: the same sealed bytes again are a replay, the device drops the link."""
     dev, air = make(monkeypatch)
-    air.lose_answers = {1: 1}
-    with open_port(bluetooth=NAME) as port:
-        hello = quick(Display(port)).hello()
-    assert hello["bt"] == "on" and [c for c, _ in dev.requests] == [1, 1]
-    air.lose_answers, air.lose_requests = {1: 2}, {}  # lost twice: an error, not a loop
-    with open_port(bluetooth=NAME) as port, pytest.raises(DisplayError, match="no reply"):
-        quick(Display(port)).hello()
+    air.lose_answers = {0x0B: 1}
+    with open_port(bluetooth=NAME) as port, pytest.raises(DisplayError, match="link is gone|no reply"):
+        fw.clear(quick(Display(port)))
+    assert dev.refreshes == 1 and dev.broken == 1 and air.gone
+    with open_port(bluetooth=NAME) as port:  # a new connection, a new handshake
+        fw.clear(quick(Display(port)))
+    assert dev.refreshes == 2
 
 
-def test_lost_request_is_asked_again_once(monkeypatch):
+def test_lost_request_is_sent_again_as_the_same_bytes(monkeypatch):
     dev, air = make(monkeypatch)
     air.lose_requests = {0x0B: 1}
     with open_port(bluetooth=NAME) as port:
         display = quick(Display(port))
         fw.clear(display)
-    assert dev.refreshes == 1
+    assert dev.refreshes == 1 and dev.broken == 0
+    sent = [b"".join(p for p, _ in f) for f in air.frames() if b"".join(p for p, _ in f)[5] == 0x0B]
+    assert len(sent) == 2 and sent[0] == sent[1]  # never sealed anew
 
 
-def test_show_chunk_whose_answer_was_lost_goes_on_at_next(monkeypatch):
+def test_show_chunk_whose_answer_was_lost_goes_on_at_next_after_reconnecting(monkeypatch):
+    """A chunk's answer lost: the link drops (the copy is a replay); the API connects again, with a new handshake, and
+    sends the picture once more."""
+    import tiny_paper_display as tpd
     dev, air = make(monkeypatch, 128, 128)
     png, rows = noisy(128, 128, 2)
     assert 4096 < len(png) < dev.max_png
-    air.lose_answers = {fw.SHOW_CHUNK: 1}
-    with open_port(bluetooth=NAME) as port:
-        display = quick(Display(port))
-        reply = fw.show_png(display, png, display.hello())
-    assert reply["depth"] == 2 and dev.glass == rows
-    chunks = [p["off"] for c, p in dev.requests if c == fw.SHOW_CHUNK]
-    assert chunks == [0, 0, 4096]  # sent, sent again (answered SEQUENCE next 4096), the rest
+    with tpd.open(bluetooth=NAME) as d:
+        quick(d.display)
+        air.lose_answers = {fw.SHOW_CHUNK: 1}
+        assert d.show(png)["depth"] == 2
+    assert dev.glass == rows and dev.broken == 1
 
 
 def test_a_sequence_refusal_is_not_resumed_over_usb(monkeypatch):
@@ -117,19 +125,19 @@ def test_a_sequence_refusal_is_not_resumed_over_usb(monkeypatch):
     assert [p["off"] for c, p in dev.requests if c == fw.SHOW_CHUNK] == [0]
 
 
-def test_unbonded_peer_gets_auth_and_nothing_is_drawn(monkeypatch):
-    dev, air = make(monkeypatch, secure=False)
-    png, _ = noisy(16, 8, 1)
-    with open_port(bluetooth=NAME) as port:
-        display = Display(port)
-        with pytest.raises(NotPaired, match=NOT_PAIRED):
-            display.hello()
-        with pytest.raises(NotPaired, match=NOT_PAIRED):
-            fw.show_png(display, png, dev.hello())
-        with pytest.raises(NotPaired, match=NOT_PAIRED):
-            fw.clear(display)
-    assert dev.glass is None and dev.refreshes == 0 and dev.requests == []
-    assert dev.auth_refused == 3
+def test_no_key_file_is_said_before_the_radio_is_used(monkeypatch):
+    dev, air = make(monkeypatch, key=False)
+    with pytest.raises(bt_key.NoKey, match="setup --key"):
+        open_port(bluetooth=NAME)
+    assert air.client is None and dev.requests == []
+
+
+def test_device_without_a_key_gives_a_short_refusal_and_draws_nothing(monkeypatch):
+    dev, air = make(monkeypatch)
+    dev.key = None  # forgotten over the cable
+    with pytest.raises(bt_key.NoKey, match="refused the key"):
+        open_port(bluetooth=NAME)
+    assert dev.glass is None and dev.refreshes == 0 and dev.requests == [] and dev.auth_refused == 1 and air.gone
 
 
 def test_show_command_over_bluetooth(monkeypatch, tmp_path, capsys):
@@ -139,9 +147,14 @@ def test_show_command_over_bluetooth(monkeypatch, tmp_path, capsys):
     assert show.main(["--bluetooth", NAME, str(tmp_path / "p.png")]) == 0
     assert dev.glass == rows
     assert show.main(["--bluetooth", air.address, "--clear"]) == 0 and dev.glass == b"\xff" * 512
-    air.secure = False
+    dev.key = None
     assert show.main(["--bluetooth", NAME, "--clear"]) == 1
-    assert NOT_PAIRED in capsys.readouterr().err
+    assert "refused the key" in capsys.readouterr().err
+    moved = tmp_path / "elsewhere.json"
+    (bt_key.key_dir() / f"{NAME}.json").rename(moved)
+    dev.key = bt_key.load(NAME, key_file=moved)["key"]
+    assert show.main(["--bluetooth", NAME, "--clear"]) == 1  # not in the key folder
+    assert show.main(["--bluetooth", NAME, "--key-file", str(moved), "--clear"]) == 0
 
 
 def test_bt_over_bluetooth_is_cable(monkeypatch):
@@ -157,7 +170,7 @@ def test_no_room_write_is_sent_again(monkeypatch):
     air.no_room = 2
     with open_port(bluetooth=NAME) as port:
         assert Display(port).hello()["bt"] == "on"
-    assert len(air.writes) == 1
+    assert len(air.writes) == 2  # the handshake, hello
 
 
 def test_lost_link_is_a_clean_error(monkeypatch):
@@ -198,6 +211,8 @@ def test_vectors_bluetooth_session(monkeypatch):
                      p["fw"], bt="off", name=b["name"])
     for st in b["steps"]:
         assert codec.build_frame(st["seq"], st["cmd"], plain(st["req"])).hex() == st["tx"], st["name"]
-        got = dev.respond(bytes.fromhex(st["tx"]), link=st["link"], secure=st.get("secure", False))
+        dev.new_connection()
+        got = dev.respond(bytes.fromhex(st["tx"]), link=st["link"])
         assert got.hex() == st["rx"], st["name"]
+        assert dev.drop == (st["link"] == "ble"), st["name"]
     assert dev.bt == "off" and dev.glass is None
