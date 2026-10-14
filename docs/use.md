@@ -67,7 +67,52 @@ The install adds the command `tiny-paper-display`. The examples below use that n
 On any system, `python -m serial.tools.list_ports -v` lists the ports. The device is the one made by Espressif
 (vendor id `303A`). The examples write `/dev/ttyACM0`; use your port.
 
-### Show a picture in a few lines
+### The simple API
+
+Find the devices, open one, draw, and it closes by itself (also after an error):
+
+```python test
+import tiny_paper_display as tpd
+
+for dev in tpd.devices():                    # USB ports that answer as the display firmware; bluetooth=True also scans
+    print(dev.port, dev.board, dev.w, dev.h)
+
+with tpd.open() as d:                        # the first device; tpd.open("COM5"), tpd.open(bluetooth="NAME")
+    print(d.caps.depths, d.caps.full_every)  # what the board can do
+    d.configure(full_every=30)               # stored on the device; None brings the default back
+    d.show("picture.png", fit="fit", dither="floyd")
+    box = tpd.Canvas(8, 4, 0)                # drawn in code: gray levels 0 (black) to 15
+    d.area(box, 8, 0)                        # a rectangle; x and its width multiples of 8
+    d.clear()
+```
+
+| Call | What |
+|---|---|
+| `tpd.devices(bluetooth=False)` | list of `Found(port, address, board, w, h)` |
+| `tpd.open(target=None, bluetooth=None, **defaults)` | a `Device`; no target: the first found |
+| `tpd.open_all()` | a `Group` of every device found; `show`, `area`, `clear`, `configure` return one result per device |
+| `tpd.show(picture)` | open the first device, show, close |
+| `d.show(picture, fit, border, dither, depth, threshold, rotate, mode)` | any picture: a path, bytes or a `Canvas` |
+| `d.area(picture, x, y, mode=None)` | a rectangle at its own size; refused before sending when `x` or the width is not a multiple of 8 or it leaves the panel |
+| `d.configure(full_every=...)` | a setting that lives on the device; returns the new `d.caps` |
+| `d.clear()` | a white panel |
+
+Picture options are per call, with the defaults of the connection (`d.defaults`, or keywords of `open`); they are never
+sent to the device. They are the Picture page's settings and give the same pixels as the page.
+
+| Option | Values (default) |
+|---|---|
+| `fit` | `fit` (whole picture, border round it), `fill` (crop), `stretch` |
+| `border` | `white`, `black` |
+| `rotate` | `auto`, `0`, `90`, `180`, `270` |
+| `depth` | `1`, `2`, `4`; none: the deepest the board has (a colour panel: its four inks) |
+| `dither` | `floyd`, `ordered`, `none` |
+| `threshold` | 0 to 255, for 1 bit with `dither="none"` (128) |
+
+PNG needs nothing else. JPEG, WebP and the like work when Pillow is installed (`pip install Pillow`), with a clear error
+otherwise. Converting a large photo takes a few seconds in plain Python.
+
+### Show a picture in a few lines (the parts underneath)
 
 ```python test
 from tiny_paper_display import display_fw

@@ -20,8 +20,29 @@ computer, then use the device name (`tp-display-XXXX`) or address. A refusal `AU
 cable and press the device's button". On battery the device is found within about 22 s. Radio behaviour on real hardware
 is unproven until a person has tried it.
 
+```python
+import tiny_paper_display as tpd
+with tpd.open() as d:                                        # the first device found; closed at the end
+    d.configure(full_every=30)                               # a setting on the device (None: default)
+    d.show("photo.png", fit="fit", dither="floyd")           # path, bytes or tpd.Canvas
+    d.area(tpd.Canvas(48, 24, 0), 8, 8)                      # a rectangle, x a multiple of 8
+```
+
+| Call | What |
+|---|---|
+| `tpd.devices(bluetooth=False)` | the devices running the display firmware: port or address, board, w, h |
+| `tpd.open(target=None, bluetooth=None, **defaults)` | a `Device` (`caps`, `defaults`, `show`, `area`, `clear`, `configure`) |
+| `tpd.open_all()` | a `Group` of every device; calls return a list of results |
+| `tpd.show(picture)` | open, show, close |
+| `tpd.Canvas(w, h)` | draw in 16 grays: `rect`, `frame`, `text`, `checker`, `crop` |
+
+Picture options (`fit`, `border`, `dither`, `depth`, `threshold`, `rotate`) are per call, never sent to the device, and
+give the pixels of the site's Picture page (`docs/spec/vectors/picture-prepare.json`). JPEG and other formats need Pillow.
+`examples/quickstart.py` is the short version, `examples/test_page.py` the reference.
+
 | Module | What |
 |---|---|
+| `tiny_paper_display.picture` | the Picture page's preparation: `prepare`, `pack_rows` |
 | `tiny_paper_display.display_fw` | `panel_png` (fit any PNG to the panel), `show_png`, `clear` |
 | `tiny_paper_display.usb_display` | `Display` (the link: `hello`, requests), `convert` |
 | `tiny_paper_display.ble_port` | `BlePort` (a port over Bluetooth), `find()` |
