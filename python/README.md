@@ -31,7 +31,7 @@ with tpd.open() as d:                                        # the first device 
 | Call | What |
 |---|---|
 | `tpd.devices(bluetooth=False)` | the devices running the display firmware: port or address, board, w, h |
-| `tpd.open(target=None, bluetooth=None, **defaults)` | a `Device` (`caps`, `defaults`, `show`, `area`, `clear`, `configure`) |
+| `tpd.open(target=None, bluetooth=None, **defaults)` | a `Device` (`caps`, `firmware`, `defaults`, `show`, `area`, `clear`, `configure`) |
 | `tpd.open_all()` | a `Group` of every device; calls return a list of results |
 | `tpd.show(picture)` | open, show, close |
 | `tpd.Canvas(w, h)` | draw in 16 grays: `rect`, `frame`, `text`, `checker`, `crop` |
