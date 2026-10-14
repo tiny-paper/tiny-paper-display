@@ -36,6 +36,7 @@ static struct {
     bool gates;            /* the panel counts gate clocks */
     usbdisp_gates_t gate;
     int kv;                /* the stored full_every, -1 none */
+    int kvc;               /* the stored clean_every, -1 none */
     int kv_sets, fail_kv;
     uint16_t next_row; /* the row the next band must start at (top first) or end at (bottom first) */
     int fail_begin, fail_write, fail_refresh;
@@ -217,18 +218,20 @@ static inline bool f_gates(void *ctx, usbdisp_gates_t *g)
 static inline int f_kv_get(void *ctx, const char *key, void *buf, size_t cap)
 {
     (void)ctx;
-    if (strcmp(key, USBDISP_KV_FULL_EVERY) || F.kv < 0 || !cap)
+    int *slot = !strcmp(key, USBDISP_KV_FULL_EVERY) ? &F.kv : !strcmp(key, USBDISP_KV_CLEAN_EVERY) ? &F.kvc : NULL;
+    if (!slot || *slot < 0 || !cap)
         return -1;
-    *(uint8_t *)buf = (uint8_t)F.kv;
+    *(uint8_t *)buf = (uint8_t)*slot;
     return 1;
 }
 
 static inline int f_kv_set(void *ctx, const char *key, const void *buf, size_t len)
 {
     (void)ctx;
-    if (F.fail_kv || strcmp(key, USBDISP_KV_FULL_EVERY) || len != 1)
+    int *slot = !strcmp(key, USBDISP_KV_FULL_EVERY) ? &F.kv : !strcmp(key, USBDISP_KV_CLEAN_EVERY) ? &F.kvc : NULL;
+    if (F.fail_kv || !slot || len != 1)
         return -1;
-    F.kv = *(const uint8_t *)buf;
+    *slot = *(const uint8_t *)buf;
     F.kv_sets++;
     return 0;
 }
@@ -236,9 +239,10 @@ static inline int f_kv_set(void *ctx, const char *key, const void *buf, size_t l
 static inline int f_kv_erase(void *ctx, const char *key)
 {
     (void)ctx;
-    if (F.fail_kv || strcmp(key, USBDISP_KV_FULL_EVERY))
+    int *slot = !strcmp(key, USBDISP_KV_FULL_EVERY) ? &F.kv : !strcmp(key, USBDISP_KV_CLEAN_EVERY) ? &F.kvc : NULL;
+    if (F.fail_kv || !slot)
         return -1;
-    F.kv = -1;
+    *slot = -1;
     return 0;
 }
 
@@ -259,7 +263,7 @@ static inline void device(uint16_t w, uint16_t h, uint8_t depths, bool bwry)
     usbdisp_reset(&D); /* a transfer a test left open (D starts zeroed) */
     memset(&F, 0, sizeof F);
     F.fail_at = -1;
-    F.kv = -1;
+    F.kv = F.kvc = -1;
     memset(F.shown, 0xAA, sizeof F.shown);
     C = (usbdisp_cfg_t){.fw = "0.0.0+vec", .board = bwry ? "vec_bwry" : "vec_gray", .w = w, .h = h, .depths = depths,
                         .bwry = bwry, .band_rows = 3, .read = f_read, .write = f_write, .alloc = f_alloc,

@@ -57,6 +57,7 @@ static void test_vectors(void)
         uint8_t partial = 0;
         for (size_t i = 0; i < sj_len(pd); i++)
             partial |= (uint8_t)sj_num(sj_at(pd, i), 0);
+        C.clean_every = (uint8_t)sj_num(sj_get(panel, "clean_every"), 0);
         device_more(partial, sj_bool(sj_get(panel, "partial_all"), false), (uint8_t)sj_num(sj_get(panel, "full_every"), 0));
         TEST_ASSERT_EQUAL_UINT32((uint32_t)sj_num(sj_get(panel, "max_png"), 0), D.c.png_max);
         const sj_t *steps = sj_get(s, "steps");

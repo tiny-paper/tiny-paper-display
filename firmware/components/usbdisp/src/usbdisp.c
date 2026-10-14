@@ -38,6 +38,9 @@ void usbdisp_init(usbdisp_t *d, const usbdisp_cfg_t *cfg)
     uint8_t v;
     if (d->c.kv_get && d->c.kv_get(d->c.ctx, USBDISP_KV_FULL_EVERY, &v, 1) == 1 && v <= USBDISP_FULL_EVERY_MAX)
         d->full_every = v, d->full_every_set = true;
+    d->clean_every = d->c.clean_every;
+    if (d->c.kv_get && d->c.kv_get(d->c.ctx, USBDISP_KV_CLEAN_EVERY, &v, 1) == 1 && v <= USBDISP_CLEAN_EVERY_MAX)
+        d->clean_every = v, d->clean_every_set = true;
     link_parser_init(&d->usb.parser);
     usbdisp_bt_init(d);
 }
@@ -59,6 +62,7 @@ void usbdisp_prev_drop(usbdisp_t *d, const char *why)
     d->prev = NULL;
     d->fingerprint[0] = 0;
     d->no_prev = why;
+    d->since_clean = 0, d->clean_area = (tiny_rect_t){0, 0, 0, 0}; /* the next update is a full one */
 }
 
 void usbdisp_reset(usbdisp_t *d)
@@ -229,7 +233,7 @@ static void hello(usbdisp_t *d, const link_frame_t *f)
     static const char *const bwry[] = {"black", "white", "red", "yellow"};
     cbor_w_t w;
     cbor_w_init(&w, d->tx, sizeof d->tx);
-    cbor_put_map(&w, (size_t)(13 + (d->c.bwry ? 1 : 0) + (d->c.bt_open ? 1 : 0)) + 3 + (d->fingerprint[0] != 0) + (tune_n(d) > 0) + (pmax_n(d) > 0) + (usbdisp_fadepths(d) != 0));
+    cbor_put_map(&w, (size_t)(13 + (d->c.bwry ? 1 : 0) + (d->c.bt_open ? 1 : 0)) + 5 + (d->fingerprint[0] != 0) + (tune_n(d) > 0) + (pmax_n(d) > 0) + (usbdisp_fadepths(d) != 0));
     cbor_put_str(&w, "proto");
     cbor_put_uint(&w, LINK_PROTO);
     cbor_put_str(&w, "project");
@@ -300,6 +304,10 @@ static void hello(usbdisp_t *d, const link_frame_t *f)
     cbor_put_uint(&w, d->full_every);
     cbor_put_str(&w, "full_every_set");
     cbor_put_bool(&w, d->full_every_set);
+    cbor_put_str(&w, "clean_every");
+    cbor_put_uint(&w, d->clean_every);
+    cbor_put_str(&w, "clean_every_set");
+    cbor_put_bool(&w, d->clean_every_set);
     cbor_put_str(&w, "fingerprint_hash");
     cbor_put_str(&w, USBDISP_FINGERPRINT_HASH);
     if (d->fingerprint[0]) {
@@ -565,45 +573,63 @@ static void set_tuning(usbdisp_t *d, const link_frame_t *f, char refused[][LINK_
     }
 }
 
-/* { full_every?: 0..250 or null (clear the stored value), tuning?: { ... } | "defaults" }: full_every is stored and answered, without the key it is only
- * answered; tuning (TRMNL X) applies from the next refresh and is not stored. The answer carries `tuning` (the knobs now)
- * where the board has them, and `refused` { key: why } for the keys not applied. */
-static void set(usbdisp_t *d, const link_frame_t *f)
+/* One stored byte setting of `set`: `key` absent: nothing; null: the stored value is erased and `dflt` applies; a number up
+ * to `max`: stored under `kv`. false: the request was refused. */
+static bool set_byte(usbdisp_t *d, const link_frame_t *f, const char *key, const char *kv, uint8_t max, uint8_t dflt, uint8_t *val,
+                     bool *is_set)
 {
     uint64_t v;
     const uint8_t *p;
     size_t n;
-    if (cbor_map_get(f->payload, f->len, "full_every", 10, &p, &n) && n == 1 && p[0] == 0xF6) {
-        /* null: forget the stored value, the board's default applies again */
-        if (d->c.kv_erase && d->c.kv_erase(d->c.ctx, USBDISP_KV_FULL_EVERY) < 0) {
+    char msg[48];
+    if (!cbor_map_get(f->payload, f->len, key, strlen(key), &p, &n))
+        return true;
+    if (n == 1 && p[0] == 0xF6) { /* null: forget the stored value, the default applies again */
+        if (d->c.kv_erase && d->c.kv_erase(d->c.ctx, kv) < 0) {
             usbdisp_refuse(d, f, USBDISP_E_IO, "the setting could not be cleared", NULL, 0);
-            return;
+            return false;
         }
-        d->full_every = d->c.full_every;
-        d->full_every_set = false;
-    } else if (cbor_map_get(f->payload, f->len, "full_every", 10, &p, &n)) {
-        if (!usbdisp_get_uint(f, "full_every", &v) || v > USBDISP_FULL_EVERY_MAX) {
-            usbdisp_refuse(d, f, USBDISP_E_BAD_REQUEST, "full_every is 0 (never) to 250", NULL, 0);
-            return;
-        }
-        uint8_t b = (uint8_t)v;
-        if (d->c.kv_set && d->c.kv_set(d->c.ctx, USBDISP_KV_FULL_EVERY, &b, 1) < 0) {
-            usbdisp_refuse(d, f, USBDISP_E_IO, "the setting could not be stored", NULL, 0);
-            return;
-        }
-        d->full_every = b;
-        d->full_every_set = true;
+        *val = dflt, *is_set = false;
+        return true;
     }
+    if (!usbdisp_get_uint(f, key, &v) || v > max) {
+        snprintf(msg, sizeof msg, "%s is 0 (never) to %u", key, (unsigned)max);
+        usbdisp_refuse(d, f, USBDISP_E_BAD_REQUEST, msg, NULL, 0);
+        return false;
+    }
+    uint8_t b = (uint8_t)v;
+    if (d->c.kv_set && d->c.kv_set(d->c.ctx, kv, &b, 1) < 0) {
+        usbdisp_refuse(d, f, USBDISP_E_IO, "the setting could not be stored", NULL, 0);
+        return false;
+    }
+    *val = b, *is_set = true;
+    return true;
+}
+
+/* { full_every?, clean_every?: 0..250 or null (clear the stored value), tuning?: { ... } | "defaults" }: the two are stored and answered, without the key
+ * they are only answered; tuning (TRMNL X) applies from the next refresh and is not stored. The answer carries `tuning` (the knobs now)
+ * where the board has them, and `refused` { key: why } for the keys not applied. */
+static void set(usbdisp_t *d, const link_frame_t *f)
+{
+    if (!set_byte(d, f, "full_every", USBDISP_KV_FULL_EVERY, USBDISP_FULL_EVERY_MAX, d->c.full_every, &d->full_every,
+                  &d->full_every_set) ||
+        !set_byte(d, f, "clean_every", USBDISP_KV_CLEAN_EVERY, USBDISP_CLEAN_EVERY_MAX, d->c.clean_every, &d->clean_every,
+                  &d->clean_every_set))
+        return;
     static char refused[TUNE_REFUSED_MAX][LINK_MSG_CAP + 24], names[TUNE_REFUSED_MAX][24];
     int nref;
     set_tuning(d, f, refused, names, &nref);
     cbor_w_t w;
     cbor_w_init(&w, d->tx, sizeof d->tx);
-    cbor_put_map(&w, 2 + (tune_n(d) > 0) + (nref > 0));
+    cbor_put_map(&w, 4 + (tune_n(d) > 0) + (nref > 0));
     cbor_put_str(&w, "full_every");
     cbor_put_uint(&w, d->full_every);
     cbor_put_str(&w, "full_every_set");
     cbor_put_bool(&w, d->full_every_set);
+    cbor_put_str(&w, "clean_every");
+    cbor_put_uint(&w, d->clean_every);
+    cbor_put_str(&w, "clean_every_set");
+    cbor_put_bool(&w, d->clean_every_set);
     if (tune_n(d))
         put_tuning(d, &w);
     if (nref) {
