@@ -10,7 +10,7 @@ import pytest
 
 from conftest import FakePort
 from fake_display_fw import FakeDevice
-from tiny_paper_display import cli
+from tiny_paper_display import api, cli
 from tiny_paper_display.usb_display import ROOT, codec
 
 GUIDE = ROOT / "docs/use.md"
@@ -18,6 +18,9 @@ BLOCK = re.compile(r"^```(\w+) test\n(.*?)^```$", re.S | re.M)
 
 
 class Port(FakePort):
+    def close(self):
+        pass
+
     def __enter__(self):
         return self
 
@@ -37,6 +40,7 @@ def test_the_guide_has_samples_to_run():
 def test_guide_samples_run(tmp_path, monkeypatch, capsys):
     device = FakeDevice(bt="off")
     monkeypatch.setattr(codec, "open_serial", lambda name, ui=None: Port(device.respond))
+    monkeypatch.setattr(api, "list_ports", lambda: [("/dev/ttyACM0", None)])
     (tmp_path / "picture.png").write_bytes((ROOT / "python/examples/bars.png").read_bytes())
     monkeypatch.chdir(tmp_path)
     for kind, code in blocks():

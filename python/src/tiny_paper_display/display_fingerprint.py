@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Canonical panel fingerprint shared with usbdisp.c and docs/spec/vectors/usb-display.json."""
 import struct
+import zlib
 
 from .png_image import decode_png
 
@@ -20,7 +21,38 @@ def fingerprint_rows(w, h, depth, rows, color=False):
     return f'{value:016x}'
 
 
+def _gray_rows(png):
+    """The packed rows of a non-interlaced gray 1, 2 or 4 bit PNG whose rows all use filter None (what this package and
+    the web page write), without decoding it to pixels and packing them again; None for any other PNG."""
+    if len(png) < 33 or png[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    w, h, bits, ctype, comp, filt, lace = struct.unpack(">IIBBBBB", png[16:29])
+    if ctype != 0 or bits not in (1, 2, 4) or comp or filt or lace or not w or not h:
+        return None
+    data, at = bytearray(), 8
+    while at + 8 <= len(png):
+        n, kind = struct.unpack(">I4s", png[at:at + 8])
+        if kind == b"IDAT":
+            data += png[at + 8:at + 8 + n]
+        elif kind != b"IHDR" and not kind[0] & 32:  # a critical chunk we do not know (PLTE, tRNS ...): the slow path
+            if kind != b"IEND":
+                return None
+        at += 12 + n
+    stride = (w * bits + 7) // 8
+    try:
+        raw = zlib.decompress(bytes(data))
+    except zlib.error:
+        return None
+    if len(raw) != (stride + 1) * h or any(raw[y * (stride + 1)] for y in range(h)):
+        return None
+    return w, h, bits, b"".join(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)] for y in range(h))
+
+
 def fingerprint(png, hello):
+    fast = None if hello.get("colors") else _gray_rows(png)
+    if fast:
+        w, h, bits, rows = fast
+        return fingerprint_rows(w, h, bits, rows)
     w, h, pixels = decode_png(png, gray_transparency=False)
     bits, ctype = png[24:26]
     color = bool(hello.get('colors'))

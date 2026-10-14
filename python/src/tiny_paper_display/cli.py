@@ -3,7 +3,7 @@
 import argparse
 import sys
 
-from . import movie, setup_bt, show
+from . import cli_show, movie, setup_bt
 
 
 def main(argv=None):
@@ -16,6 +16,6 @@ def main(argv=None):
         sys.argv = [f"tiny-paper-display {args.command}", *argv[1:]]
         if args.command == "clear":
             sys.argv.append("--clear")
-        return {"movie": movie.main, "setup": setup_bt.main}.get(args.command, show.main)()
+        return {"movie": movie.main, "setup": setup_bt.main}.get(args.command, cli_show.main)()
     finally:
         sys.argv = saved

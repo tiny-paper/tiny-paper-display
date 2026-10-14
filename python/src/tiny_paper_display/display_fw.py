@@ -14,7 +14,9 @@ import struct
 import time
 import zlib
 
-from .usb_display import DisplayError, convert, refusal_error
+import logging
+
+from .usb_display import Disconnected, DisplayError, convert, refusal_error
 from .display_fingerprint import fingerprint
 
 HELLO, SHOW_BEGIN, SHOW_CHUNK, SHOW_END, CLEAR, SET, BT, HAVE = 0x01, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E
@@ -25,12 +27,33 @@ MODES = ("full", "partial", "partial_all", "inverse", "passes")
 BWRY = b"\x00\x00\x00\xff\x00\x00\xff\xff\x00\xff\xff\xff"  # palette index = the panel's code: black, red, yellow, white
 
 
+log = logging.getLogger(__name__)
+
+
 class Refused(DisplayError):
-    """The device's refusal: err is the reason code, msg its text, detail its map."""
+    """The device's refusal: err is the reason code, name its name (MODE 36), msg its text, detail its map."""
 
     def __init__(self, reply):
         self.err, self.msg, self.detail = reply["err"], reply.get("msg", ""), reply.get("detail") or {}
-        super().__init__(f"display refused: {self.msg} ({NAMES.get(self.err, 'code')} {self.err})")
+        self.name = NAMES.get(self.err, "code")
+        super().__init__(f"display refused: {self.msg} ({self.name} {self.err})")
+
+
+class Busy(Refused):
+    """BUSY for longer than the wait: the panel is still refreshing (or another transfer holds the device)."""
+
+
+class PanelFault(DisplayError):
+    """The device counted a wrong gate clock: the picture is not where it should be. reply: the device's answer."""
+
+    def __init__(self, reply):
+        self.reply = reply
+        super().__init__("the device counted a wrong gate clock: the picture is not where it should be")
+
+
+def _brief(data):
+    """A map for the log: bytes are shown by their length, never their content."""
+    return {k: (f"<{len(v)} bytes>" if isinstance(v, (bytes, bytearray)) else v) for k, v in (data or {}).items()}
 
 
 def is_display_firmware(hello):
@@ -42,6 +65,8 @@ def request(display, cmd, data=None, timeout=3, busy_wait=60):
     repeat); over Bluetooth bytes get lost, so an unanswered request is sent once more ("Lost bytes")."""
     end = time.monotonic() + busy_wait
     while True:
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("request 0x%02x %s", cmd, _brief(data))
         try:
             reply = display.link.request(cmd, data or {}, timeout, retries=int(display.ble))
         except (ValueError, TypeError, IndexError, struct.error) as exc:
@@ -50,14 +75,16 @@ def request(display, cmd, data=None, timeout=3, busy_wait=60):
             raise DisplayError(f"invalid device reply: {reply}")
         if reply.get("_timeout"):
             display._display_last = None
-            raise DisplayError(f"no reply for command 0x{cmd:02x} within {timeout} s")
+            raise Disconnected(f"no reply for command 0x{cmd:02x} within {timeout} s")
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("answer 0x%02x %s", cmd, _brief(reply))
         if "err" not in reply:
             return reply
         if refusal_error(reply):
             raise refusal_error(reply)
         if reply["err"] != BUSY or time.monotonic() >= end:
             display._display_last = None
-            raise Refused(reply)
+            raise (Busy if reply["err"] == BUSY else Refused)(reply)
         retry = reply.get("detail", {}).get("retry_ms", 2000)
         time.sleep(min(retry, 5000) / 1000 if type(retry) is int else 2)
 
@@ -224,6 +251,8 @@ def describe(reply):
     ckv = reply.get("ckv")
     if ckv:
         out += f" ckv {ckv['per']}/frame for {ckv['rows']} rows" + ("" if ckv["ok"] else " WRONG GATE CLOCK")
+    if "prepare_ms" in reply:  # the host's own time, apart from the device's ms
+        out += f"; host: prepare {reply['prepare_ms']} ms, transfer {reply.get('transfer_ms')} ms"
     return out
 
 

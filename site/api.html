@@ -114,7 +114,98 @@ dependency is pyserial. After the first release it will be <code>pip install tin
 </tbody></table>
 <p>On any system, <code>python -m serial.tools.list_ports -v</code> lists the ports. The device is the one made by Espressif
 (vendor id <code>303A</code>). The examples write <code>/dev/ttyACM0</code>; use your port.</p>
-<h3 id="show-a-picture-in-a-few-lines">Show a picture in a few lines</h3>
+<h3 id="the-simple-api">The simple API</h3>
+<p>Find the devices, open one, draw, and it closes by itself (also after an error):</p>
+<pre><code class="language-python">import tiny_paper_display as tpd
+
+for dev in tpd.devices():                    # USB ports that answer as the display firmware; bluetooth=True also scans
+    print(dev.port, dev.board, dev.w, dev.h)
+
+with tpd.open() as d:                        # the first device; tpd.open(&quot;COM5&quot;), tpd.open(bluetooth=&quot;NAME&quot;)
+    print(d.caps.depths, d.caps.full_every)  # what the board can do
+    d.configure(full_every=30)               # stored on the device; None brings the default back
+    d.show(&quot;picture.png&quot;, fit=&quot;fit&quot;, dither=&quot;floyd&quot;)
+    box = tpd.Canvas(8, 4, 0)                # drawn in code: gray levels 0 (black) to 15
+    d.area(box, 8, 0)                        # a rectangle; x and its width multiples of 8
+    d.clear()
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Call</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>tpd.devices(bluetooth=False)</code></td>
+<td>list of <code>Found(port, address, board, w, h)</code></td>
+</tr>
+<tr>
+<td><code>tpd.open(target=None, bluetooth=None, **defaults)</code></td>
+<td>a <code>Device</code>; no target: the first found</td>
+</tr>
+<tr>
+<td><code>tpd.open_all()</code></td>
+<td>a <code>Group</code> of every device found; <code>show</code>, <code>area</code>, <code>clear</code>, <code>configure</code> return one result per device</td>
+</tr>
+<tr>
+<td><code>tpd.show(picture)</code></td>
+<td>open the first device, show, close</td>
+</tr>
+<tr>
+<td><code>d.show(picture, fit, border, dither, depth, threshold, rotate, mode)</code></td>
+<td>any picture: a path, bytes or a <code>Canvas</code></td>
+</tr>
+<tr>
+<td><code>d.area(picture, x, y, mode=None)</code></td>
+<td>a rectangle at its own size; refused before sending when <code>x</code> or the width is not a multiple of 8 or it leaves the panel</td>
+</tr>
+<tr>
+<td><code>d.configure(full_every=...)</code></td>
+<td>a setting that lives on the device; returns the new <code>d.caps</code></td>
+</tr>
+<tr>
+<td><code>d.clear()</code></td>
+<td>a white panel</td>
+</tr>
+</tbody></table>
+<p>Picture options are per call, with the defaults of the connection (<code>d.defaults</code>, or keywords of <code>open</code>); they are never
+sent to the device. They are the Picture page&#39;s settings and give the same pixels as the page.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Values (default)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>fit</code></td>
+<td><code>fit</code> (whole picture, border round it), <code>fill</code> (crop), <code>stretch</code></td>
+</tr>
+<tr>
+<td><code>border</code></td>
+<td><code>white</code>, <code>black</code></td>
+</tr>
+<tr>
+<td><code>rotate</code></td>
+<td><code>auto</code>, <code>0</code>, <code>90</code>, <code>180</code>, <code>270</code></td>
+</tr>
+<tr>
+<td><code>depth</code></td>
+<td><code>1</code>, <code>2</code>, <code>4</code>; none: the deepest the board has (a colour panel: its four inks)</td>
+</tr>
+<tr>
+<td><code>dither</code></td>
+<td><code>floyd</code>, <code>ordered</code>, <code>none</code></td>
+</tr>
+<tr>
+<td><code>threshold</code></td>
+<td>0 to 255, for 1 bit with <code>dither=&quot;none&quot;</code> (128)</td>
+</tr>
+</tbody></table>
+<p>PNG needs nothing else. JPEG, WebP and the like work when Pillow is installed (<code>pip install Pillow</code>), with a clear error
+otherwise. Converting a large photo takes a few seconds in plain Python.</p>
+<h3 id="show-a-picture-in-a-few-lines-the-parts-underneath">Show a picture in a few lines (the parts underneath)</h3>
 <pre><code class="language-python">from tiny_paper_display import display_fw
 from tiny_paper_display.usb_display import Display, open_port
 
