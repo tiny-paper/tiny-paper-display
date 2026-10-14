@@ -1,4 +1,4 @@
-# Tests and the three firmware images on every push; a tag v* (on main) publishes the images as a GitHub release, a tag
+# Tests and the TRMNL X firmware image on every push (the OG and PicPak code stays in the tree, not built or released); a tag v* (on main) publishes the images as a GitHub release, a tag
 # t* (on testing, for example t20261008.1) as a GitHub PRE-release, a test build: each board's files under
 # `<board>__<file>` with its flash layout `<board>__flash.txt`, then the Pages site picks the release up (it is
 # called with the tag and fails when that release or its files are missing). publish.yml (PyPI) runs on v* only.
@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        board: [trmnl_og, picpak, trmnl_x]
+        board: [trmnl_x]
     env:
       TINY_IDF_CACHE: ${{ github.workspace }}/.idf-cache
     steps:
@@ -41,8 +41,7 @@ jobs:
       - run: make -C firmware esp BOARD=${{ matrix.board }}
       - name: Collect the files of this board
         run: |
-          dist=firmware/build/esp/display-${{ matrix.board }}/dist
-          [ "${{ matrix.board }}" = trmnl_og ] && dist=firmware/build/esp/display/dist
+          dist=firmware/build/esp/display/dist
           mkdir out
           for f in "$dist"/*; do cp "$f" "out/${{ matrix.board }}__$(basename "$f")"; done
           npm ci --prefix site --no-audit --no-fund
@@ -71,7 +70,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ls out/trmnl_og__flash.txt out/picpak__flash.txt out/trmnl_x__flash.txt
+          ls out/trmnl_x__flash.txt
           kind=""
           case "$GITHUB_REF_NAME" in
             t*) # a test build: only from a commit that is on testing
@@ -79,7 +78,7 @@ jobs:
               kind="--prerelease" ;;
           esac
           gh release create "$GITHUB_REF_NAME" out/* $kind --title "$GITHUB_REF_NAME" \
-            --notes "Display firmware for TRMNL OG, PicPak and TRMNL X. Install from the flash page, or with esptool: the \`# separate:\` line of \`<board>__flash.txt\` (it keeps the device's settings). $(cat SOURCE | head -1)."
+            --notes "Display firmware for the TRMNL X. Install from the flash page, or with esptool: the \`# separate:\` line of \`<board>__flash.txt\` (it keeps the device's settings). $(cat SOURCE | head -1)."
 
   pages:
     needs: release

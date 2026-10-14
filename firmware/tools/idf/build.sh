@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Build an ESP-IDF project under firmware/ and collect flashable binaries. Runs inside the IDF
 # container (idf.sh); use `make -C firmware esp` from the host.
-#   build.sh <project dir, e.g. bringup> [qemu] [ble] [board=<boards/ dir, default trmnl_og>]
+#   build.sh <project dir, e.g. bringup> [qemu] [ble] [board=<boards/ dir, default trmnl_x>]
 #   checked: testing-only build (app/sdkconfig.checked: heap poisoning, stack checks, heap check at every probe)
 #   fault: with checked, plants a one-byte heap overrun (guard self-test, never released)
 #   stackfault: with qemu, plants a task with too small a stack (guard self-test of the stack floor, never released)
 #   heapfault: with qemu, holds 30 KB of heap from boot (guard self-test of the heap floors, never released)
 #   ble: app with the optional Bluetooth config mode (app/sdkconfig.ble; off on every board by default)
-# Output: firmware/build/esp/<project>[-<board> unless trmnl_og][-ble][-qemu]/dist/
+# Output: firmware/build/esp/<project>[-<board> unless trmnl_x][-ble][-qemu]/dist/
 #   <project>-merged.bin   write at 0x0 (bootloader + partition table + otadata + app); none for xteink_x4pro
 #   bootloader.bin 0x0, partition-table.bin 0x8000, ota_data_initial.bin, <app>.bin (offsets per board)
 #   flash.txt              the same list, plus esptool commands
@@ -20,7 +20,7 @@ CHECKED=
 FAULT=
 STACKFAULT=
 HEAPFAULT=
-BOARD=trmnl_og
+BOARD=trmnl_x
 for a in "$@"; do
     case $a in
         qemu) MODE=qemu ;;
@@ -37,7 +37,7 @@ done
 FW=$(cd "$(dirname "$0")/../.." && pwd)
 [ -d "$FW/boards/$BOARD" ] || { echo "no board $BOARD in $FW/boards" >&2; exit 2; }
 NAME=$PROJ
-[ "$BOARD" = trmnl_og ] || NAME=$PROJ-$BOARD
+[ "$BOARD" = trmnl_x ] || NAME=$PROJ-$BOARD
 EXTRA=(-DTINY_BOARD="$BOARD")
 # Firmware version (docs/spec/firmware.md): firmware/VERSION + UTC time and short hash of the HEAD commit,
 # or TINY_FW_VERSION (firmware/Makefile passes it). TINY_FW_BASE_URL: update channel base (tests).

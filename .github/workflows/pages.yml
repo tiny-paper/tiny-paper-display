@@ -68,7 +68,7 @@ jobs:
               gh release download "$tag" --dir "$2/fw/$tag"
             done
             if [ -n "$4" ]; then
-              for f in trmnl_og__flash.txt picpak__flash.txt trmnl_x__flash.txt; do
+              for f in trmnl_x__flash.txt; do
                 [ -s "$2/fw/$4/$f" ] || { echo "::error::$4 has no $f: the site is not published"; exit 1; }
               done
             fi
