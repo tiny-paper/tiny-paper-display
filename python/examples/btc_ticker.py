@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Bitcoin price, live, over a 24-hour candle chart, from Kraken's public market data (no account, no key).
+"""Bitcoin price, live, over a candle chart of the last hour, from Kraken's public market data (no account, no key).
 
-    python btc_ticker.py                        (the first device found)
-    python btc_ticker.py COM5 --currency EUR
+    python btc_ticker.py                        (the first device found: 1-minute candles, the last hour)
+    python btc_ticker.py COM5 --currency EUR --minutes 5 --refresh partial
     python btc_ticker.py --bluetooth NAME
     python btc_ticker.py --png page.png --size 800x480 [--demo]     (no device; --demo: fixed fake candles)
 
-The last 24 hours come once over HTTP, then Kraken's WebSocket pushes every change of the current candle (needs
-`pip install websockets`). The page is redrawn when a price moved, at most every --every seconds (default 1), in 1 bit: the
-device refreshes only what changed, without a flash (its full_every does the clean-up; measured on the X: 1.9 s per
-update, against 5.3 s for the same change sent as three rectangles). Without the network the last page stays up with an OFFLINE mark and the program connects again."""
+The candles come once over HTTP, then Kraken's WebSocket pushes every change of the current one (needs
+`pip install websockets`). The page is redrawn when a price moved, at most every --every seconds (default 1), in 1 bit:
+the device refreshes only what changed, with an inverse flash by default (--refresh partial: no flash). Its full_every
+does the clean-up. Without the network the last page stays up with an OFFLINE mark and the program connects again."""
 import argparse
 import json
 import math
@@ -25,8 +25,7 @@ import tiny_paper_display as tpd
 BLACK, WHITE = 0, 15
 API = "https://api.kraken.com/0/public/"
 WS = "wss://ws.kraken.com/v2"
-CANDLES = 96  # 24 hours of 15-minute candles
-CANDLES_EVERY = 60  # seconds between candle fetches
+CANDLES = 60  # candles on the chart: the last hour at the default --minutes 1
 FAILS = (OSError, ValueError, KeyError, IndexError, TypeError, AttributeError, StopIteration)  # network down, odd answers
 
 
@@ -38,14 +37,14 @@ def ask(path, timeout=10):
     return next(v for k, v in data["result"].items() if k != "last")
 
 
-def fetch_candles(cur):
-    """[(unix time, open, high, low, close)] of the last 24 hours, oldest first."""
-    rows = ask(f"OHLC?pair=XBT{cur}&interval=15")
+def fetch_candles(cur, minutes=1):
+    """[(unix time, open, high, low, close)] of the last CANDLES candles of `minutes` each, oldest first."""
+    rows = ask(f"OHLC?pair=XBT{cur}&interval={minutes}")
     return [(int(r[0]), *(float(v) for v in r[1:5])) for r in rows][-CANDLES:]
 
 
-def subscribe(cur):
-    return json.dumps({"method": "subscribe", "params": {"channel": "ohlc", "symbol": [f"BTC/{cur}"], "interval": 15}})
+def subscribe(cur, minutes=1):
+    return json.dumps({"method": "subscribe", "params": {"channel": "ohlc", "symbol": [f"BTC/{cur}"], "interval": minutes}})
 
 
 def apply(candles, msg):
@@ -67,8 +66,8 @@ def apply(candles, msg):
 def demo_candles(now=1791400000):
     out, p = [], 84000.0
     for i in range(CANDLES):
-        c = 84000 + 900 * math.sin(i / 9) + 12 * i
-        out.append((now - (CANDLES - i) * 900, p, max(p, c) + 60, min(p, c) - 60, c))
+        c = 84000 + 90 * math.sin(i / 6) + 2 * i
+        out.append((now - (CANDLES - i) * 60, p, max(p, c) + 8, min(p, c) - 8, c))
         p = c
     return out
 
@@ -77,8 +76,13 @@ def money(v):
     return f"{v:,.0f}" if v >= 100 else f"{v:,.2f}"
 
 
-def render(candles, w, h, cur="USD", offline=False, clock=None):
-    """The page as a Canvas: header, price and 24-hour change, the candles with their high and low, time marks."""
+def span(m):
+    """Minutes as a label: 30M, 60M, 5H."""
+    return f"{m}M" if m < 120 or m % 60 else f"{m // 60}H"
+
+
+def render(candles, w, h, cur="USD", offline=False, clock=None, minutes=1):
+    """The page as a Canvas: header, price and its change over the chart, the candles with their high and low, time marks."""
     c = tpd.Canvas(w, h)
     s = max(2, w // 300)  # text scale: 7 * s px tall
     pad = 4 * s
@@ -95,21 +99,21 @@ def render(candles, w, h, cur="USD", offline=False, clock=None):
     x = c.text(pad, y, money(last), big)
     pct = (last - first) / first * 100 if first else 0.0
     trend = "UP" if pct > 0 else "DOWN" if pct < 0 else "FLAT"  # the font has no plus sign
-    c.text(x + 6 * s, y + 7 * big - 14 * s, f"{trend} {abs(pct):.2f} % 24H", 2 * s)
+    c.text(x + 6 * s, y + 7 * big - 14 * s, f"{trend} {abs(pct):.2f} % {span(minutes * CANDLES)}", 2 * s)
 
     top, bottom = y + 7 * big + 8 * s, h - 16 * s
     left, right = pad, w - pad - 9 * 6 * s  # room for the price labels on the right
     lo, hi = min(k[3] for k in candles), max(k[2] for k in candles)
-    span = (hi - lo) or 1.0
+    rng = (hi - lo) or 1.0
 
     def yof(v):
-        return round(bottom - (v - lo) / span * (bottom - top))
+        return round(bottom - (v - lo) / rng * (bottom - top))
 
     for frac in (0, 0.5, 1):  # dotted guide lines with their prices
-        gy = yof(lo + span * frac)
+        gy = yof(lo + rng * frac)
         for gx in range(left, right, 4 * s):
             c.rect(gx, gy, s, max(1, s // 2), BLACK)
-        c.text(right + 2 * s, gy - 3 * s, money(lo + span * frac), s)
+        c.text(right + 2 * s, gy - 3 * s, money(lo + rng * frac), s)
     slot = (right - left) / len(candles)
     body = max(1, round(slot * 0.6))
     line = max(1, s // 2)
@@ -122,16 +126,16 @@ def render(candles, w, h, cur="USD", offline=False, clock=None):
             c.frame(cx, by, body, bh, BLACK, line)
         else:
             c.rect(cx, by, body, bh, BLACK)
-    for label, frac in (("-24H", 0), ("-12H", 0.5), ("NOW", 1)):  # time marks under the chart
+    for label, frac in (("-" + span(minutes * CANDLES), 0), ("-" + span(minutes * CANDLES // 2), 0.5), ("NOW", 1)):  # time marks under the chart
         lx = left + round((right - left) * frac) - round(len(label) * 6 * s * frac)
         c.text(lx, h - 9 * s, label, s)
     return c
 
 
-def draw(d, page):
-    """Send the page; the device refreshes only what changed, without a flash (its full_every cleans up now and then)."""
+def draw(d, page, refresh):
+    """Send the page; the device refreshes only what changed (its full_every cleans up now and then)."""
     try:
-        d.show(page, depth=1)
+        d.show(page, depth=1, mode=refresh)
     except tpd.DisplayError as e:
         print(f"show failed, trying again with the next price: {e}", file=sys.stderr)
 
@@ -141,6 +145,9 @@ def main(argv=None):
     ap.add_argument("port", nargs="?", help="/dev/ttyACM0 or COM5 (default: the first device found)")
     ap.add_argument("--bluetooth", metavar="NAME_OR_ADDRESS")
     ap.add_argument("--currency", default="USD", choices=("USD", "EUR", "GBP", "CAD", "JPY", "CHF", "AUD"))
+    ap.add_argument("--minutes", type=int, default=1, choices=(1, 5, 15), help="minutes per candle (default 1: the last hour)")
+    ap.add_argument("--refresh", default="inverse", choices=("inverse", "partial", "full"),
+                    help="how the panel changes: inverse (default) flashes the changed part, partial does not")
     ap.add_argument("--every", type=float, default=1, help="at most one screen update per this many seconds (default 1)")
     ap.add_argument("--verbose", action="store_true", help="one line per screen update: price, rectangles, time")
     ap.add_argument("--png", metavar="FILE", help="write the page to a PNG and exit (no device)")
@@ -149,8 +156,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
     if args.png:
         w, h = (int(v) for v in args.size.lower().split("x"))
-        candles = demo_candles() if args.demo else fetch_candles(args.currency)
-        Path(args.png).write_bytes(render(candles, w, h, args.currency, clock=candles[-1][0]).png(1))
+        candles = demo_candles() if args.demo else fetch_candles(args.currency, args.minutes)
+        Path(args.png).write_bytes(render(candles, w, h, args.currency, clock=candles[-1][0], minutes=args.minutes).png(1))
         print(f"wrote {args.png} ({w}x{h})")
         return 0
     try:
@@ -164,9 +171,9 @@ def main(argv=None):
         with tpd.open(args.port, args.bluetooth) as d:
             while True:
                 try:
-                    candles = fetch_candles(args.currency)
+                    candles = fetch_candles(args.currency, args.minutes)
                     with connect(WS, open_timeout=10, max_queue=None) as ws:  # no limit: pings get through while a page draws
-                        ws.send(subscribe(args.currency))
+                        ws.send(subscribe(args.currency, args.minutes))
                         dirty, drawn = True, 0.0
                         while True:
                             wait = max(0.0, args.every - (time.monotonic() - drawn)) if dirty else 30
@@ -177,13 +184,13 @@ def main(argv=None):
                                 pass
                             if dirty and time.monotonic() - drawn >= args.every:
                                 t0 = time.monotonic()
-                                draw(d, render(candles, d.w, d.h, args.currency))
+                                draw(d, render(candles, d.w, d.h, args.currency, minutes=args.minutes), args.refresh)
                                 if args.verbose:
                                     print(f"{candles[-1][4]:,.1f} in {round((time.monotonic() - t0) * 1000)} ms", flush=True)
                                 dirty, drawn = False, time.monotonic()
                 except FAILS + (WebSocketException,) as e:
                     print(f"no prices, connecting again in 5 s: {e}", file=sys.stderr)
-                    draw(d, render(candles, d.w, d.h, args.currency, offline=True))
+                    draw(d, render(candles, d.w, d.h, args.currency, offline=True, minutes=args.minutes), args.refresh)
                     time.sleep(5)
     except KeyboardInterrupt:
         print()

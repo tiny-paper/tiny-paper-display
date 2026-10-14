@@ -37,7 +37,7 @@ def drawn(monkeypatch):
 
 
 def series(step):
-    return [(1791400000 + i * 900, 80000.0 + step * i, 80030.0 + step * (i + 1), 79970.0 + step * i,
+    return [(1791400000 + i * 60, 80000.0 + step * i, 80030.0 + step * (i + 1), 79970.0 + step * i,
              80000.0 + step * (i + 1)) for i in range(bt.CANDLES)]
 
 
@@ -46,9 +46,14 @@ def series(step):
 def test_page(drawn, w, h, step):
     c = bt.render(series(step), w, h, "EUR", clock=1791400000)
     assert (c.w, c.h) == (w, h) and 0 in c.px and 15 in c.px
-    change = next(s for s in drawn if "24H" in s)
+    change = next(s for s in drawn if s.endswith("% 60M"))
+    assert "-60M" in drawn and "-30M" in drawn and "NOW" in drawn
     assert change.split()[0] == ("UP" if step > 0 else "DOWN" if step < 0 else "FLAT")
     assert any("BTC/EUR" in s for s in drawn)
+
+
+def test_spans():
+    assert [bt.span(m) for m in (30, 60, 150, 300, 900)] == ["30M", "60M", "150M", "5H", "15H"]
 
 
 @pytest.mark.parametrize("prices", [[], series(1)[:1]])
@@ -87,7 +92,7 @@ def test_websocket_updates_move_the_candles():
     assert len(got) == 2 and got[-1][0] == start[0][0] + 900 and got[-1][4] == 4.0  # the next one started
     assert bt.apply(got, update((15, 9.0))) == got  # an older candle is ignored
     full = bt.apply(series(1), update((59, 1.0)))
-    assert len(full) == bt.CANDLES  # still 24 hours
+    assert len(full) == bt.CANDLES  # still one chart
 
 
 @pytest.mark.parametrize("msg", [{"channel": "heartbeat"}, {"method": "subscribe", "success": True},
