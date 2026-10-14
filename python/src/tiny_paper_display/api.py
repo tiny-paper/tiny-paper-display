@@ -5,13 +5,13 @@
     for dev in tpd.devices():          # USB ports whose hello says: display firmware
         print(dev.port, dev.board, dev.w, dev.h)
     with tpd.open() as d:              # the first device; tpd.open("COM5"), tpd.open(bluetooth="NAME")
-        d.configure(cleanup={"screen": 30})     # stored on the device
+        d.configure(full_every=30)     # stored on the device
         d.show("photo.png", fit="fit", dither="floyd")
         d.area(canvas, 8, 16)          # a rectangle, x a multiple of 8
         d.clear()
     tpd.show("photo.png")              # open the first device, show, close
 
-Device settings (cleanup) live on the device. Picture preferences (fit, border, dither, depth, threshold, rotate) are
+Device settings (full_every) live on the device. Picture preferences (fit, border, dither, depth, threshold, rotate) are
 per call, with the defaults of the connection (`d.defaults`, or keyword arguments of open()); they are never sent.
 """
 import logging
@@ -287,14 +287,12 @@ class Device:
     _next_force = False
 
     # ------------------------------------------------------------------ settings on the device
-    def configure(self, cleanup=KEEP):
-        """Settings stored on the device. cleanup: how ghosting is removed, {"areas": N, "screen": M}. areas: clean the
-        changed parts every N partial updates (default 15, 0 never); screen: refresh the whole screen every M updates
-        (default 0, never). A key left out keeps its value; None clears both (the defaults). Returns the new
-        capabilities (caps.cleanup is the same dict)."""
+    def configure(self, full_every=KEEP):
+        """Settings stored on the device. full_every: a full refresh after this many partial ones (0 never); None clears
+        the stored value (the default 30 applies again). Returns the new capabilities."""
         def work():
-            if cleanup is not KEEP:
-                display_fw.set_cleanup(self.display, cleanup)
+            if full_every is not KEEP:
+                display_fw.full_every(self.display, **({"clear": True} if full_every is None else {"n": full_every}))
             self._set_hello(display_fw.request(self.display, display_fw.HELLO))
             return self.caps
         return self._run("configure", work)

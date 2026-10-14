@@ -725,7 +725,7 @@ static void test_gate_clocks_reported(void)
  * the total (docs/spec/usb-display.md "The answer"). */
 static void test_steps_in_the_answer(void)
 {
-    static const char *const KEYS[] = {"recv", "prep", "inflate", "convert", "diff", "fingerprint", "panel", "clean"};
+    static const char *const KEYS[] = {"recv", "prep", "inflate", "convert", "diff", "fingerprint", "panel"};
     device_partial(W, H, 1, 1, true, 0);
     random_px(s_want, W * H, 1);
     TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0)); /* the first picture: a full refresh */
@@ -821,177 +821,6 @@ static void test_full_every_setting(void)
     TEST_ASSERT_EQUAL_INT(3, map_int(s_ans, s_ans_len, "full_every", -1));
 }
 
-/* A 1 bit partial board with clean_every `ce` and full_every `fe`; a first full picture is shown. */
-static void clean_device(uint8_t ce, uint8_t fe)
-{
-    device_partial(W, H, 1, 1, true, fe);
-    C.clean_every = ce;
-    usbdisp_init(&D, &C);
-    random_px(s_want, W * H, 1);
-    TEST_ASSERT_EQUAL_INT(0, show_want(NULL, 0));
-}
-
-/* One partial update that flips the pixel at x, y. */
-static void flip(int x, int y, const char *mode)
-{
-    s_want[y * W + x] ^= 1;
-    TEST_ASSERT_EQUAL_INT(0, show_want(mode, 0));
-}
-
-/* The answer's `clean` as x,y,w,h; false: none. */
-static bool clean_of(int *x, int *y, int *w, int *h, const char **mode)
-{
-    const uint8_t *v;
-    size_t vn;
-    if (!cbor_map_get(s_ans, s_ans_len, "clean", 5, &v, &vn))
-        return false;
-    *x = (int)map_int(v, vn, "x", -1), *y = (int)map_int(v, vn, "y", -1);
-    *w = (int)map_int(v, vn, "w", -1), *h = (int)map_int(v, vn, "h", -1);
-    *mode = NULL;
-    const uint8_t *m;
-    size_t mn;
-    if (cbor_map_get(v, vn, "mode", 4, &m, &mn))
-        *mode = (mn == 1 + 7 && !memcmp(m + 1, "inverse", 7)) ? "inverse" : "other";
-    TEST_ASSERT_TRUE(map_int(v, vn, "ms", -1) >= 0);
-    return true;
-}
-
-/* clean_every: after N partial updates the Nth answer carries `clean` with the union of their rectangles, drawn again as
- * inverse; the next union starts empty. */
-static void test_clean_union_and_restart(void)
-{
-    int x, y, w, h;
-    const char *mode;
-    clean_device(3, 0);
-    flip(1, 2, NULL);
-    TEST_ASSERT_FALSE(clean_of(&x, &y, &w, &h, &mode));
-    flip(20, 10, NULL);
-    TEST_ASSERT_FALSE(clean_of(&x, &y, &w, &h, &mode));
-    int fulls = F.fulls;
-    flip(40, 20, NULL);
-    TEST_ASSERT_TRUE(clean_of(&x, &y, &w, &h, &mode));
-    TEST_ASSERT_EQUAL_INT(0, x);
-    TEST_ASSERT_EQUAL_INT(2, y);
-    TEST_ASSERT_EQUAL_INT(48, w);
-    TEST_ASSERT_EQUAL_INT(19, h);
-    TEST_ASSERT_EQUAL_STRING("inverse", mode);
-    TEST_ASSERT_EQUAL_INT(fulls, F.fulls); /* no whole-screen flash */
-    expect_shown(1, "after a clean");
-    /* the next union starts empty: three flips at one place give exactly that place */
-    flip(9, 5, NULL);
-    flip(9, 5, NULL);
-    TEST_ASSERT_FALSE(clean_of(&x, &y, &w, &h, &mode));
-    flip(9, 5, NULL);
-    TEST_ASSERT_TRUE(clean_of(&x, &y, &w, &h, &mode));
-    TEST_ASSERT_EQUAL_INT(8, x);
-    TEST_ASSERT_EQUAL_INT(5, y);
-    TEST_ASSERT_EQUAL_INT(8, w);
-    TEST_ASSERT_EQUAL_INT(1, h);
-    expect_shown(1, "after the second clean");
-}
-
-/* A full refresh resets both counters: the clean after it counts from it and holds nothing from before. */
-static void test_full_resets_clean(void)
-{
-    int x, y, w, h;
-    const char *mode;
-    clean_device(3, 0);
-    flip(1, 2, NULL);
-    flip(41, 30, NULL);
-    s_want[0] ^= 1;
-    TEST_ASSERT_EQUAL_INT(0, show_want("full", 0));
-    flip(9, 5, NULL);
-    flip(9, 5, NULL);
-    TEST_ASSERT_FALSE(clean_of(&x, &y, &w, &h, &mode)); /* 2 since the full, not 3 */
-    flip(9, 5, NULL);
-    TEST_ASSERT_TRUE(clean_of(&x, &y, &w, &h, &mode));
-    TEST_ASSERT_EQUAL_INT(8, x);
-    TEST_ASSERT_EQUAL_INT(5, y);
-    TEST_ASSERT_EQUAL_INT(1, h);
-}
-
-/* clean_every 0 never cleans; a full refresh due at the same time wins; a depth with no area mode is left to full_every. */
-static void test_clean_off_full_wins_no_mode(void)
-{
-    int x, y, w, h;
-    const char *mode;
-    clean_device(0, 0);
-    for (int i = 0; i < 40; i++) {
-        flip(i, 3, NULL);
-        TEST_ASSERT_FALSE(clean_of(&x, &y, &w, &h, &mode));
-    }
-    clean_device(3, 3);
-    for (int i = 0; i < 3; i++) {
-        flip(i, 3, NULL);
-        TEST_ASSERT_FALSE(clean_of(&x, &y, &w, &h, &mode));
-    }
-    flip(5, 3, NULL);
-    TEST_ASSERT_EQUAL_STRING("cleanup", ans_str("why"));
-    TEST_ASSERT_FALSE(clean_of(&x, &y, &w, &h, &mode));
-    /* 4 bit, partial only: no area mode at that depth */
-    device_partial(W, H, 4, 4, false, 0);
-    C.clean_every = 2;
-    usbdisp_init(&D, &C);
-    random_px(s_want, W * H, 4);
-    uint8_t png[4096];
-    size_t n = make_png(png, W, H, 4, 0, s_want);
-    TEST_ASSERT_EQUAL_INT(0, show(png, n, 512));
-    for (int i = 0; i < 6; i++) {
-        s_want[i] ^= 5;
-        n = make_png(png, W, H, 4, 0, s_want);
-        TEST_ASSERT_EQUAL_INT(0, show(png, n, 512));
-        TEST_ASSERT_FALSE(clean_of(&x, &y, &w, &h, &mode));
-    }
-}
-
-static int set_clean(int v, bool null)
-{
-    uint8_t p[32];
-    cbor_w_t w;
-    cbor_w_init(&w, p, sizeof p);
-    cbor_put_map(&w, 1);
-    cbor_put_str(&w, "clean_every");
-    if (null)
-        cbor_put_raw(&w, (const uint8_t[]){0xF6}, 1);
-    else
-        cbor_put_uint(&w, (uint64_t)v);
-    return req_err(USBDISP_CMD_SET, p, w.len);
-}
-
-/* The setting: default (the board's), stored over a restart, null restores the default, out of range and a failing store. */
-static void test_clean_every_setting(void)
-{
-    device_partial(W, H, 1, 1, true, 30);
-    C.clean_every = USBDISP_CLEAN_EVERY;
-    usbdisp_init(&D, &C);
-    TEST_ASSERT_EQUAL_INT(15, USBDISP_CLEAN_EVERY);
-    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_HELLO, NULL, 0));
-    TEST_ASSERT_EQUAL_INT(15, map_int(s_ans, s_ans_len, "clean_every", -1));
-    TEST_ASSERT_EQUAL_INT(0, set_clean(4, false));
-    TEST_ASSERT_EQUAL_INT(4, map_int(s_ans, s_ans_len, "clean_every", -1));
-    TEST_ASSERT_EQUAL_INT(4, F.kvc);
-    TEST_ASSERT_EQUAL_INT(-1, F.kv); /* its own key: full_every is untouched */
-    usbdisp_reset(&D);
-    usbdisp_init(&D, &C); /* a config reload */
-    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_HELLO, NULL, 0));
-    TEST_ASSERT_EQUAL_INT(4, map_int(s_ans, s_ans_len, "clean_every", -1));
-    const uint8_t *v;
-    size_t vn;
-    TEST_ASSERT_TRUE(cbor_map_get(s_ans, s_ans_len, "clean_every_set", 15, &v, &vn));
-    TEST_ASSERT_EQUAL_HEX8(0xF5, v[0]);
-    TEST_ASSERT_EQUAL_INT(0, set_clean(0, true));
-    TEST_ASSERT_EQUAL_INT(15, map_int(s_ans, s_ans_len, "clean_every", -1));
-    TEST_ASSERT_EQUAL_INT(-1, F.kvc);
-    TEST_ASSERT_TRUE(cbor_map_get(s_ans, s_ans_len, "clean_every_set", 15, &v, &vn));
-    TEST_ASSERT_EQUAL_HEX8(0xF4, v[0]);
-    TEST_ASSERT_EQUAL_INT(USBDISP_E_BAD_REQUEST, set_clean(USBDISP_CLEAN_EVERY_MAX + 1, false));
-    F.fail_kv = 1;
-    TEST_ASSERT_EQUAL_INT(USBDISP_E_IO, set_clean(9, false));
-    F.fail_kv = 0;
-    TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_SET, NULL, 0));
-    TEST_ASSERT_EQUAL_INT(15, map_int(s_ans, s_ans_len, "clean_every", -1));
-}
-
 void setUp(void) {}
 void tearDown(void) {}
 
@@ -1012,9 +841,5 @@ int main(void)
     RUN_TEST(test_gate_clocks_reported);
     RUN_TEST(test_steps_in_the_answer);
     RUN_TEST(test_full_every_setting);
-    RUN_TEST(test_clean_union_and_restart);
-    RUN_TEST(test_full_resets_clean);
-    RUN_TEST(test_clean_off_full_wins_no_mode);
-    RUN_TEST(test_clean_every_setting);
     return UNITY_END();
 }
