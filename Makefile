@@ -2,6 +2,7 @@ test: test-firmware test-python test-site   ## everything that needs no hardware
 
 test-firmware:
 	$(MAKE) -C firmware test
+	$(MAKE) -C firmware test32
 
 VENV := build/venv
 $(VENV)/bin/pytest: python/pyproject.toml
