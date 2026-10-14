@@ -10,9 +10,9 @@ import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "usb-display.json")
-HELLO, SHOW_BEGIN, SHOW_CHUNK, SHOW_END, CLEAR, SET, BT, HAVE = 0x01, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E
+HELLO, SHOW_BEGIN, SHOW_CHUNK, SHOW_END, CLEAR, SET, BT, HAVE, BT_AUTH = 0x01, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x10
 BT_NAME = "tp-display-VEC0"
-BT_AUTH = {"err": 12, "msg": "pair first: this Bluetooth link is not bonded"}
+AUTH = {"err": 12, "msg": "authenticate first: bt_auth with the key made over the USB cable"}
 
 
 def head(major, n):
@@ -411,26 +411,24 @@ def fingerprint_vectors():
                         BWRY if color else None).hex(), "fingerprint": fingerprint(W, H, bits, rows, color)})
     return out
 def bt_session():
-    """Bluetooth ("Bluetooth" in the spec): link says where the request arrives, secure whether that Bluetooth link is
-    bonded and encrypted. The panel's pairing screens are not part of the vectors."""
+    """Bluetooth ("Bluetooth" in the spec) before any key: link says where the request arrives; after every refusal over
+    ble the device drops the link (the next ble step is a new connection). Sealed frames: bt-key.json."""
     s = Session("bt", "vec_gray", [1, 2], None, partial_depths=[1], partial_all=True, full_every=20)
 
-    def st(name, link, cmd, req, resp, secure=False):
-        s.step(name, cmd, req, resp, link=link, **({"secure": secure} if link == "ble" else {}))
+    def st(name, link, cmd, req, resp):
+        s.step(name, cmd, req, resp, link=link)
 
-    def state(on, pairing=0):
-        return {"on": on, "pairing": pairing, "name": BT_NAME}
+    def state(on):
+        return {"on": on, "name": BT_NAME}
 
     st("hello_off", "usb", HELLO, {}, {**s.hello_resp(), "bt": "off"})
     st("state_off", "usb", BT, {}, state(False))
-    st("pair_while_off", "usb", BT, {"pair": True}, {"err": 36, "msg": "Bluetooth is off: bt { on: true } first"})
+    st("auth_over_usb", "usb", BT_AUTH, {}, {"err": 2, "msg": "bt_auth is for Bluetooth only"})
     st("on", "usb", BT, {"on": True}, state(True))
     st("hello_on", "usb", HELLO, {}, {**s.hello_resp(), "bt": "on"})
-    st("unbonded_hello", "ble", HELLO, {}, BT_AUTH)
-    st("unbonded_clear", "ble", CLEAR, {}, BT_AUTH)
-    st("pair", "usb", BT, {"pair": True}, state(True, 120))
-    st("bonded_hello", "ble", HELLO, {}, {**s.hello_resp(), "bt": "on"}, secure=True)
-    st("bonded_bt", "ble", BT, {"on": False}, {"err": 38, "msg": "bt works only over the USB cable"}, secure=True)
+    st("unauthenticated_hello", "ble", HELLO, {}, AUTH)
+    st("unauthenticated_clear", "ble", CLEAR, {}, AUTH)
+    st("auth_without_key", "ble", BT_AUTH, {"kid": bytes(8), "nonce": bytes(16)}, AUTH)
     st("forget", "usb", BT, {"forget": True}, state(True))
     st("off", "usb", BT, {"on": False}, state(False))
     return s
@@ -452,8 +450,8 @@ def build():
                      for code, msg in ((10, "panel failed"), (14, "no memory"))],
         "pictures": {k: {"png": p["png"].hex(), "bits": p["bits"], "pixels": pixels(p["rows"])} for k, p in PICS.items()},
         "sessions": [{"name": s.name, "panel": s.panel, "steps": s.steps} for s in (gray_session(), bwry_session())],
-        "bluetooth": {"about": "A device with Bluetooth (panel as session gray, name as given). link: usb or ble; "
-                               "secure: the Bluetooth link is bonded and encrypted. Replayed in order.",
+        "bluetooth": {"about": "A device with Bluetooth and no key (panel as session gray, name as given). link: usb "
+                               "or ble; each ble step is a new connection, dropped after its refusal. Replayed in order.",
                       "name": BT_NAME, "panel": bt.panel, "steps": bt.steps},
     }
 

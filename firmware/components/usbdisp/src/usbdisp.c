@@ -111,13 +111,15 @@ void usbdisp_fingerprint(const usbdisp_t *d, uint8_t depth, const uint8_t *rows,
 
 void usbdisp_send(usbdisp_t *d, const link_frame_t *f, const cbor_w_t *w)
 {
-    uint8_t out[sizeof d->tx + LINK_FRAME_OVERHEAD];
+    uint8_t out[sizeof d->tx + BTSEAL_TAG + LINK_FRAME_OVERHEAD];
     if (w->err)
         return; /* cannot happen: every answer fits tx (the host test builds each) */
+    if (d->via_bt) {
+        usbdisp_bt_send(d, out, sizeof out, f->seq, (uint8_t)(f->cmd | 0x80), d->tx, w->len);
+        return;
+    }
     size_t n = link_frame_encode(out, sizeof out, f->seq, (uint8_t)(f->cmd | 0x80), d->tx, w->len);
-    if (n && d->via_bt)
-        d->c.bt_write(d->c.ctx, out, n);
-    else if (n)
+    if (n)
         usbdisp_write_all(d, out, n);
 }
 
@@ -646,6 +648,8 @@ static void have(usbdisp_t *d, const link_frame_t *f)
 static void handle(usbdisp_t *d, const link_frame_t *in, bool busy)
 {
     link_frame_t f = *in; /* seq and cmd outlive the parser's buffer (show_end feeds it again) */
+    if (d->via_bt && !usbdisp_bt_unseal(d, &f))
+        return; /* every Bluetooth frame is opened first, or refused and the link dropped */
     if (f.cmd < 0x01 || f.cmd > 0x3F || !f.seq)
         return; /* not a request */
     if (f.len && (f.payload[0] >> 5 != 5 || !cbor_valid(f.payload, f.len))) {
@@ -671,8 +675,15 @@ static void handle(usbdisp_t *d, const link_frame_t *in, bool busy)
     case USBDISP_CMD_SET: set(d, &f); break;
     case USBDISP_CMD_HAVE: have(d, &f); break;
     case USBDISP_CMD_BT:
+    case USBDISP_CMD_BT_KEY:
+    case USBDISP_CMD_BT_AUTH:
         if (d->c.bt_open) {
-            usbdisp_bt_cmd(d, &f);
+            if (f.cmd == USBDISP_CMD_BT)
+                usbdisp_bt_cmd(d, &f);
+            else if (f.cmd == USBDISP_CMD_BT_KEY)
+                usbdisp_bt_key_cmd(d, &f);
+            else
+                usbdisp_bt_auth_cmd(d, &f);
             break;
         }
         /* fallthrough */
@@ -727,11 +738,11 @@ int usbdisp_poll(usbdisp_t *d, uint32_t timeout_ms)
     uint32_t bt_ms = timeout_ms < USBDISP_BT_RX_MS ? timeout_ms : USBDISP_BT_RX_MS;
     int n = pump(d, &d->usb, false, conn ? 0 : timeout_ms, false);
     if (d->bt)
-        n += pump(d, d->bt, true, conn ? bt_ms : 0, false);
+        n += pump(d, &d->bt->rx, true, conn ? bt_ms : 0, false);
     uint64_t now = d->c.now_us(d->c.ctx);
     forget_half(&d->usb, now);
     if (d->bt)
-        forget_half(d->bt, now);
+        forget_half(&d->bt->rx, now);
     if (d->png && now - d->last_us >= USBDISP_IDLE_US) {
         usbdisp_log(d, "W show: the transfer went quiet, dropped");
         usbdisp_xfer_drop(d);
@@ -746,5 +757,5 @@ void usbdisp_busy(usbdisp_t *d)
         return;
     pump(d, &d->usb, false, 0, true);
     if (d->bt)
-        pump(d, d->bt, true, 0, true);
+        pump(d, &d->bt->rx, true, 0, true);
 }
