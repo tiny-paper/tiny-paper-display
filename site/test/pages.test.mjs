@@ -74,6 +74,9 @@ test('the Sketch page loads only the site\'s own files: its policy says so and n
   }
 });
 
+// a plain link to TRMNL's own instructions, nothing is loaded from it
+const TRMNL_FLASHING_MODE = 'https://help.trmnl.com/en/articles/11936721-put-your-trmnl-in-flashing-mode';
+
 test('the whole site loads one thing from elsewhere: esptool-js from jsDelivr, on the flash page', () => {
   const urls = new Set();
   for (const f of readdirSync(SITE).filter((n) => /\.(html|js)$/.test(n))) {
@@ -81,7 +84,7 @@ test('the whole site loads one thing from elsewhere: esptool-js from jsDelivr, o
     const text = ['api.html', 'protocol.html'].includes(f) ? read(f).replace(/<pre>[^]*?<\/pre>/g, '') : read(f);
     for (const m of text.matchAll(/https?:\/\/[^\s"'<>)]+/g)) urls.add(m[0]);
   }
-  assert.deepEqual([...urls].sort(), ['https://cdn.jsdelivr.net/npm/esptool-js@0.7.0/bundle.js', 'https://github.com/espressif/esptool-js']);
+  assert.deepEqual([...urls].sort(), ['https://cdn.jsdelivr.net/npm/esptool-js@0.7.0/bundle.js', 'https://github.com/espressif/esptool-js', TRMNL_FLASHING_MODE]);
 });
 
 test('the bundle names the tool that made it', () => {
