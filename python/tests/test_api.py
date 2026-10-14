@@ -137,15 +137,35 @@ def test_a_picture_that_is_not_a_png_needs_pillow_or_says_so(bench):
             d.show(b"\xff\xd8\xff\xe0not really a jpeg")
 
 
-def test_configure_is_stored_on_the_device_and_none_clears(bench):
-    dev = bench.devices["A"] = FakeDevice()
+def test_configure_cleanup_maps_both_ways_and_none_clears(bench):
+    dev = bench.devices["A"] = FakeDevice(full_every=0)
     with tpd.open("A") as d:
-        assert d.caps.full_every == 30
-        caps = d.configure(full_every=50)
-        assert (caps.full_every, caps.full_every_set, dev.full_every) == (50, True, 50) and d.caps is caps
-        assert d.configure().full_every == 50, "no argument leaves it"
-        caps = d.configure(full_every=None)
-        assert (caps.full_every, caps.full_every_set) == (30, False)
+        assert d.caps.cleanup == {"areas": 15, "screen": 0}
+        caps = d.configure(cleanup={"screen": 30})
+        assert (dev.full_every, dev.clean_every) == (30, 15), "a key left out keeps its value"
+        assert caps.cleanup == {"areas": 15, "screen": 30} and d.caps is caps
+        caps = d.configure(cleanup={"areas": 5})
+        assert (dev.full_every, dev.clean_every) == (30, 5) and caps.cleanup == {"areas": 5, "screen": 30}
+        assert d.configure().cleanup == {"areas": 5, "screen": 30}, "no argument leaves it"
+        caps = d.configure(cleanup={"areas": 0, "screen": 0})
+        assert caps.cleanup == {"areas": 0, "screen": 0} and (caps.clean_every_set, caps.full_every_set) == (True, True)
+        caps = d.configure(cleanup=None)
+        assert caps.cleanup == {"areas": 15, "screen": 0} and (caps.clean_every_set, caps.full_every_set) == (False, False)
+
+
+def test_configure_cleanup_refuses_bad_values_before_sending(bench):
+    dev = bench.devices["A"] = FakeDevice(full_every=0)
+    with tpd.open("A") as d:
+        for bad in ({"area": 3}, {"areas": 251}, {"screen": -1}, {"areas": "5"}, {"areas": True}, "auto", 5):
+            with pytest.raises(tpd.DisplayError, match="cleanup"):
+                d.configure(cleanup=bad)
+        assert (dev.full_every, dev.clean_every, dev.every_set, dev.clean_set) == (0, 15, False, False)
+
+
+def test_cleanup_of_an_older_firmware_without_clean_every(bench):
+    from tiny_paper_display import display_fw
+    assert display_fw.cleanup_of(30, None) == {"areas": 0, "screen": 30}
+    assert display_fw.cleanup_of(None, None) is None
 
 
 def test_open_all_and_a_group_of_two_fake_devices(bench):
@@ -364,7 +384,7 @@ def test_info_logging_has_the_times_of_a_show(bench, capsys):
 def test_info_logging_has_the_device_steps(bench, capsys):
     """The device's ms for each step of a show (recv, prep, inflate, ...) are in the info line and in describe()."""
     dev = bench.devices["A"] = FakeDevice(w=16, h=8)
-    dev.steps = {"recv": 11, "prep": 2, "inflate": 31, "convert": 17, "diff": 3, "fingerprint": 5, "panel": 70, "total": 150}
+    dev.steps = {"recv": 11, "prep": 2, "inflate": 31, "convert": 17, "diff": 3, "fingerprint": 5, "panel": 70, "clean": 0, "total": 150}
     with tpd.open("A", log="info") as d:
         reply = d.show(tpd.Canvas(16, 8, 0))
     err = capsys.readouterr().err

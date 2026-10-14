@@ -78,8 +78,8 @@ for dev in tpd.devices():                    # USB ports that answer as the disp
     print(dev.port, dev.board, dev.w, dev.h)
 
 with tpd.open() as d:                        # the first device; tpd.open("COM5"), tpd.open(bluetooth="NAME")
-    print(d.caps.depths, d.caps.full_every)  # what the board can do
-    d.configure(full_every=30)               # stored on the device; None brings the default back
+    print(d.caps.depths, d.caps.cleanup)  # what the board can do
+    d.configure(cleanup={"screen": 30})      # stored on the device; None brings the defaults back
     d.show("picture.png", fit="fit", dither="floyd")
     box = tpd.Canvas(8, 4, 0)                # drawn in code: gray levels 0 (black) to 15
     d.area(box, 8, 0)                        # a rectangle; x and its width multiples of 8
@@ -94,7 +94,7 @@ with tpd.open() as d:                        # the first device; tpd.open("COM5"
 | `tpd.show(picture)` | open the first device, show, close |
 | `d.show(picture, fit, border, dither, depth, threshold, rotate, mode)` | any picture: a path, bytes or a `Canvas` |
 | `d.area(picture, x, y, mode=None)` | a rectangle at its own size; refused before sending when `x` or the width is not a multiple of 8 or it leaves the panel |
-| `d.configure(full_every=...)` | a setting that lives on the device; returns the new `d.caps` |
+| `d.configure(cleanup=...)` | ghosting clean-up, stored on the device: `{"areas": N, "screen": M}`; returns the new `d.caps` (`d.caps.cleanup`) |
 | `d.clear()` | a white panel |
 
 Picture options are per call, with the defaults of the connection (`d.defaults`, or keywords of `open`); they are never

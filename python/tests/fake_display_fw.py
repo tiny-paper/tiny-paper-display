@@ -19,12 +19,13 @@ class Refuse(Exception):
 
 class FakeDevice:
     def __init__(self, w=16, h=8, depths=(1, 2), partial_depths=(1,), partial_all=True, full_every=30,
-                 board="fake", fw_version="0.0.0+fake", ckv=None, hello=None, bt=None, name="tp-display-FAKE"):
+                 board="fake", fw_version="0.0.0+fake", ckv=None, hello=None, bt=None, name="tp-display-FAKE", clean_every=15):
         self.w, self.h, self.depths, self.partial_depths = w, h, list(depths), list(partial_depths)
         self.partial_all, self.full_every, self.board, self.fw = partial_all, full_every, board, fw_version
         self.default_every, self.every_set = full_every, False
+        self.clean_every, self.default_clean, self.clean_set = clean_every, clean_every, False
         self.max_png = ((w * max(depths) + 7) // 8 + 1) * h + 4096
-        self.steps = dict.fromkeys(("recv", "prep", "inflate", "convert", "diff", "fingerprint", "panel", "total"), 0)
+        self.steps = dict.fromkeys(("recv", "prep", "inflate", "convert", "diff", "fingerprint", "panel", "clean", "total"), 0)
         self.ckv, self.hello_override = ckv, hello  # ckv: the gate clock map of every answer (a TRMNL X)
         self.png = None                # the open transfer: [size, bytes, target]
         self.glass = None              # what the panel shows: packed rows at glass_depth (the whole panel)
@@ -76,6 +77,7 @@ class FakeDevice:
             "depths": self.depths, "max_payload": 6144, "max_png": self.max_png, "chunk": 4096,
             "partial_depths": self.partial_depths, "modes": self.modes(), "depth_modes": self.depth_modes(),
             "full_every": self.full_every, "full_every_set": self.every_set,
+            "clean_every": self.clean_every, "clean_every_set": self.clean_set,
             "fingerprint_hash": "fnv1a64", **({"fingerprint": self.fingerprint} if self.fingerprint else {})}
         return {**base, "bt": self.bt} if self.bt and not self.hello_override else base
 
@@ -112,7 +114,14 @@ class FakeDevice:
                 if type(p["full_every"]) is not int or not 0 <= p["full_every"] <= 250:
                     raise Refuse(2, "full_every is 0 (never) to 250")
                 self.full_every, self.every_set = p["full_every"], True
-            return {"full_every": self.full_every, "full_every_set": self.every_set}
+            if "clean_every" in p and p["clean_every"] is None:
+                self.clean_every, self.clean_set = self.default_clean, False
+            elif "clean_every" in p:
+                if type(p["clean_every"]) is not int or not 0 <= p["clean_every"] <= 250:
+                    raise Refuse(2, "clean_every is 0 (never) to 250")
+                self.clean_every, self.clean_set = p["clean_every"], True
+            return {"full_every": self.full_every, "full_every_set": self.every_set,
+                    "clean_every": self.clean_every, "clean_every_set": self.clean_set}
         if cmd == fw.BT and self.bt:
             return self.set_bt(p)
         raise Refuse(1, "this is the display firmware: hello, show, clear, set")

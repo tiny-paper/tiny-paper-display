@@ -58,7 +58,7 @@ def device(name, **more):
     """The fake firmware with the session's panel."""
     p = session(name)["panel"]
     return FakeDevice(p["w"], p["h"], p["depths"], p["partial_depths"], p["partial_all"], p["full_every"], p["board"],
-                      p["fw"], **more)
+                      p["fw"], clean_every=p.get("clean_every", 15), **more)
 
 
 def replay(name, busy_first=0, hello=None):
@@ -107,7 +107,7 @@ def test_hello_show_clear():
     assert fw.is_display_firmware(hello) and (hello["w"], hello["h"], hello["depths"]) == (16, 8, [1, 2])
     assert hello["partial_depths"] == [1] and hello["modes"] == list(fw.MODES) and hello["full_every"] == 20
     whole = {"x": 0, "y": 0, "w": 16, "h": 8}
-    zero = dict.fromkeys(("recv", "prep", "inflate", "convert", "diff", "fingerprint", "panel", "total"), 0)
+    zero = dict.fromkeys(("recv", "prep", "inflate", "convert", "diff", "fingerprint", "panel", "clean", "total"), 0)
     assert fw.show_png(d, picture("gray2"), hello) == {"depth": 2, "ms": 0, "mode": "full", "why": "depth", **whole, "steps": zero}
     assert fw.clear(d) == {"depth": 1, "ms": 0, "mode": "full", "why": "asked", **whole}
     assert state["seen"] == [fw.HELLO, fw.SHOW_BEGIN, fw.SHOW_CHUNK, fw.SHOW_END, fw.CLEAR]

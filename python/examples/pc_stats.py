@@ -569,7 +569,10 @@ def main(argv=None):
     ap.add_argument("--bluetooth", metavar="NAME_OR_ADDRESS")
     ap.add_argument("--interval", type=float, default=5, help="seconds between pages (default 5)")
     ap.add_argument("--depth", type=int, default=1, choices=(1, 2, 4), help="gray bits (default 1: fastest partial refresh)")
-    ap.add_argument("--full-every", type=int, metavar="N", help="a full refresh after N partial ones (sets it on the device)")
+    ap.add_argument("--cleanup-areas", type=int, metavar="N",
+                    help="clean the changed parts every N updates (device default 15, 0 never; stored on the device)")
+    ap.add_argument("--cleanup-screen", type=int, metavar="M",
+                    help="refresh the whole screen every M updates (device default 0 never; stored on the device)")
     ap.add_argument("--once", action="store_true", help="draw one page and exit")
     ap.add_argument("--verbose", action="store_true", help="one line per cycle: host and device times, mode, why")
     ap.add_argument("--png", metavar="FILE", help="write the page to a PNG and exit (no device)")
@@ -594,8 +597,9 @@ def main(argv=None):
     sampler.sample()  # the first counters; rates start with the next sample
     try:
         with tpd.open(args.port, args.bluetooth) as d:
-            if args.full_every is not None:
-                d.configure(full_every=args.full_every)
+            given = {k: v for k, v in (("areas", args.cleanup_areas), ("screen", args.cleanup_screen)) if v is not None}
+            if given:
+                d.configure(cleanup=given)
             slots = sampler.n
             nxt = time.monotonic()
             while True:
