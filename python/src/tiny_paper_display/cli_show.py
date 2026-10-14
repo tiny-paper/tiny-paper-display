@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# Show a host PNG through the current USB album upload path.
+# Show a host PNG (the command line; the API is api.py: tpd.show) through the current USB album upload path.
 """Upload a PNG to the USB album. A Photos album consumer must already be active."""
 import argparse
 import json

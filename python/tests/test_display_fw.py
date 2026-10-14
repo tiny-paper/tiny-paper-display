@@ -10,7 +10,7 @@ import zlib
 import pytest
 
 from tiny_paper_display import display_fw as fw
-from tiny_paper_display import show
+from tiny_paper_display import cli_show as show
 from conftest import FakePort, png
 from fake_display_fw import FakeDevice
 from tiny_paper_display.usb_display import ROOT, Display, DisplayError, codec

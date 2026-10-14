@@ -9,7 +9,7 @@ import pytest
 
 from tiny_paper_display import ble_port
 from tiny_paper_display import display_fw as fw
-from tiny_paper_display import show
+from tiny_paper_display import cli_show as show
 from fake_ble import Air, install
 from fake_display_fw import FakeDevice
 from test_display_fw import V, plain
