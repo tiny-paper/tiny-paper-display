@@ -12,9 +12,9 @@ requires-python = ">=3.9"
 dependencies = ["pyserial>=3.5"]
 
 [project.optional-dependencies]
-bluetooth = ["bleak>=0.22"]
+bluetooth = ["bleak>=0.22", "cryptography>=42"]
 images = ["pillow>=10"]
-test = ["pytest>=8,<10", "pyyaml>=6"]
+test = ["pytest>=8,<10", "pyyaml>=6", "cryptography>=42"]
 
 [project.scripts]
 tiny-paper-display = "tiny_paper_display.cli:main"

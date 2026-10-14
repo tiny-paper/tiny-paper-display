@@ -3,7 +3,8 @@
 """A serial-port-like object over BLE for the display firmware (docs/spec/usb-display.md "Bluetooth").
 
 The bytes are the USB link's frames: written to RX in pieces of at most MTU-3 bytes, read from TX as notifications of
-any size. `bleak` (pip install tiny-paper-display[bluetooth]) runs its asyncio loop in a thread of its own, so the
+any size. They are sealed with the key made over the cable (bt_key.SealedPort wraps this port); there is no system
+pairing. `bleak` (pip install tiny-paper-display[bluetooth]) runs its asyncio loop in a thread of its own, so the
 callers stay plain blocking code. Radio behaviour on a real device is unproven until a person has tried it.
 """
 import asyncio
@@ -14,7 +15,7 @@ import time
 from .usb_display import DisplayError
 
 SERVICE = "48770001-4516-40a8-8cc6-57e06fe2ff0d"
-RX, TX, PAIR = (f"4877000{n}-4516-40a8-8cc6-57e06fe2ff0d" for n in (2, 3, 4))
+RX, TX = (f"4877000{n}-4516-40a8-8cc6-57e06fe2ff0d" for n in (2, 3))
 SCAN_S = 30  # on battery the device advertises 2 s in every 20 s
 MIN_MTU = 23
 INSTALL_HINT = "Bluetooth needs the bleak library: pip install tiny-paper-display[bluetooth]"
@@ -47,15 +48,15 @@ def find(timeout=5):
 
 
 class BlePort:
-    """Connects to the device with this name or address (scans up to scan_s seconds) and reads Pair once, so that
-    the host's system pairs. write() returns when the whole frame is written; read() waits up to .timeout."""
+    """Connects to the device with this name or address (scans up to scan_s seconds); .name is its advertised name.
+    write() returns when the whole frame is written; read() waits up to .timeout."""
 
     is_ble = True
 
     def __init__(self, target, scan_s=SCAN_S):
         self.bleak = load_bleak()
         self.timeout, self.write_timeout = 0.05, 2
-        self.mtu, self.pair_error = MIN_MTU, None
+        self.mtu, self.name = MIN_MTU, None
         self.buf, self.lost, self.client = bytearray(), False, None
         self.cond = threading.Condition()
         self.loop = asyncio.new_event_loop()
@@ -86,13 +87,10 @@ class BlePort:
         if found is None:
             raise DisplayError(f"no display named {target} found in {scan_s} s: on battery it advertises only 2 s "
                                f"in every 20 s; is Bluetooth on (tiny-paper-display setup) and the device awake?")
+        self.name = found.name or (None if ADDRESS.match(target) else target)
         self.client = self.bleak.BleakClient(found, disconnected_callback=self.on_lost, timeout=scan_s)
         await self.client.connect()
         self.mtu = max(MIN_MTU, int(self.client.mtu_size or MIN_MTU))
-        try:  # an encrypted read: the host's system pairs now. Refused: the writes say so later
-            await self.client.read_gatt_char(PAIR)
-        except Exception as exc:
-            self.pair_error = exc
         await self.client.start_notify(TX, self.on_data)
 
     def on_data(self, _char, data):
@@ -125,8 +123,7 @@ class BlePort:
         try:
             self.run(self.put_frame(bytes(data)), max(self.write_timeout, len(data) / 100))
         except DisplayError as exc:
-            hint = " (not paired? run tiny-paper-display setup with the cable and press the device's button)"
-            raise OSError(f"{exc}{hint if self.pair_error else ''}") from exc
+            raise OSError(str(exc)) from exc
         return len(data)
 
     def read(self, size):

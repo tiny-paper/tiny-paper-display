@@ -23,16 +23,16 @@ class Disconnected(DisplayError):
     """The port is gone, stalled or stopped answering: a transfer was cut."""
 
 
-class NotPaired(DisplayError):
-    """AUTH (12): a request over Bluetooth on a link that is not bonded."""
+class NotAuthorized(DisplayError):
+    """AUTH (12): a request over Bluetooth before the handshake with the device's key."""
 
 
 class CableOnly(DisplayError):
-    """CABLE (38): the Bluetooth setting, pairing window and bonds change only over the USB cable."""
+    """CABLE (38): the Bluetooth setting and key change only over the USB cable."""
 
 
-PLAIN = {12: (NotPaired, "not paired: run setup with the cable and press the device's button"),
-         38: (CableOnly, "this works only over the USB cable (the Bluetooth setting, pairing and bonds)")}
+PLAIN = {12: (NotAuthorized, "not authorized: make a Bluetooth key over the USB cable (tiny-paper-display setup --key)"),
+         38: (CableOnly, "this works only over the USB cable (the Bluetooth setting and key)")}
 
 
 def refusal_error(reply):
@@ -43,11 +43,24 @@ def refusal_error(reply):
     return None
 
 
-def open_port(port=None, bluetooth=None, scan_s=None):
-    """The serial port `port`, or the display named or addressed `bluetooth`, with the timeouts the examples use."""
+def open_port(port=None, bluetooth=None, scan_s=None, key_file=None):
+    """The serial port `port`, or the display named or addressed `bluetooth`, with the timeouts the examples use.
+    Over Bluetooth the frames are sealed with the device's key: key_file, else the key folder's file of its name
+    (bt_key.load); no key: bt_key.NoKey before the radio is used when the name is given."""
     if bluetooth:
-        from .ble_port import SCAN_S, BlePort
-        opened = BlePort(bluetooth, scan_s or SCAN_S)
+        from . import bt_key
+        from .ble_port import ADDRESS, SCAN_S, BlePort, load_bleak
+        load_bleak()  # a missing library is said first
+        bt_key.require()  # the same for cryptography
+        by_address = ADDRESS.match(bluetooth) and not key_file
+        key = None if by_address else bt_key.load(bluetooth, key_file)  # no key: said before the radio is used
+        raw = BlePort(bluetooth, scan_s or SCAN_S)
+        try:
+            key = key or bt_key.load(raw.name)  # an address: the key file goes by the name it advertises
+            opened = bt_key.SealedPort(raw, key["key"])
+        except BaseException:
+            raw.close()
+            raise
     else:
         opened = codec.open_serial(port)
     opened.timeout, opened.write_timeout = 0.05, 2
