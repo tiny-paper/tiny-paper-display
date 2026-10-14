@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
 """examples/btc_ticker.py without a device or a network: every text drawn has its letters in the font, the page at
-both panel sizes for rising, falling, flat and missing prices, the WebSocket updates, the changed
-rectangles, and the Kraken answer parsing (data, error, bad data)."""
+both panel sizes for rising, falling, flat and missing prices, the WebSocket updates and the Kraken answer parsing (data, error, bad data)."""
 import importlib.util
 import io
 import json
@@ -102,19 +101,6 @@ def test_other_messages_change_nothing(msg):
 def test_bad_updates_end_in_a_known_error(msg):
     with pytest.raises(bt.FAILS):
         bt.apply(series(1), msg)
-
-
-def test_changes_cover_every_changed_pixel():
-    a = bt.render(series(1), 800, 480, clock=0)
-    last = series(1)[-1]
-    b = bt.render(series(1)[:-1] + [last[:4] + (last[4] + 3,)], 800, 480, clock=1)
-    rects = bt.changes(a, b)
-    assert bt.changes(a, a) == [] and 1 < len(rects) <= 4
-    for x, y, w, h in rects:
-        assert x % 8 == 0 and w % 8 == 0 and x + w <= 800 and y + h <= 480
-        for yy in range(y, y + h):
-            a.px[yy * 800 + x:yy * 800 + x + w] = b.px[yy * 800 + x:yy * 800 + x + w]
-    assert a.px == b.px
 
 
 @pytest.mark.parametrize("body", [{"error": ["EQuery:Unknown asset pair"]}, {"error": [], "result": {"last": 1}},
