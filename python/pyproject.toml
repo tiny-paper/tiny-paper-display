@@ -14,7 +14,7 @@ dependencies = ["pyserial>=3.5"]
 [project.optional-dependencies]
 bluetooth = ["bleak>=0.22"]
 images = ["pillow>=10"]
-test = ["pytest>=8,<10", "pyyaml>=6", "paho-mqtt>=2,<3"]
+test = ["pytest>=8,<10", "pyyaml>=6"]
 
 [project.scripts]
 tiny-paper-display = "tiny_paper_display.cli:main"
