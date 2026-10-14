@@ -280,8 +280,10 @@ class Device:
             raise PanelFault(reply)
         self._next_force = False
         steps = display_fw.steps_text(reply)
-        logger.info("%s: host prepare %s ms, transfer %s ms; device %s (%s) %s ms%s", what, reply["prepare_ms"],
-                    reply["transfer_ms"], reply.get("mode"), reply.get("why"), reply.get("ms"), f" ({steps})" if steps else "")
+        clean = display_fw.clean_text(reply)
+        logger.info("%s: host prepare %s ms, transfer %s ms; device %s (%s) %s ms%s%s", what, reply["prepare_ms"],
+                    reply["transfer_ms"], reply.get("mode"), reply.get("why"), reply.get("ms"), f", {clean}" if clean else "",
+                    f" ({steps})" if steps else "")
         return reply
 
     _next_force = False

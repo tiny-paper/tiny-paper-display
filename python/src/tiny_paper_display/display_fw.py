@@ -290,6 +290,17 @@ def steps_text(reply):
     return "steps " + ", ".join(f"{k} {steps[k]}" for k in STEP_KEYS if k in steps) if steps else ""
 
 
+def clean_text(reply):
+    """The tiles the device cleaned after a show ("clean 2 tiles 390 ms"); empty when none, or from a firmware without it.
+    `clean` is a list of {x, y, w, h, mode, ms}."""
+    tiles = reply.get("clean")
+    if isinstance(tiles, dict):  # the first firmware answered one rectangle
+        tiles = [tiles]
+    if not tiles:
+        return ""
+    return f"clean {len(tiles)} tile{'s' if len(tiles) != 1 else ''} {sum(t.get('ms', 0) for t in tiles)} ms"
+
+
 def describe(reply):
     """One line of an answer: which refresh ran, why, where, how long, and the gate clocks the device counted."""
     if reply.get("skipped"):
@@ -301,6 +312,8 @@ def describe(reply):
     ckv = reply.get("ckv")
     if ckv:
         out += f" ckv {ckv['per']}/frame for {ckv['rows']} rows" + ("" if ckv["ok"] else " WRONG GATE CLOCK")
+    if clean_text(reply):
+        out += f" {clean_text(reply)}"
     if reply.get("steps"):
         out += f" [{steps_text(reply)}]"
     if "prepare_ms" in reply:  # the host's own time, apart from the device's ms

@@ -608,8 +608,9 @@ def main(argv=None):
                 try:
                     r = d.show(page.c, depth=args.depth)
                     if args.verbose:
+                        cleaned = tpd.display_fw.clean_text(r)
                         print(f"prepare {r['prepare_ms']} ms, transfer {r['transfer_ms']} ms, device {r.get('ms')} ms, "
-                              f"{r.get('mode')}, {r.get('why')}; drawn in {round((time.monotonic() - t0) * 1000)} ms", flush=True)
+                              f"{r.get('mode')}, {r.get('why')}{', ' + cleaned if cleaned else ''}; drawn in {round((time.monotonic() - t0) * 1000)} ms", flush=True)
                 except tpd.DisplayError as e:
                     print(f"show failed, trying again next cycle: {e}", file=sys.stderr)
                 if args.once:

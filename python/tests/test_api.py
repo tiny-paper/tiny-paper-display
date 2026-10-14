@@ -381,6 +381,19 @@ def test_info_logging_has_the_times_of_a_show(bench, capsys):
     assert "request 0x" not in err, "debug lines are not info"
 
 
+def test_clean_tiles_in_the_log_and_describe(bench, capsys):
+    """The tiles the device cleaned are in the info line and in describe() as "clean 2 tiles 390 ms"; none, nothing."""
+    dev = bench.devices["A"] = FakeDevice(w=16, h=8)
+    dev.clean = [{"x": 0, "y": 0, "w": 8, "h": 8, "mode": "passes", "ms": 200}, {"x": 8, "y": 0, "w": 8, "h": 8, "mode": "passes", "ms": 190}]
+    with tpd.open("A", log="info") as d:
+        reply = d.show(tpd.Canvas(16, 8, 0))
+    assert "clean 2 tiles 390 ms" in capsys.readouterr().err
+    assert "clean 2 tiles 390 ms" in display_fw.describe(reply)
+    assert display_fw.clean_text({"clean": [dev.clean[0]]}) == "clean 1 tile 200 ms"
+    assert display_fw.clean_text({}) == "" and display_fw.clean_text({"clean": []}) == ""
+    assert "clean" not in display_fw.describe({"mode": "full", "why": "asked", "depth": 1, "ms": 0})
+
+
 def test_info_logging_has_the_device_steps(bench, capsys):
     """The device's ms for each step of a show (recv, prep, inflate, ...) are in the info line and in describe()."""
     dev = bench.devices["A"] = FakeDevice(w=16, h=8)

@@ -73,7 +73,7 @@ cache: after a lost answer send <code>hello</code> and start the picture again.<
 <td>0x01</td>
 <td>hello</td>
 <td>any map (the app&#39;s <code>{ proto: 1, app: tstr }</code> is fine)</td>
-<td><code>{ proto: 1, project: &quot;display&quot;, fw: tstr, board: tstr, w: uint, h: uint, depths: [uint], colors?: [tstr], max_payload: 6144, max_png: uint, chunk: 4096, partial_depths: [uint], modes: [tstr], depth_modes: map, full_every: uint, full_every_set: bool, fingerprint_hash: &quot;fnv1a64&quot;, fingerprint?: tstr, bt?: tstr, partial_max?: map, tuning?: map, full_area?: [uint] }</code> (<code>partial_max</code>, <code>full_area</code>: &quot;Area and refresh mode&quot;; <code>tuning</code>: &quot;Tuning&quot;)</td>
+<td><code>{ proto: 1, project: &quot;display&quot;, fw: tstr, board: tstr, w: uint, h: uint, depths: [uint], colors?: [tstr], max_payload: 6144, max_png: uint, chunk: 4096, partial_depths: [uint], modes: [tstr], depth_modes: map, full_every: uint, full_every_set: bool, clean_every: uint, clean_every_set: bool, fingerprint_hash: &quot;fnv1a64&quot;, fingerprint?: tstr, bt?: tstr, partial_max?: map, tuning?: map, full_area?: [uint] }</code> (<code>partial_max</code>, <code>full_area</code>: &quot;Area and refresh mode&quot;; <code>tuning</code>: &quot;Tuning&quot;)</td>
 </tr>
 <tr>
 <td>0x08</td>
@@ -102,8 +102,8 @@ cache: after a lost answer send <code>hello</code> and start the picture again.<
 <tr>
 <td>0x0C</td>
 <td>set</td>
-<td><code>{ full_every?: uint or null, tuning?: map or &quot;defaults&quot; }</code> <code>full_every</code> 0 (never) .. 250, null: remove the stored value, the default (30) applies again; &quot;Tuning&quot;; without a key nothing changes</td>
-<td><code>{ full_every: uint, full_every_set: bool, tuning?: map, refused?: map }</code> <code>full_every</code> as in use (<code>full_every_set</code> as in hello), stored on the device, kept over power-off; the others under &quot;Tuning&quot;</td>
+<td><code>{ full_every?: uint or null, clean_every?: uint or null, tuning?: map or &quot;defaults&quot; }</code> <code>full_every</code>, <code>clean_every</code> 0 (never) .. 250, null: remove the stored value, the default (0 and 15) applies again; &quot;Tuning&quot;; without a key nothing changes</td>
+<td><code>{ full_every: uint, full_every_set: bool, clean_every: uint, clean_every_set: bool, tuning?: map, refused?: map }</code> <code>full_every</code>, <code>clean_every</code> as in use (the <code>_set</code> flags as in hello), each stored on the device under its own key, kept over power-off; the others under &quot;Tuning&quot;</td>
 </tr>
 <tr>
 <td>0x0D</td>
@@ -122,7 +122,7 @@ cache: after a lost answer send <code>hello</code> and start the picture again.<
 <code>UNKNOWN_CMD</code>. <code>board</code>: <code>trmnl_og</code>, <code>picpak</code>, <code>trmnl_x</code>. <code>depths</code>: the gray bit depths taken. <code>colors</code>
 (<code>[&quot;black&quot;,&quot;white&quot;,&quot;red&quot;,&quot;yellow&quot;]</code>, PicPak): the panel&#39;s own colors. <code>warn</code>: the driver reported a refresh in less
 time than the panel needs (SPI panels: under 300 ms): look at the panel. <code>partial_depths</code>: the depths the board
-refreshes partially now (empty: none; the tuning key <code>driver</code> takes the gray depths away while it is <code>plain</code>). <code>modes</code>: the modes it does at some depth. <code>depth_modes</code>: <code>{ &quot;1&quot;: [tstr], &quot;2&quot;: [tstr], &quot;4&quot;: [tstr] }</code>, a key for each of <code>depths</code> (text keys), the modes a <code>show</code> of a whole picture at that depth is accepted with, from the same check that refuses the others with MODE 36 (a TRMNL X at 2 and 4 bit lists <code>full</code> and <code>partial</code> only, <code>partial_all</code>, <code>inverse</code> and <code>passes</code> need a 1 bit picture; a firmware from before this field lacks it: try the mode and read the refusal). <code>full_every</code>: the setting in use (default 30); <code>full_every_set</code>: true when it is a stored value, false while the default applies (<code>set</code> with <code>full_every: null</code> makes it false again). <code>bt</code>: <code>&quot;off&quot;</code> or
+refreshes partially now (empty: none; the tuning key <code>driver</code> takes the gray depths away while it is <code>plain</code>). <code>modes</code>: the modes it does at some depth. <code>depth_modes</code>: <code>{ &quot;1&quot;: [tstr], &quot;2&quot;: [tstr], &quot;4&quot;: [tstr] }</code>, a key for each of <code>depths</code> (text keys), the modes a <code>show</code> of a whole picture at that depth is accepted with, from the same check that refuses the others with MODE 36 (a TRMNL X at 2 and 4 bit lists <code>full</code> and <code>partial</code> only, <code>partial_all</code>, <code>inverse</code> and <code>passes</code> need a 1 bit picture; a firmware from before this field lacks it: try the mode and read the refusal). <code>full_every</code>: the setting in use (default 0, never); <code>full_every_set</code>: true when it is a stored value, false while the default applies (<code>set</code> with <code>full_every: null</code> makes it false again). <code>clean_every</code>, <code>clean_every_set</code>: the same for the clean of the changed area (default 15; &quot;Clean of the changed area&quot;). <code>bt</code>: <code>&quot;off&quot;</code> or
 <code>&quot;on&quot;</code>, the Bluetooth setting; absent on a build without Bluetooth, which answers <code>bt</code> with <code>UNKNOWN_CMD</code>.</p>
 <p>Example (vector session <code>gray</code>, a 16 x 8 test panel, partial at 1 bit):</p>
 <table>
@@ -333,6 +333,10 @@ frame. A whole picture without a mode gives up the frame kept when memory is sho
 <td>with the mode <code>passes</code></td>
 </tr>
 <tr>
+<td><code>clean</code></td>
+<td>when a clean ran after this update: a list of at most 3 tiles <code>[{ x, y, w, h, mode, ms }]</code>, each rectangle cleaned, the mode used and its time (&quot;Clean of the changed area&quot;)</td>
+</tr>
+<tr>
 <td><code>ckv</code></td>
 <td>TRMNL X: <code>{ edges: uint, frames: uint, per: uint, rows: uint, ok: bool }</code>, the gate clock edges the firmware counted over the last refresh of the update, the drive frames, edges a frame, the panel&#39;s rows; <code>ok</code> false when a frame did not clock once per row (the picture is then drawn at the wrong height). Log: <code># display W show ... WRONG</code></td>
 </tr>
@@ -375,13 +379,62 @@ monotonic clock. The steps are disjoint and run one after the other, so their su
 <td>the panel calls (the same as <code>ms</code>)</td>
 </tr>
 <tr>
+<td><code>clean</code></td>
+<td>the sum of the <code>clean</code> tiles&#39; time after the update (0: none ran); not in <code>panel</code></td>
+</tr>
+<tr>
 <td><code>total</code></td>
 <td>first <code>show_chunk</code> to the answer being built; what is not in a step (the wait between the last chunk and <code>show_end</code>, mode choice, freeing) is the rest</td>
 </tr>
 </tbody></table>
 <p>The device log line <code>show ...</code> ends with <code>steps=recv/prep/inflate/convert/diff/fingerprint/panel/total</code>.</p>
-<p><code>full_every</code> (default 30, <code>set</code>): the count of partial updates since the last full refresh; a named mode is run as
+<p><code>full_every</code> (default 0: never, <code>set</code>): the count of partial updates since the last full refresh; a named mode is run as
 named and counts, except an unchanged <code>partial</code> which uses no count.</p>
+<h3 id="clean-of-the-changed-area">Clean of the changed area</h3>
+<p>A 1 bit partial update turns black back to white only weakly, so light ghosting builds up in a page that redraws every few
+seconds. Instead of a flash of the whole screen the device cleans only the small areas that kept changing. It keeps a dirty
+map: a fixed grid of tiles over the panel, one counter each. <code>clean_every</code> (<code>set</code>, 0..250, 0 = off, default 15): a tile is
+due when its counter reaches it. The tile edges are multiples of 8 px (a rectangle starts and ends on a byte at every depth)
+and the grid is about 8 columns by 6 rows: the panel&#39;s width over 8 and its height over 6, each rounded up to a multiple of 8
+(240 x 240 px on the TRMNL X, 1872 x 1404). That is small enough that a clock, a graph and a block of numbers fall in
+different tiles, and few enough (at most 48) for a one-byte counter each. The answer of the <code>show_end</code> that cleans carries
+<code>clean: [{ x, y, w, h, mode, ms }, ...]</code>, one entry per tile cleaned, and <code>steps.clean</code> the time of them all.</p>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Counting</td>
+<td>each update that drove a partial refresh adds 1 to the counter of every tile that holds a changed pixel (found by comparing the new frame with the frame kept, not from the bounding rectangle: a clock at the top and a number at the bottom mark two tiles, not the middle); a rectangle&#39;s full refresh (<code>why: &quot;area&quot;</code>) counts like a partial one</td>
+</tr>
+<tr>
+<td>Full refresh</td>
+<td>a full refresh of the whole panel resets every counter</td>
+</tr>
+<tr>
+<td>Cleaning</td>
+<td>after an update that counted, the due tiles are cleaned, the one with the highest counter first, each as its own rectangle redrawing the frame kept, then its counter is reset. At most 3 tiles per update, and no further tile is started once the clean took 1.5 s: the rest stay due and are cleaned by the next update that drives the panel</td>
+</tr>
+<tr>
+<td>Both due</td>
+<td><code>full_every</code> reached: the next update is the full refresh and no clean runs; the full resets all counters</td>
+</tr>
+<tr>
+<td>Mode</td>
+<td>the gentlest that removes traces: <code>passes</code> (the tile driven twice, no inversion, no flash). A depth without <code>passes</code> takes <code>inverse</code>, then <code>partial_all</code>. A depth with none of the modes (the TRMNL X at 2 and 4 bit lists <code>full</code> and <code>partial</code> only) is not cleaned: it is left to <code>full_every</code>. A setting to choose the mode (<code>inverse</code> flips the tile through its opposite) is not built</td>
+</tr>
+<tr>
+<td>No memory, panel refusal</td>
+<td>no memory for the negative of <code>inverse</code>: no clean now, the tiles stay due; a panel failure: refused <code>IO</code> and the frame kept is forgotten, as for any update</td>
+</tr>
+<tr>
+<td>Default 15</td>
+<td>a pc_stats-style page at 1 bit shows the first light ghost after about 10 to 20 partial updates; 15 cleans before it is seen. Not measured on the glass: whether two <code>passes</code> remove the traces is still to be seen on the X</td>
+</tr>
+</tbody></table>
 <h2 id="tuning">Tuning</h2>
 <p>For comparing how the panel is driven without reflashing. Only the TRMNL X has knobs: <code>hello.tuning</code> is a map of every
 key to its value now (a number, or a word where the key has words); other boards have no <code>tuning</code> in hello and refuse every
@@ -694,7 +747,7 @@ drives only the pixels that changed, so there is no such step.</p>
 <tr>
 <td>2</td>
 <td>BAD_REQUEST</td>
-<td>payload not one CBOR map, a key missing or of the wrong type, a first chunk under 29 bytes, <code>passes</code> without the mode <code>passes</code> or outside 1..4, <code>full_every</code> over 250</td>
+<td>payload not one CBOR map, a key missing or of the wrong type, a first chunk under 29 bytes, <code>passes</code> without the mode <code>passes</code> or outside 1..4, <code>full_every</code> or <code>clean_every</code> over 250</td>
 </tr>
 <tr>
 <td>3</td>
@@ -788,7 +841,11 @@ drives only the pixels that changed, so there is no such step.</p>
 </tr>
 <tr>
 <td><code>full_every</code></td>
-<td>0..250, default 30</td>
+<td>0..250, default 0</td>
+</tr>
+<tr>
+<td><code>clean_every</code></td>
+<td>0..250, default 15</td>
 </tr>
 <tr>
 <td>Quiet transfer</td>

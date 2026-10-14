@@ -283,6 +283,8 @@ class FakeDevice:
             out["passes"] = passes
         if self.ckv and mode != "none":
             out["ckv"] = self.ckv
+        if getattr(self, "clean", None) and mode != "none":  # self.clean: the tiles a clean ran after this show
+            out["clean"] = [dict(t) for t in self.clean]
         if steps:  # a show_end answer; self.steps: the milliseconds of each device step (zeros: the vectors' fixed clock)
             out["steps"] = dict(self.steps)
         return out

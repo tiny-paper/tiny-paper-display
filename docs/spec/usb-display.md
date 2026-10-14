@@ -159,7 +159,7 @@ frame. A whole picture without a mode gives up the frame kept when memory is sho
 | `x`, `y`, `w`, `h` | the area driven (all 0 with `none`) |
 | `same` | true with `mode: "none"` |
 | `passes` | with the mode `passes` |
-| `clean` | when a clean ran after this update: `{ x, y, w, h, mode, ms }`, the area cleaned, the mode used and its time ("Clean of the changed area") |
+| `clean` | when a clean ran after this update: a list of at most 3 tiles `[{ x, y, w, h, mode, ms }]`, each rectangle cleaned, the mode used and its time ("Clean of the changed area") |
 | `ckv` | TRMNL X: `{ edges: uint, frames: uint, per: uint, rows: uint, ok: bool }`, the gate clock edges the firmware counted over the last refresh of the update, the drive frames, edges a frame, the panel's rows; `ok` false when a frame did not clock once per row (the picture is then drawn at the wrong height). Log: `# display W show ... WRONG` |
 
 `steps` (a `show_end` answer, not `clear`) is the device's own time for each step, in whole milliseconds on the board's
@@ -174,7 +174,7 @@ monotonic clock. The steps are disjoint and run one after the other, so their su
 | `diff` | the search for the changed rectangle (a partial update only, else 0) |
 | `fingerprint` | the hash of the new frame |
 | `panel` | the panel calls (the same as `ms`) |
-| `clean` | the clean of the changed area after the update (0: none ran); not in `panel` |
+| `clean` | the sum of the `clean` tiles' time after the update (0: none ran); not in `panel` |
 | `total` | first `show_chunk` to the answer being built; what is not in a step (the wait between the last chunk and `show_end`, mode choice, freeing) is the rest |
 
 The device log line `show ...` ends with `steps=recv/prep/inflate/convert/diff/fingerprint/panel/total`.
@@ -185,19 +185,23 @@ named and counts, except an unchanged `partial` which uses no count.
 ### Clean of the changed area
 
 A 1 bit partial update turns black back to white only weakly, so light ghosting builds up in a page that redraws every few
-seconds. Instead of a flash of the whole screen the device cleans only the area that changed. `clean_every` (`set`, 0..250,
-0 = off, default 15): the device keeps the union rectangle of all partial updates since the last clean or full refresh.
-After `clean_every` partial updates it drives that rectangle once with the strongest area mode the depth offers
-(order: `inverse`, `passes` twice, `partial_all`; from `depth_modes`), redrawing the frame kept there, then starts a new
-union. The answer of that `show_end` carries `clean: { x, y, w, h, mode, ms }`, and `steps.clean` its time.
+seconds. Instead of a flash of the whole screen the device cleans only the small areas that kept changing. It keeps a dirty
+map: a fixed grid of tiles over the panel, one counter each. `clean_every` (`set`, 0..250, 0 = off, default 15): a tile is
+due when its counter reaches it. The tile edges are multiples of 8 px (a rectangle starts and ends on a byte at every depth)
+and the grid is about 8 columns by 6 rows: the panel's width over 8 and its height over 6, each rounded up to a multiple of 8
+(240 x 240 px on the TRMNL X, 1872 x 1404). That is small enough that a clock, a graph and a block of numbers fall in
+different tiles, and few enough (at most 48) for a one-byte counter each. The answer of the `show_end` that cleans carries
+`clean: [{ x, y, w, h, mode, ms }, ...]`, one entry per tile cleaned, and `steps.clean` the time of them all.
 
 | Rule | |
 |---|---|
-| Counting | each update that drove a partial refresh counts and adds its rectangle; a full refresh of the whole panel resets the count and the union; a rectangle's full refresh (`why: "area"`) counts like a partial one |
-| Both due | `full_every` reached: the next update is the full refresh and no clean runs; the full resets both |
-| Mode | at 1 bit `inverse` (every pixel goes through its opposite and back, so black turns white fully; `passes` leaves a pixel driven twice towards the value it already has). A depth with none of the modes (the TRMNL X at 2 and 4 bit lists `full` and `partial` only) is not cleaned: it is left to `full_every` |
-| No memory, panel refusal | no memory for the negative: no clean now, tried again at the next update; a panel failure: refused `IO` and the frame kept is forgotten, as for any update |
-| Default 15 | a pc_stats-style page at 1 bit shows the first light ghost after about 10 to 20 partial updates; 15 cleans before it is seen, and the clean (one area, about a partial update twice) costs far less than the full flash. This is an estimate, not measured on the glass |
+| Counting | each update that drove a partial refresh adds 1 to the counter of every tile that holds a changed pixel (found by comparing the new frame with the frame kept, not from the bounding rectangle: a clock at the top and a number at the bottom mark two tiles, not the middle); a rectangle's full refresh (`why: "area"`) counts like a partial one |
+| Full refresh | a full refresh of the whole panel resets every counter |
+| Cleaning | after an update that counted, the due tiles are cleaned, the one with the highest counter first, each as its own rectangle redrawing the frame kept, then its counter is reset. At most 3 tiles per update, and no further tile is started once the clean took 1.5 s: the rest stay due and are cleaned by the next update that drives the panel |
+| Both due | `full_every` reached: the next update is the full refresh and no clean runs; the full resets all counters |
+| Mode | the gentlest that removes traces: `passes` (the tile driven twice, no inversion, no flash). A depth without `passes` takes `inverse`, then `partial_all`. A depth with none of the modes (the TRMNL X at 2 and 4 bit lists `full` and `partial` only) is not cleaned: it is left to `full_every`. A setting to choose the mode (`inverse` flips the tile through its opposite) is not built |
+| No memory, panel refusal | no memory for the negative of `inverse`: no clean now, the tiles stay due; a panel failure: refused `IO` and the frame kept is forgotten, as for any update |
+| Default 15 | a pc_stats-style page at 1 bit shows the first light ghost after about 10 to 20 partial updates; 15 cleans before it is seen. Not measured on the glass: whether two `passes` remove the traces is still to be seen on the X |
 
 ## Tuning
 
