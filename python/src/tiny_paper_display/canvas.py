@@ -50,6 +50,14 @@ class Canvas:
             x += 6 * scale
         return x
 
+    def polyline(self, points, level, t=1):
+        """A line through (x, y) points, `t` pixels thick, clipped to the canvas (one point: a dot; none: nothing)."""
+        pts = list(points)
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]) if len(pts) > 1 else [(pts[0], pts[0])] if pts else []:
+            n = max(abs(x1 - x0), abs(y1 - y0), 1)
+            for i in range(n + 1):
+                self.rect(x0 + round((x1 - x0) * i / n) - t // 2, y0 + round((y1 - y0) * i / n) - t // 2, t, t, level)
+
     def checker(self, x, y, w, h, cell):
         for yy in range(max(y, 0), min(y + h, self.h)):
             for xx in range(max(x, 0), min(x + w, self.w)):
