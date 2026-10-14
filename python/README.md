@@ -38,7 +38,8 @@ with tpd.open() as d:                                        # the first device 
 
 Picture options (`fit`, `border`, `dither`, `depth`, `threshold`, `rotate`) are per call, never sent to the device, and
 give the pixels of the site's Picture page (`docs/spec/vectors/picture-prepare.json`). JPEG and other formats need Pillow: `pip install tiny-paper-display[images]`.
-`examples/quickstart.py` is the short version, `examples/test_page.py` the reference.
+`examples/quickstart.py` is the short version, `examples/test_page.py` the reference, `examples/pc_stats.py` live PC stats
+(CPU, memory, disks, network, processes; psutil optional, else /proc; `--once`, `--png FILE`; pictures in `docs/img/`).
 
 | Error (all subclasses of `DisplayError`) | When |
 |---|---|
