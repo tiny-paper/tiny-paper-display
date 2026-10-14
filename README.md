@@ -1,22 +1,27 @@
 # tiny-paper display
 
-Firmware that turns an e-paper device you already have into a plain display: plug it into a computer with its USB
-cable and send it a picture. No WiFi, no account, no apps. Bluetooth is there too, switched off until you switch it on.
+Firmware that turns a TRMNL X into a plain e-paper display: plug it into a computer with its USB cable and send it a
+picture. No WiFi, no account, no apps. Bluetooth is there too, off until you switch it on.
 
-| Board | Panel |
+| | |
 |---|---|
-| TRMNL X (`trmnl_x`) | 1872 x 1404 |
-| TRMNL OG (`trmnl_og`) | 800 x 480 |
-| PicPak (`picpak`) | 400 x 300, black white red yellow |
+| Board | TRMNL X, 1872 x 1404, 16 grays |
+| [Flash page](https://tiny-paper.github.io/tiny-paper-display/) | back up the device, install the firmware, restore (Chrome or Edge on a computer) |
+| [Sketch page](https://tiny-paper.github.io/tiny-paper-display/sketch.html) | draw on the panel from the browser |
+| [Guide](https://tiny-paper.github.io/tiny-paper-display/api.html) | Python, the command line, what the answers mean, what to do when something goes wrong |
+| [Protocol](docs/spec/usb-display.md) | the bytes on the cable, for a client in another language |
 
-| In the browser (Chrome or Edge on a computer) | |
-|---|---|
-| [Site](https://tiny-paper.github.io/tiny-paper-display/) | put the firmware on the device (Flash), draw on the panel (Sketch) |
-| [Guide: use it](https://tiny-paper.github.io/tiny-paper-display/api.html) | pictures from Python, from the command line, what the answers mean, what to do when something goes wrong |
+## Install
 
-## Show a picture in three commands
+1. Put the X in flashing mode: [TRMNL's instructions](https://help.trmnl.com/en/articles/11936721-put-your-trmnl-in-flashing-mode).
+2. Open the [Flash page](https://tiny-paper.github.io/tiny-paper-display/), press Back up and keep the file, then Install.
 
-Install the firmware from the Flash page first. The Python package is not on PyPI yet; this installs it from here:
+Without Web Serial: each release has a `flash.txt` with the `esptool` command (use the `# separate:` line, it keeps the
+device's settings). To go back, restore the backup from the Flash page, or install TRMNL's firmware with their installer.
+
+## Show a picture
+
+The package is not on PyPI yet; this installs it from here:
 
 ```sh
 python3 -m venv .venv
@@ -24,75 +29,73 @@ python3 -m venv .venv
 .venv/bin/tiny-paper-display show /dev/ttyACM0 picture.png
 ```
 
-The port is `/dev/ttyACM0` on Linux, `/dev/cu.usbmodem...` on macOS, `COM5` on Windows; the guide shows how to find it.
-Any PNG is fitted to the panel first. The command returns when the panel has refreshed. `tiny-paper-display clear PORT`
-makes the panel white; `tiny-paper-display movie PORT film.mp4 --every 5 --duration 60` shows frames of a video, one
-every few seconds (needs `ffmpeg`).
+The port is `/dev/ttyACM0` on Linux, `/dev/cu.usbmodem...` on macOS, `COM5` on Windows. Any picture is fitted to the
+panel. `tiny-paper-display clear PORT` makes it white, `tiny-paper-display movie PORT film.mp4 --every 5` shows video
+frames (needs `ffmpeg`).
 
-The bytes of the USB protocol, for your own client in another language: [protocol reference](docs/spec/usb-display.md)
-(on the site: `protocol.html`).
+```python
+import tiny_paper_display as tpd
 
-## Install the firmware
+with tpd.open() as d:                    # the first device found
+    d.show("photo.png", dither="floyd")
+    page = tpd.Canvas(d.w, d.h)
+    page.text(8, 8, "HELLO", 4)
+    d.show(page, depth=1)                # the device refreshes only what changed
+```
 
-Open the [Flash page](https://tiny-paper.github.io/tiny-paper-display/) in Chrome or Edge on a computer, plug the device in,
-press Install. The page finds the board, checks it and writes the newest release. Without Web Serial: every release
-has a `flash.txt` per board with the `esptool` command (use the `# separate:` line, it keeps the device's settings).
-Installing replaces the firmware the device has.
+| Example (`python/examples/`) | What it shows |
+|---|---|
+| `quickstart.py` | the short version |
+| `test_page.py` | every gray depth and refresh mode, with timings |
+| `pc_stats.py` | live PC stats: CPU, memory, disks, network |
+| `btc_ticker.py` | live Bitcoin price over 1-minute candles (Kraken WebSocket) |
+| `live_wire/` | live Wikipedia edits and earthquakes (Docker) |
 
-## Unplugged
+## Refreshes
 
-The panel keeps the last picture with no power. On battery the device sleeps and looks for a computer every 20 s;
-after plugging in, it answers within about 20 s, or at once after a press of its button. (By design; not measured.)
+| | |
+|---|---|
+| Partial | only what changed, no flash: a 1-bit page in about 1.9 s over USB |
+| Full | the whole panel with a flash, at 1, 2 or 4 bit (a 4-bit page in about 3.3 s) |
+| Clean-up | a full refresh after every 30 partial ones, against ghosting: `d.configure(full_every=N)`, stored on the device |
 
 ## Bluetooth
 
-Off by default; with it off the device behaves exactly as without it. Nobody has tried the radio on a real device
-yet: everything here is unproven until a person has, and the battery numbers are estimates.
+Off by default; with it off the device behaves exactly as without it.
 
 | | |
 |---|---|
-| Switch on or off | only over the cable: the flash page's "Bluetooth setup" step, or `tiny-paper-display setup --port PORT` |
-| What on costs | on battery about three times the use (the battery lasts about a third as long); on the cable nothing |
-| Key | no system pairing: `tiny-paper-display setup --port PORT --key` makes a key on the device and saves it on the computer in a small file (copy it to use another computer, or give it to a container) |
-| Who can send pictures | computers with the key file only; every frame is encrypted and checked. Anyone else gets a short refusal and changes nothing |
-| Lock everyone out | setup `--key` again (a new key) or `--forget`, over the cable |
-| Send | install the extra (`bleak`, `cryptography`, see the guide), then `tiny-paper-display show --bluetooth tp-display-XXXX picture.png` (the name setup prints); on battery the device is found within about 22 s |
+| Switch on or off | over the cable only: the Flash page's Bluetooth step, or `tiny-paper-display setup --port PORT` |
+| Key | `setup --key` makes a key on the device and saves it in a small file; no system pairing. Only computers with the file can send, every frame is encrypted and checked |
+| Lock everyone out | `setup --key` again (a new key) or `--forget`, over the cable |
+| Send | `pip install "tiny-paper-display[bluetooth]"`, then `tiny-paper-display show --bluetooth tp-display-XXXX picture.png` |
+| Speed (Windows, BT 4.0 stick) | found in 7 s, connected in 2 s, a 1-bit page in 2.6 s |
+| Cost | on battery about three times the use (an estimate); on the cable nothing |
 
-## Going back
+## Unplugged
 
-The device can always be flashed again over USB. Install the firmware it had with that firmware's own installer. To
-be sure you can, read a backup of the whole flash before the first install: `esptool read_flash 0 ALL backup.bin`
-(PicPak: with `--no-stub`, the first 16 MB); writing it back at 0 restores the device exactly.
+The panel keeps the last picture without power. On battery the device sleeps and looks for a computer every 20 s, or
+at once after a press of its button.
 
-## Not supported
+## Seen on the device, and not yet
 
-| | |
+| Seen on the X (2026-10-14) | Not yet |
 |---|---|
-| Other boards | none yet; the Xteink X4 Pro is not built |
-| Scaling, dithering, rotation on the device | the picture is shown as given; the Python tool fits it first |
-| WiFi, updates over the air | not in the image (the build checks the link map) |
-| Sending pictures from a browser over Bluetooth | not yet; the Python package does it |
-| Colour beyond the PicPak's four inks, 8-bit gray, RGB, alpha, interlaced PNG | refused with a clear error |
-
-## Not proven yet
-
-Seen on a real panel so far: on the TRMNL X, the firmware starts, and a sketch over the cable works with black strokes
-as partial updates (2026-10-08); clearing by a partial update left traces, so Clear is now a full refresh. Everything
-else has not been seen on a real panel: pictures over the cable and over Bluetooth, partial updates on the other boards
-and at the gray depths, backup, flash, restore. Battery life unplugged is not measured. See `PLAN.md`.
+| pictures and pages over USB, all gray depths and refresh modes | battery life unplugged (not measured) |
+| 437 PC stats updates in 14 minutes without a failure | pulling the cable during a transfer |
+| Bluetooth from Windows with the key | the TRMNL OG and the PicPak: in the code, not released |
 
 ## Build and test
 
 | | |
 |---|---|
-| Tests, no hardware | `make test` (firmware host tests, Python tests, flash page tests; needs cmake, ninja, gcc, python3, node 20+) |
-| Pages | `docs/use.md` becomes `site/api.html` and `docs/spec/usb-display.md` becomes `site/protocol.html`: run `npm run pages` in `site/` after editing either; a test fails when a page is stale. The Python samples of the guide are run by `python/tests/test_use_guide.py` |
-| Firmware | `make -C firmware esp-setup` once (Docker; ESP-IDF v5.5.1, about 4.5 GB), then `make -C firmware esp BOARD=trmnl_og` (or `picpak`, `trmnl_x`): `firmware/build/esp/display[-<board>]/dist` with `flash.txt` |
-| Guards in every build | the image fits the board's slot (`tools/check_slot.py`), no WiFi or network code is linked and Bluetooth is reached only through its one gate (`tools/check_no_radio.py`) |
-| CI | `.github/workflows/build.yml`: tests and the three images on every push; a tag `v*` publishes them as a release and the flash page picks them up |
+| Tests, no hardware | `make test` (firmware host tests, Python, flash page; needs cmake, ninja, gcc, python3, node 20+) |
+| Firmware | `make -C firmware esp-setup` once (Docker, ESP-IDF v5.5.1), then `make -C firmware esp BOARD=trmnl_x` |
+| Pages | `docs/use.md` becomes `site/api.html`, `docs/spec/usb-display.md` becomes `site/protocol.html`: `npm run pages` in `site/` (a test fails on a stale page) |
+| Guards in every build | the image fits its slot, no WiFi or network code is linked, Bluetooth only through its one gate |
+| Release | a tag `v*` builds and publishes the image; the Flash page picks it up |
 
 ## Licenses
 
-Firmware: GPL-3.0-or-later. Python package, flash page, docs: MIT. Files from others: `NOTICE`.
-
-This repository is the home of the project: it is edited here. What is planned and what was seen on a device is in `PLAN.md`.
+Firmware: GPL-3.0-or-later. Python package, pages, docs: MIT. Files from others: `NOTICE`. Plans and device notes:
+`PLAN.md`.
