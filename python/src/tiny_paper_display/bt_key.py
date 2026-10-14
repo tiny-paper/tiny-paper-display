@@ -170,6 +170,8 @@ class SealedPort:
         self.channel = self._handshake(key, timeout)
 
     def __getattr__(self, name):  # timeout, write_timeout, mtu...: the raw port's
+        if name == "raw":
+            raise AttributeError(name)
         return getattr(self.raw, name)
 
     def __setattr__(self, name, value):
