@@ -82,6 +82,11 @@ fi
 # Guards of the display firmware (docs/usb-display.md): it fits the same slot; no WiFi and no network code is linked,
 # and Bluetooth is linked only through hal_esp's ble_link.c (started behind the stored setting, off by default)
 if [ "$PROJ" = display ]; then
+    # the panel library compiled is the pinned one, the lock names it, and the glue's MIRROR_X fits it
+    # (firmware/tools/check_fastepd_source.py; X_EDGE variants must be off: this build sets none of their defines)
+    python3 "$FW/tools/check_fastepd_source.py" "$B/compile_commands.json" 'iSkipped < 2' '1872, 1404, 26666666' "" \
+        "$FW/components/epd/idf_component.yml" "$FW/$PROJ/dependencies.lock.esp32s3" \
+        "$FW/components/epd/esp/epd_fastepd.cpp" off
     python3 "$FW/tools/check_slot.py" "$BOARD" "$B/tiny_display.bin"
     python3 "$FW/tools/check_no_radio.py" "$B/tiny_display.map"
 fi

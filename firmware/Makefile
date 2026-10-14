@@ -13,6 +13,7 @@ FW_VERSION ?= $(if $(FW_STAMP),$(FW_SEMVER)+$(FW_STAMP).$(FW_SHA))
 .PHONY: test esp-setup esp clean
 
 test:
+	python3 tools/check_fastepd_source.py --pin components/epd/idf_component.yml components/epd/esp/epd_fastepd.cpp ../PLAN.md
 	cmake -S host -B $(BUILD) -G Ninja -DCMAKE_BUILD_TYPE=Debug
 	cmake --build $(BUILD)
 	ctest --test-dir $(BUILD) --output-on-failure

@@ -1,7 +1,23 @@
-# FastEPD (Apache-2.0) for parallel panels, pinned to the commit stock trmnl-firmware f5f87b7 uses.
+# FastEPD (Apache-2.0) for parallel panels: upstream bitbank2/FastEPD head of 2026-10-03
+# (3d2a63a52f527d4b55d4d385cbdfeac98eb6b316, owner decision 2026-10-08: the X uses the library's latest) plus the six
+# commits of our fork's branch all-fixes-head (6b61b35: the partial row range, the 4 bpp rectangle mask on the row
+# buffer half that is sent, the 2 bpp rectangle, a bound on the power good wait, clear and smooth update alternating
+# the row buffer halves, the row buffer cleared after allocation).
+# One line each: PLAN.md "Upstream". The pin returns to upstream when upstream has them.
+# With them, three commits with two experiments for the strip at the right edge (upstream issue 42, 9dd1c54), both OFF
+# unless the build sets X_EDGE=lead|dc|both (not set by this repo's build: always off); with X_EDGE=off the library
+# compiles to the code of 6b61b35 (PLAN.md "Upstream").
+# The pin is branch all-fixes-edge-head (eb10f7e): those plus setVCOM and getVCOM (eb10f7e: the VCOM after the
+# panel init, for "!tp vcom", issue 268; nothing changes unless setVCOM is called).
+# The erase passes (setErasePasses) are WITHDRAWN (2026-10-10, issue 268, the design doc's "Erase passes, withdrawn")
+# and not in this branch: tools/check_fastepd_source.py fails a build whose library holds them.
+# NOT in it: the mirrored rectangle fix (fork cb95742, branch all-fixes-with-mirror-head). The glue mirrors a
+# rectangle's x itself (MIRROR_X in esp/epd_fastepd.cpp): the pin and MIRROR_X move in one commit, and
+# tools/check_fastepd_source.py refuses the one without the other.
+# The version is a full commit, never a branch name (the same check).
 dependencies:
   bitbank2/fastepd:
-    git: https://github.com/bitbank2/FastEPD.git
-    version: 8dc8c74394c2ebd28b7283c048c0f283601ab476
+    git: https://github.com/tiny-paper/FastEPD.git
+    version: eb10f7edd5f097688eb96b9f2d3c6a36a21ca5bd
     rules:
       - if: "target == esp32s3"
