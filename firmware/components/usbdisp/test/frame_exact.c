@@ -8,8 +8,15 @@
 #include "unity.h"
 #include "usbdisp_priv.h"
 
+/* freed in tearDown: a failed assertion leaves check() early */
+static uint8_t *g_px, *g_png, *g_got, *g_want;
+
 void setUp(void) {}
-void tearDown(void) {}
+void tearDown(void)
+{
+    free(g_px), free(g_png), free(g_got), free(g_want);
+    g_px = g_png = g_got = g_want = NULL;
+}
 
 static void *t_alloc(void *ctx, size_t n) { return (void)ctx, malloc(n ? n : 1); }
 static void t_free(void *ctx, void *p) { (void)ctx, free(p); }
@@ -33,17 +40,18 @@ static void check(uint16_t W, uint16_t H, uint16_t x, uint16_t y, uint16_t w, ui
     snprintf(what, sizeof what, "%ux%u at %u,%u of %ux%u, %u bit%s, page %d, filter %d, zlib %d/%d, split %u", w, h, x,
              y, W, H, bits, bwry ? " bwry" : "", kind, filter, level, wbits, split);
     usbdisp_cfg_t c = cfg(W, H, bwry);
-    uint8_t *px = malloc((size_t)w * h);
+    free(g_px), free(g_png), free(g_got), free(g_want);
+    uint8_t *px = g_px = malloc((size_t)w * h);
     page_levels(px, w, h, bits, kind);
     size_t n;
-    uint8_t *png = page_png(px, w, h, bits, filter, level, wbits, split, &n);
+    uint8_t *png = g_png = page_png(px, w, h, bits, filter, level, wbits, split, &n);
     usbdisp_pnginfo_t pi;
     const char *why = "";
     bool area = w != W || h != H;
     TEST_ASSERT_EQUAL_INT_MESSAGE(0, usbdisp_png_check(&c, png, n, area, &pi, &why), what);
     uint8_t depth = pi.depth;
     size_t stride = ((size_t)W * depth + 7) / 8, bytes = stride * H;
-    uint8_t *got = malloc(bytes), *want = malloc(bytes);
+    uint8_t *got = g_got = malloc(bytes), *want = g_want = malloc(bytes);
     for (size_t i = 0; i < bytes; i++)
         got[i] = want[i] = (uint8_t)fp_rnd();
     size_t at = (size_t)y * stride + (size_t)x * depth / 8;
@@ -64,6 +72,7 @@ static void check(uint16_t W, uint16_t H, uint16_t x, uint16_t y, uint16_t w, ui
         TEST_ASSERT_EQUAL_STRING_MESSAGE(fwhite, fw, what);
     }
     free(px), free(png), free(got), free(want);
+    g_px = g_png = g_got = g_want = NULL;
 }
 
 static void test_whole_panel_every_depth(void)

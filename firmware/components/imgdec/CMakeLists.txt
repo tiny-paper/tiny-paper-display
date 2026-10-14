@@ -20,3 +20,7 @@ endif()
 if(CONFIG_IDF_TARGET_ESP32C3)
     target_compile_options(${COMPONENT_LIB} PRIVATE -Os)
 endif()
+# The inflate loop is on every picture shown over USB (usb-display.md "steps": inflate): speed over size off the C3
+if(NOT CONFIG_IDF_TARGET_ESP32C3)
+    set_source_files_properties(src/imginflate.c PROPERTIES COMPILE_OPTIONS -O2)
+endif()
