@@ -76,6 +76,14 @@ const uint8_t *usbdisp_prev(const usbdisp_t *d, uint8_t *depth)
 
 size_t usbdisp_stride(const usbdisp_t *d, uint8_t depth) { return ((size_t)d->c.w * depth + 7) / 8; }
 
+/* One byte into FNV-1a 64: the prime 0x100000001b3 is 2^40 + 0x1b3, so the product is a shift and a small multiply
+ * (the same value as hash * prime, without a 64 by 64 bit multiply on a 32-bit core). */
+static inline uint64_t fnv_byte(uint64_t hash, uint8_t b)
+{
+    hash ^= b;
+    return hash * 0x1b3u + (hash << 40);
+}
+
 /* Canonical panel pixels, not PNG bytes. Mask padding bits in the last byte of each row. */
 void usbdisp_fingerprint(const usbdisp_t *d, uint8_t depth, const uint8_t *rows, char out[17])
 {
@@ -83,16 +91,16 @@ void usbdisp_fingerprint(const usbdisp_t *d, uint8_t depth, const uint8_t *rows,
     uint8_t head[] = {(uint8_t)(d->c.w >> 8), (uint8_t)d->c.w, (uint8_t)(d->c.h >> 8), (uint8_t)d->c.h,
                       depth, d->c.bwry};
     for (size_t i = 0; i < sizeof head; i++)
-        hash = (hash ^ head[i]) * UINT64_C(0x100000001b3);
+        hash = fnv_byte(hash, head[i]);
     size_t stride = usbdisp_stride(d, depth);
     unsigned padding = (8 - (d->c.w * (unsigned)depth) % 8) % 8;
-    for (uint16_t y = 0; y < d->c.h; y++)
-        for (size_t x = 0; x < stride; x++) {
-            uint8_t b = rows ? rows[(size_t)y * stride + x] : 0xFF;
-            if (x + 1 == stride)
-                b &= (uint8_t)(0xFFu << padding);
-            hash = (hash ^ b) * UINT64_C(0x100000001b3);
-        }
+    const uint8_t last = (uint8_t)(0xFFu << padding);
+    for (uint16_t y = 0; y < d->c.h; y++) {
+        const uint8_t *r = rows ? rows + (size_t)y * stride : NULL;
+        for (size_t x = 0; x + 1 < stride; x++)
+            hash = fnv_byte(hash, r ? r[x] : 0xFF);
+        hash = fnv_byte(hash, (uint8_t)((r ? r[stride - 1] : 0xFF) & last));
+    }
     static const char hex[] = "0123456789abcdef";
     for (unsigned i = 0; i < 16; i++)
         out[i] = hex[(hash >> (60 - 4 * i)) & 15];

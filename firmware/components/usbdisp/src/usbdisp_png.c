@@ -70,7 +70,7 @@ typedef struct {
     uint32_t rows;
     int err;
     const char *why;
-    uint64_t convert_us; /* the time spent in dec_row8 */
+    uint64_t convert_us; /* the time spent in dec_row8 and dec_packed */
 } dec_t;
 
 static long dec_read(void *ctx, uint8_t *buf, size_t cap)
@@ -145,11 +145,43 @@ static int row8_convert(dec_t *d, uint16_t y, const uint8_t *px, uint16_t w, uin
     return 0;
 }
 
+/* A gray row as stored, at the frame's depth (the color panel: 1 bit, each pixel to code 0 or 3): copied, with the
+ * padding bits of its last byte zero, as the per-pixel conversion left them. */
+static int packed_convert(dec_t *d, uint16_t y, const uint8_t *in, uint16_t w, uint8_t bits)
+{
+    static const uint8_t two[16] = {0x00, 0x03, 0x0C, 0x0F, 0x30, 0x33, 0x3C, 0x3F,
+                                    0xC0, 0xC3, 0xCC, 0xCF, 0xF0, 0xF3, 0xFC, 0xFF}; /* 4 pixels of 1 bit -> 2 bit */
+    const uint8_t depth = d->pi->depth;
+    if (y >= d->pi->h || w != d->pi->w || d->pi->indexed || bits != (d->c->bwry ? 1 : depth))
+        return 1;
+    uint8_t *row = d->frame + (size_t)y * d->stride;
+    const size_t n = ((size_t)w * depth + 7) / 8;
+    if (depth == bits) {
+        memcpy(row, in, n);
+    } else {
+        for (size_t i = 0; i < n; i++)
+            row[i] = two[(in[i / 2] >> (i & 1 ? 0 : 4)) & 15];
+    }
+    const unsigned pad = (8u - ((unsigned)w * depth) % 8u) % 8u;
+    row[n - 1] &= (uint8_t)(0xFFu << pad);
+    d->rows++;
+    return 0;
+}
+
+static int dec_packed(void *ctx, uint16_t y, const uint8_t *in, uint16_t w, uint8_t bits)
+{
+    dec_t *d = ctx;
+    const uint64_t t0 = d->c->now_us(d->c->ctx);
+    int rc = packed_convert(d, y, in, w, bits);
+    d->convert_us += d->c->now_us(d->c->ctx) - t0;
+    return rc;
+}
+
 int usbdisp_png_frame(const usbdisp_cfg_t *c, const uint8_t *png, size_t n, const usbdisp_pnginfo_t *pi, uint8_t *frame,
                       size_t stride, const char **why, usbdisp_png_time_t *time)
 {
     dec_t d = {.c = c, .pi = pi, .png = png, .n = n, .frame = frame, .stride = stride};
-    imgdec_io_t io = {.read = dec_read, .info = dec_info, .row8 = dec_row8, .alloc = dec_alloc, .free = dec_free,
+    imgdec_io_t io = {.read = dec_read, .info = dec_info, .row8 = dec_row8, .row_packed = dec_packed, .alloc = dec_alloc, .free = dec_free,
                       .ctx = &d, .want_rgb = true};
     imgdec_info_t in;
     const uint64_t t0 = c->now_us(c->ctx);
