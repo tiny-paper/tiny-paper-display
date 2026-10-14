@@ -37,7 +37,7 @@ void usbdisp_init(usbdisp_t *d, const usbdisp_cfg_t *cfg)
     d->full_every = d->c.full_every;
     uint8_t v;
     if (d->c.kv_get && d->c.kv_get(d->c.ctx, USBDISP_KV_FULL_EVERY, &v, 1) == 1 && v <= USBDISP_FULL_EVERY_MAX)
-        d->full_every = v;
+        d->full_every = v, d->full_every_set = true;
     link_parser_init(&d->usb.parser);
     usbdisp_bt_init(d);
 }
@@ -221,7 +221,7 @@ static void hello(usbdisp_t *d, const link_frame_t *f)
     static const char *const bwry[] = {"black", "white", "red", "yellow"};
     cbor_w_t w;
     cbor_w_init(&w, d->tx, sizeof d->tx);
-    cbor_put_map(&w, (size_t)(13 + (d->c.bwry ? 1 : 0) + (d->c.bt_open ? 1 : 0)) + 1 + (d->fingerprint[0] != 0) + (tune_n(d) > 0) + (pmax_n(d) > 0) + (usbdisp_fadepths(d) != 0));
+    cbor_put_map(&w, (size_t)(13 + (d->c.bwry ? 1 : 0) + (d->c.bt_open ? 1 : 0)) + 3 + (d->fingerprint[0] != 0) + (tune_n(d) > 0) + (pmax_n(d) > 0) + (usbdisp_fadepths(d) != 0));
     cbor_put_str(&w, "proto");
     cbor_put_uint(&w, LINK_PROTO);
     cbor_put_str(&w, "project");
@@ -273,8 +273,25 @@ static void hello(usbdisp_t *d, const link_frame_t *f)
                     modes++;
             }
     }
+    /* depth_modes: per depth, the modes usbdisp_mode_check lets through at that depth (the check show itself makes) */
+    cbor_put_str(&w, "depth_modes");
+    cbor_put_map(&w, (size_t)((d->c.depths & 1) + (d->c.depths >> 1 & 1) + (d->c.depths >> 2 & 1)));
+    for (unsigned b = 0; b < 3; b++) {
+        if (!(d->c.depths >> b & 1))
+            continue;
+        size_t cnt = 0;
+        for (usbdisp_mode_t m = USBDISP_MODE_FULL; m < USBDISP_MODE_NONE; m++)
+            cnt += !usbdisp_mode_check(d, m, false, (uint8_t)(1u << b), &why);
+        cbor_put_str(&w, b == 0 ? "1" : b == 1 ? "2" : "4"); /* text keys: the profile has no other */
+        cbor_put_array(&w, cnt);
+        for (usbdisp_mode_t m = USBDISP_MODE_FULL; m < USBDISP_MODE_NONE; m++)
+            if (!usbdisp_mode_check(d, m, false, (uint8_t)(1u << b), &why))
+                cbor_put_str(&w, usbdisp_mode_name(m));
+    }
     cbor_put_str(&w, "full_every");
     cbor_put_uint(&w, d->full_every);
+    cbor_put_str(&w, "full_every_set");
+    cbor_put_bool(&w, d->full_every_set);
     cbor_put_str(&w, "fingerprint_hash");
     cbor_put_str(&w, USBDISP_FINGERPRINT_HASH);
     if (d->fingerprint[0]) {
@@ -537,7 +554,7 @@ static void set_tuning(usbdisp_t *d, const link_frame_t *f, char refused[][LINK_
     }
 }
 
-/* { full_every?: 0..250, tuning?: { ... } | "defaults" }: full_every is stored and answered, without the key it is only
+/* { full_every?: 0..250 or null (clear the stored value), tuning?: { ... } | "defaults" }: full_every is stored and answered, without the key it is only
  * answered; tuning (TRMNL X) applies from the next refresh and is not stored. The answer carries `tuning` (the knobs now)
  * where the board has them, and `refused` { key: why } for the keys not applied. */
 static void set(usbdisp_t *d, const link_frame_t *f)
@@ -545,7 +562,15 @@ static void set(usbdisp_t *d, const link_frame_t *f)
     uint64_t v;
     const uint8_t *p;
     size_t n;
-    if (cbor_map_get(f->payload, f->len, "full_every", 10, &p, &n)) {
+    if (cbor_map_get(f->payload, f->len, "full_every", 10, &p, &n) && n == 1 && p[0] == 0xF6) {
+        /* null: forget the stored value, the board's default applies again */
+        if (d->c.kv_erase && d->c.kv_erase(d->c.ctx, USBDISP_KV_FULL_EVERY) < 0) {
+            usbdisp_refuse(d, f, USBDISP_E_IO, "the setting could not be cleared", NULL, 0);
+            return;
+        }
+        d->full_every = d->c.full_every;
+        d->full_every_set = false;
+    } else if (cbor_map_get(f->payload, f->len, "full_every", 10, &p, &n)) {
         if (!usbdisp_get_uint(f, "full_every", &v) || v > USBDISP_FULL_EVERY_MAX) {
             usbdisp_refuse(d, f, USBDISP_E_BAD_REQUEST, "full_every is 0 (never) to 250", NULL, 0);
             return;
@@ -556,15 +581,18 @@ static void set(usbdisp_t *d, const link_frame_t *f)
             return;
         }
         d->full_every = b;
+        d->full_every_set = true;
     }
     static char refused[TUNE_REFUSED_MAX][LINK_MSG_CAP + 24], names[TUNE_REFUSED_MAX][24];
     int nref;
     set_tuning(d, f, refused, names, &nref);
     cbor_w_t w;
     cbor_w_init(&w, d->tx, sizeof d->tx);
-    cbor_put_map(&w, 1 + (tune_n(d) > 0) + (nref > 0));
+    cbor_put_map(&w, 2 + (tune_n(d) > 0) + (nref > 0));
     cbor_put_str(&w, "full_every");
     cbor_put_uint(&w, d->full_every);
+    cbor_put_str(&w, "full_every_set");
+    cbor_put_bool(&w, d->full_every_set);
     if (tune_n(d))
         put_tuning(d, &w);
     if (nref) {

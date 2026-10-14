@@ -231,6 +231,15 @@ static inline int f_kv_set(void *ctx, const char *key, const void *buf, size_t l
     return 0;
 }
 
+static inline int f_kv_erase(void *ctx, const char *key)
+{
+    (void)ctx;
+    if (F.fail_kv || strcmp(key, USBDISP_KV_FULL_EVERY))
+        return -1;
+    F.kv = -1;
+    return 0;
+}
+
 static inline void f_sleep(void *ctx)
 {
     (void)ctx;
@@ -266,6 +275,7 @@ static inline void device_more(uint8_t partial_depths, bool all, uint8_t every)
     C.panel_gates = f_gates;
     C.kv_get = f_kv_get;
     C.kv_set = f_kv_set;
+    C.kv_erase = f_kv_erase;
     usbdisp_init(&D, &C);
 }
 

@@ -40,7 +40,7 @@
 #define USBDISP_FRAME_IDLE_US 2000000ull /* half a frame without a further byte for this long is forgotten */
 #define USBDISP_RETRY_MS 2000            /* BUSY detail retry_ms */
 #define USBDISP_ALIGN 8                  /* x and the width of a rectangle are multiples of this (hal_panel_write) */
-#define USBDISP_FULL_EVERY 20            /* default of `full_every`: a full refresh after this many partial ones */
+#define USBDISP_FULL_EVERY 30            /* default of `full_every`: a full refresh after this many partial ones */
 #define USBDISP_FULL_EVERY_MAX 250
 #define USBDISP_PASSES_MAX 4             /* mode passes: drives of the rectangle */
 #define USBDISP_KV_FULL_EVERY "dfull"    /* the setting's key (one byte) */
@@ -162,6 +162,7 @@ typedef struct {
     /* optional: the device's settings store, as hal_kv_get / hal_kv_set */
     int (*kv_get)(void *ctx, const char *key, void *buf, size_t cap);
     int (*kv_set)(void *ctx, const char *key, const void *buf, size_t len);
+    int (*kv_erase)(void *ctx, const char *key); /* optional: removes a key (set full_every null: the default applies again) */
     void (*log)(void *ctx, const char *line); /* optional */
     /* optional, all or none: Bluetooth (bt_open NULL: a build without it). Called only while the setting is on,
      * bt_forget also when off (the bonds in the store).
@@ -217,6 +218,7 @@ typedef struct {
     char fingerprint[17];       /* FNV-1a 64 bits, lowercase hex; empty when the panel frame is unknown */
     const char *no_prev;        /* why prev is NULL: the `why` of that full refresh */
     uint8_t full_every, since_full;
+    bool full_every_set;        /* full_every comes from the stored setting, not from the board default */
     bool in_panel;              /* a panel call is running: requests fed from usbdisp_busy get BUSY */
     uint32_t shown, refused;    /* pictures shown (clear counts), requests refused */
 } usbdisp_t;
