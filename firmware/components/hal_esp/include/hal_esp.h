@@ -25,10 +25,6 @@ bool hal_esp_stay_awake(void);
 /* Called by hal_reboot before a software restart (weak, default empty): the app commits its RTC state. */
 void hal_esp_pre_reboot(void);
 
-/* Bluetooth with CONFIG_TINY_BLE_GATED (the display firmware): open or close the pairing window. Closed (the state
- * after every hal_link_open), a pairing attempt ends the connection and nothing is stored. Without the option, or
- * without Bluetooth in the build: nothing. */
-void hal_esp_ble_pairing(bool open);
 
 /* Heap watermark bookkeeping (plan 3.9): call at the end of a phase. */
 typedef enum { HAL_ESP_PH_BOOT = 0, HAL_ESP_PH_RENDER, HAL_ESP_PH_NET, HAL_ESP_PH_SLEEP, HAL_ESP_PH_COUNT } hal_esp_phase_t;

@@ -8,8 +8,8 @@
  * button. A deep-sleep wake is a fresh boot, so a transfer the cable cut leaves nothing behind.
  * No WiFi and no network: neither stack is in the image (sdkconfig.defaults, tools/check_no_radio.py). Bluetooth
  * (bt.c) is in the image and stays off until the stored setting is on: then each look also advertises for
- * DISPLAY_BT_ADV_MS, a connected host or an open pairing window keeps the device up, and a button press opens the
- * pairing window. Off, this loop does what it did before Bluetooth was added.
+ * DISPLAY_BT_ADV_MS and a connected host keeps the device up. Off, this loop does what it did before Bluetooth was
+ * added.
  * C11. SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "board.h"
@@ -49,18 +49,8 @@ void app_main(void)
     display_bt_cfg(&cfg);
     usbdisp_init(&D, &cfg);
     uint64_t up = hal_rtc_us();
-    bool pressed = usbdisp_bt_on(&D) && hal_wake_cause() == HAL_WAKE_BUTTON, was_down = pressed;
     for (;;) {
         usbdisp_poll(&D, 100);
-        if (usbdisp_bt_on(&D)) { /* a press (the one that woke the device too) opens the pairing window */
-            uint64_t t0, t1;
-            bool down = hal_button_down();
-            pressed |= (down && !was_down) || hal_button_take(&t0, &t1);
-            was_down = down;
-            if (pressed)
-                usbdisp_bt_button(&D);
-            pressed = false;
-        }
         if (usbdisp_transfer(&D) || hal_usb_power() || usbdisp_bt_awake(&D))
             continue; /* a host is there: awake and reachable */
         if (hal_rtc_us() - up < (usbdisp_bt_on(&D) ? DISPLAY_BT_ADV_MS : DISPLAY_ENUM_MS) * 1000ull)

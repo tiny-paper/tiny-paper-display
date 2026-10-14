@@ -1,8 +1,8 @@
-/* hal_esp: the BLE link transport of config mode (link-protocol.md "Bluetooth"), NimBLE peripheral.
- * One GATT service: RX (write, host to device, into a ring), TX (notify, device to host, MTU-3 pieces),
- * Pair (read, needs an authenticated encrypted link: the host reads it to make its OS pair).
- * LE Secure Connections only, passkey entry (DisplayOnly, MITM), bonding. The whole stack (host and
- * controller) is brought up by hal_link_open(HAL_LINK_BLE) and torn down and freed by hal_link_close.
+/* hal_esp: the BLE link transport of the display firmware (usb-display.md "Bluetooth"), NimBLE peripheral.
+ * One GATT service: RX (write, host to device, into a ring), TX (notify, device to host, MTU-3 pieces).
+ * No pairing and no bonds (NimBLE built without its security manager): the core seals every frame with the key made
+ * over the cable (usb-display.md "Bluetooth key"). The whole stack (host and controller) is brought up by
+ * hal_link_open(HAL_LINK_BLE) and torn down and freed by hal_link_close.
  * Callbacks run in the NimBLE host task; the app reads and writes from its own task (one reader, one writer).
  * Without CONFIG_TINY_BLE (every board by default, QEMU) everything answers "no BLE" and NimBLE is not in the image.
  * SPDX-License-Identifier: GPL-3.0-or-later */
@@ -18,14 +18,11 @@
 #include "nvs.h"
 
 #include "host/ble_hs.h"
-#include "host/ble_store.h"
 #include "host/util/util.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
-
-void ble_store_config_init(void);
 
 #define RX_CAP 8192               /* >= one 6 KiB frame plus the next writes */
 #define TX_DEADLINE_MS 5000
@@ -36,26 +33,23 @@ void ble_store_config_init(void);
 static const ble_uuid128_t UUID_SVC = TP_UUID(0x01);
 static const ble_uuid128_t UUID_RX = TP_UUID(0x02);
 static const ble_uuid128_t UUID_TX = TP_UUID(0x03);
-static const ble_uuid128_t UUID_PAIR = TP_UUID(0x04);
 
 static char s_name[32] = "tiny-paper";
-static volatile uint32_t s_passkey;
 static volatile bool s_open, s_closing, s_subscribed;
 static volatile uint16_t s_conn = BLE_HS_CONN_HANDLE_NONE;
-static volatile uint16_t s_mtu = 23, s_fails;
+static volatile uint16_t s_mtu = 23;
+static volatile uint16_t s_dropped = BLE_HS_CONN_HANDLE_NONE; /* the connection hal_link_ble_drop ended: RX refuses it */
 static volatile uint32_t s_connects;
 static uint32_t s_heap_min;
 static uint16_t s_tx_handle;
-/* CONFIG_TINY_BLE_GATED: pairing is taken only while the window is open (hal_esp_ble_pairing) */
-#define GATED 1
-#define RX_SEC (BLE_GATT_CHR_F_WRITE_ENC | BLE_GATT_CHR_F_WRITE_AUTHEN)
 #define ADV_ITVL 160 /* x 0.625 ms = 100 ms */
-static volatile bool s_pair_open;
 static uint8_t s_own_addr;
 
-/* RX ring: the host task writes (head), the app reads (tail) */
+/* RX ring: the host task writes (head), the app reads (tail). s_mark: where the latest connection's bytes start (set
+ * by the host task at its connect, s_marked true until the app skips what came before) */
 static uint8_t *s_rx;
-static volatile uint32_t s_head, s_tail;
+static volatile uint32_t s_head, s_tail, s_mark;
+static volatile bool s_marked;
 static SemaphoreHandle_t s_rx_sem, s_sync_sem;
 
 static void heap_sample(void)
@@ -80,6 +74,8 @@ static int chr_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt 
 {
     int which = (int)(intptr_t)arg;
     if (which == 2 && ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
+        if (conn == s_dropped)
+            return BLE_ATT_ERR_UNLIKELY; /* ended by the core (a refusal): nothing more of it is read */
         uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
         if (!s_rx || len > RX_CAP - 1 - rx_used())
             return BLE_ATT_ERR_INSUFFICIENT_RES; /* full: the host sends it again (spec) */
@@ -91,10 +87,6 @@ static int chr_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt 
         xSemaphoreGive(s_rx_sem);
         return 0;
     }
-    if (which == 4 && ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
-        static const uint8_t one = 1;
-        return os_mbuf_append(ctxt->om, &one, 1) ? BLE_ATT_ERR_INSUFFICIENT_RES : 0;
-    }
     return BLE_ATT_ERR_UNLIKELY;
 }
 
@@ -104,11 +96,9 @@ static const struct ble_gatt_svc_def SVCS[] = {
         .uuid = &UUID_SVC.u,
         .characteristics = (struct ble_gatt_chr_def[]){
             {.uuid = &UUID_RX.u, .access_cb = chr_access, .arg = (void *)2,
-             .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP | RX_SEC},
+             .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP},
             {.uuid = &UUID_TX.u, .access_cb = chr_access, .arg = (void *)3, .flags = BLE_GATT_CHR_F_NOTIFY,
              .val_handle = &s_tx_handle},
-            {.uuid = &UUID_PAIR.u, .access_cb = chr_access, .arg = (void *)4,
-             .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_ENC | BLE_GATT_CHR_F_READ_AUTHEN},
             {0},
         },
     },
@@ -148,12 +138,13 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
     switch (ev->type) {
     case BLE_GAP_EVENT_CONNECT:
         if (ev->connect.status == 0) {
+            s_mark = s_head; /* what is in the ring now belongs to an earlier connection */
+            __atomic_store_n(&s_marked, true, __ATOMIC_RELEASE);
             s_conn = ev->connect.conn_handle;
             s_mtu = 23;
             s_connects++;
             hal_logf("ble connect n=%u", (unsigned)s_connects);
-            if (GATED) /* longer packets when the host takes them; nothing depends on it */
-                ble_gap_set_data_len(s_conn, 251, 2120);
+            ble_gap_set_data_len(s_conn, 251, 2120); /* longer packets when the host takes them; nothing depends on it */
         } else if (s_open && !s_closing) {
             adv_start();
         }
@@ -176,43 +167,6 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
     case BLE_GAP_EVENT_MTU:
         s_mtu = ev->mtu.value;
         break;
-    case BLE_GAP_EVENT_ENC_CHANGE: {
-        struct ble_gap_conn_desc d;
-        bool ok = ev->enc_change.status == 0 && ble_gap_conn_find(ev->enc_change.conn_handle, &d) == 0;
-        if (!ok && s_fails < 0xFFFF)
-            s_fails++;
-        hal_logf("ble enc status=%d auth=%d bonded=%d key=%d fails=%u", ev->enc_change.status,
-                 ok ? d.sec_state.authenticated : 0, ok ? d.sec_state.bonded : 0, ok ? d.sec_state.key_size : 0,
-                 (unsigned)s_fails);
-        /* gated: an encrypted link without an authenticated bond (Just Works, a short key) is not kept */
-        if (GATED && ok && !(d.sec_state.authenticated && d.sec_state.bonded && d.sec_state.key_size == 16)) {
-            ble_store_util_delete_peer(&d.peer_id_addr);
-            ble_gap_terminate(ev->enc_change.conn_handle, BLE_ERR_AUTH_FAIL);
-        }
-        break;
-    }
-    case BLE_GAP_EVENT_PASSKEY_ACTION: {
-        struct ble_sm_io io = {.action = ev->passkey.params.action};
-        if (GATED && !s_pair_open) { /* no window: no pairing, the host is dropped and nothing is stored */
-            hal_logf("W ble pairing refused: the window is closed");
-            ble_gap_terminate(ev->passkey.conn_handle, BLE_ERR_AUTH_FAIL);
-        } else if (io.action == BLE_SM_IOACT_DISP) {
-            io.passkey = s_passkey % 1000000u; /* shown on the panel; never logged */
-            ble_sm_inject_io(ev->passkey.conn_handle, &io);
-        } else {
-            hal_logf("W ble passkey action %d refused", io.action);
-        }
-        break;
-    }
-    case BLE_GAP_EVENT_REPEAT_PAIRING: {
-        /* a known host lost its bond: forget ours and pair again (with the passkey) */
-        struct ble_gap_conn_desc d;
-        if (GATED && !s_pair_open)
-            return BLE_GAP_REPEAT_PAIRING_IGNORE; /* our bond stays, the host must wait for a window */
-        if (ble_gap_conn_find(ev->repeat_pairing.conn_handle, &d) == 0)
-            ble_store_util_delete_peer(&d.peer_id_addr);
-        return BLE_GAP_REPEAT_PAIRING_RETRY;
-    }
     default:
         break;
     }
@@ -248,10 +202,9 @@ static void free_bufs(void)
     s_rx_sem = s_sync_sem = NULL;
 }
 
-void hal_link_ble_setup(const char *name, uint32_t passkey)
+void hal_link_ble_setup(const char *name)
 {
     snprintf(s_name, sizeof s_name, "%s", name && name[0] ? name : "tiny-paper");
-    s_passkey = passkey % 1000000u;
 }
 
 int hal_ble_open(void)
@@ -266,7 +219,9 @@ int hal_ble_open(void)
     heap_caps_monitor_local_minimum_free_size_start();
     s_heap_min = 0;
     heap_sample();
-    s_head = s_tail = 0;
+    s_head = s_tail = s_mark = 0;
+    s_marked = false;
+    s_dropped = BLE_HS_CONN_HANDLE_NONE;
     s_rx = malloc(RX_CAP);
     s_rx_sem = xSemaphoreCreateBinary();
     s_sync_sem = xSemaphoreCreateBinary();
@@ -277,9 +232,7 @@ int hal_ble_open(void)
     }
     s_conn = BLE_HS_CONN_HANDLE_NONE;
     s_subscribed = s_closing = false;
-    s_pair_open = false;
     s_mtu = 23;
-    s_fails = 0;
     s_connects = 0;
     esp_err_t e = nimble_port_init(); /* controller + host; frees what it took on failure */
     if (e != ESP_OK) {
@@ -291,13 +244,6 @@ int hal_ble_open(void)
     }
     ble_hs_cfg.reset_cb = on_reset;
     ble_hs_cfg.sync_cb = on_sync;
-    ble_hs_cfg.store_status_cb = ble_store_util_status_rr;
-    ble_hs_cfg.sm_io_cap = BLE_HS_IO_DISPLAY_ONLY;
-    ble_hs_cfg.sm_bonding = 1;
-    ble_hs_cfg.sm_mitm = 1;
-    ble_hs_cfg.sm_sc = 1;
-    ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
-    ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
     ble_svc_gap_init();
     ble_svc_gatt_init();
     int rc = ble_gatts_count_cfg(SVCS);
@@ -307,7 +253,6 @@ int hal_ble_open(void)
         rc = ble_svc_gap_device_name_set(s_name);
     if (rc)
         hal_logf("E ble gatt rc=%d", rc);
-    ble_store_config_init();
     s_open = true;
     nimble_port_freertos_init(host_task);
     if (rc || xSemaphoreTake(s_sync_sem, pdMS_TO_TICKS(SYNC_TIMEOUT_MS)) != pdTRUE) {
@@ -353,6 +298,11 @@ long hal_ble_read(uint8_t *buf, size_t cap, uint32_t timeout_ms)
 {
     if (!s_open || !s_rx)
         return HAL_E_NOTFOUND;
+    if (__atomic_exchange_n(&s_marked, false, __ATOMIC_ACQ_REL)) { /* a new connection: skip the bytes of the last */
+        uint32_t h = __atomic_load_n(&s_head, __ATOMIC_ACQUIRE), m = s_mark;
+        if ((m - s_tail) % RX_CAP <= (h - s_tail) % RX_CAP) /* never back over bytes already read */
+            __atomic_store_n(&s_tail, m, __ATOMIC_RELEASE);
+    }
     if (!rx_used())
         xSemaphoreTake(s_rx_sem, pdMS_TO_TICKS(timeout_ms));
     uint32_t head = __atomic_load_n(&s_head, __ATOMIC_ACQUIRE), t = s_tail;
@@ -394,35 +344,30 @@ long hal_ble_write(const uint8_t *buf, size_t len)
     return (long)len;
 }
 
-void hal_esp_ble_pairing(bool open) { s_pair_open = open; }
-
 void hal_link_ble_state(hal_ble_state_t *out)
 {
     memset(out, 0, sizeof *out);
     out->open = s_open;
     out->connected = s_open && s_conn != BLE_HS_CONN_HANDLE_NONE;
-    out->secure = hal_link_ble_secure();
     out->mtu = out->connected ? s_mtu : 23;
-    out->pair_fails = s_fails;
     out->connects = s_connects;
     out->heap_min = s_heap_min;
 }
 
-bool hal_link_ble_secure(void)
+void hal_link_ble_drop(void)
 {
     uint16_t c = s_conn;
-    struct ble_gap_conn_desc d;
-    if (!s_open || c == BLE_HS_CONN_HANDLE_NONE || ble_gap_conn_find(c, &d) != 0)
-        return false;
-    return d.sec_state.encrypted && d.sec_state.authenticated && d.sec_state.bonded && d.sec_state.key_size == 16;
+    if (!s_open || c == BLE_HS_CONN_HANDLE_NONE)
+        return;
+    s_dropped = c;
+    vTaskDelay(pdMS_TO_TICKS(100)); /* let the last notification (a refusal) go out */
+    ble_gap_terminate(c, BLE_ERR_REM_USER_CONN_TERM);
+    __atomic_store_n(&s_tail, __atomic_load_n(&s_head, __ATOMIC_ACQUIRE), __ATOMIC_RELEASE); /* its unread bytes */
 }
 
+/* The bonds of an older firmware that paired (NimBLE's store in NVS): erased, nothing else uses them now */
 void hal_link_ble_forget(void)
 {
-    if (s_open) {
-        ble_store_clear();
-        return;
-    }
     nvs_handle_t h;
     if (nvs_open("nimble_bond", NVS_READWRITE, &h) == ESP_OK) {
         nvs_erase_all(h);

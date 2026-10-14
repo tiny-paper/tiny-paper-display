@@ -1,6 +1,6 @@
 /*
  * bt.c - the display firmware's Bluetooth on the device (docs/spec/usb-display.md "Bluetooth"): usbdisp's bt_* calls
- * on the HAL's BLE link (hal_esp esp/ble_link.c, built with CONFIG_TINY_BLE_GATED). The only place of this firmware
+ * on the HAL's BLE link (hal_esp esp/ble_link.c). The only place of this firmware
  * that starts the Bluetooth stack is bt_open below, and usbdisp calls it only while the stored setting is on
  * (components/usbdisp/test/test_usbdisp_bt.c counts the calls; firmware/tools/check_no_radio.py checks the link).
  * C11. SPDX-License-Identifier: GPL-3.0-or-later
@@ -17,7 +17,7 @@ static char s_name[20];
 static int bt_open(void *ctx, const char *name)
 {
     (void)ctx;
-    hal_link_ble_setup(name, 0);
+    hal_link_ble_setup(name);
     return hal_link_open(HAL_LINK_BLE);
 }
 
@@ -39,26 +39,19 @@ static long bt_write(void *ctx, const uint8_t *buf, size_t len)
     return hal_link_write(HAL_LINK_BLE, buf, len);
 }
 
-static bool bt_connected(void *ctx)
+/* the connection's number: connects since the stack started, new for every connection */
+static uint32_t bt_connected(void *ctx)
 {
     (void)ctx;
     hal_ble_state_t s;
     hal_link_ble_state(&s);
-    return s.connected;
+    return s.connected ? s.connects : 0;
 }
 
-static bool bt_secure(void *ctx)
+static void bt_drop(void *ctx)
 {
     (void)ctx;
-    return hal_link_ble_secure();
-}
-
-static void bt_pairing(void *ctx, bool open, uint32_t passkey)
-{
-    (void)ctx;
-    if (open)
-        hal_link_ble_setup(s_name, passkey); /* the passkey the panel shows */
-    hal_esp_ble_pairing(open);
+    hal_link_ble_drop();
 }
 
 static void bt_forget(void *ctx)
@@ -67,12 +60,11 @@ static void bt_forget(void *ctx)
     hal_link_ble_forget();
 }
 
-static uint32_t bt_rand(void *ctx)
+/* esp_fill_random: the hardware RNG, true random while the radio runs (usbdisp asks only then) */
+static void bt_random(void *ctx, void *buf, size_t n)
 {
     (void)ctx;
-    uint32_t v;
-    hal_random_bytes(&v, sizeof v);
-    return v;
+    hal_random_bytes(buf, n);
 }
 
 void display_bt_cfg(usbdisp_cfg_t *cfg)
@@ -86,8 +78,7 @@ void display_bt_cfg(usbdisp_cfg_t *cfg)
     cfg->bt_read = bt_read;
     cfg->bt_write = bt_write;
     cfg->bt_connected = bt_connected;
-    cfg->bt_secure = bt_secure;
-    cfg->bt_pairing = bt_pairing;
+    cfg->bt_drop = bt_drop;
     cfg->bt_forget = bt_forget;
-    cfg->rand32 = bt_rand;
+    cfg->random = bt_random;
 }
