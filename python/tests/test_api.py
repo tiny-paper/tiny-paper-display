@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 """The simple API (tiny_paper_display.api) against the fake display firmware: finding, opening, closing by itself,
-the area rule, several devices, the connection's defaults."""
+several devices, the connection's defaults."""
 
 import pytest
 
@@ -87,27 +87,11 @@ def test_open_a_port_that_is_not_the_display_firmware_closes_it(bench):
     assert bench.opened[-1][1].closed == 1
 
 
-def test_area_refuses_x_not_a_multiple_of_8_before_sending(bench):
-    dev = bench.devices["A"] = FakeDevice(w=32, h=16)
-    with tpd.open("A") as d:
-        before = len(dev.requests)
-        for x, w in ((4, 8), (8, 12)):
-            with pytest.raises(tpd.DisplayError, match="multiples of 8"):
-                d.area(tpd.Canvas(w, 4), x, 0)
-        with pytest.raises(tpd.DisplayError, match="inside"):
-            d.area(tpd.Canvas(16, 4), 24, 0)
-        assert len(dev.requests) == before, "nothing was sent"
-        d.show(tpd.Canvas(32, 16), depth=1)
-        c = tpd.Canvas(8, 4, 0)
-        assert d.area(c, 8, 4)["mode"] in ("partial", "none")
-
-
-def test_area_takes_a_png_and_a_picture_at_its_own_size(bench):
-    bench.devices = {"A": FakeDevice(w=32, h=16)}
-    rgb = png(8, 4, b"".join(b"\x00" + bytes([200, 30, 30]) * 8 for _ in range(4)))
-    with tpd.open("A") as d:
-        d.show(tpd.Canvas(32, 16))
-        assert d.area(rgb, 8, 4, mode="full")["mode"] == "full"
+def test_no_rectangles_in_the_api():
+    """Whole pages only: the device refreshes just what changed, and one page measured 1.9 s on the X against 5.3 s
+    for the same change as three rectangles (2026-10-14)."""
+    for cls in (tpd.Device, tpd.Group):
+        assert not hasattr(cls, "area"), f"{cls.__name__}.area is back"
 
 
 def test_show_a_picture_a_path_bytes_and_the_defaults(bench, tmp_path):

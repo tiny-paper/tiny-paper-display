@@ -27,13 +27,12 @@ import tiny_paper_display as tpd
 with tpd.open() as d:                                        # the first device found; closed at the end
     d.configure(full_every=30)                               # a setting on the device (None: default)
     d.show("photo.png", fit="fit", dither="floyd")           # path, bytes or tpd.Canvas
-    d.area(tpd.Canvas(48, 24, 0), 8, 8)                      # a rectangle, x a multiple of 8
 ```
 
 | Call | What |
 |---|---|
 | `tpd.devices(bluetooth=False)` | the devices running the display firmware: port or address, board, w, h |
-| `tpd.open(target=None, bluetooth=None, key_file=None, **defaults)` | a `Device` (`caps`, `firmware`, `defaults`, `show`, `area`, `clear`, `configure`) |
+| `tpd.open(target=None, bluetooth=None, key_file=None, **defaults)` | a `Device` (`caps`, `firmware`, `defaults`, `show`, `clear`, `configure`) |
 | `tpd.open_all()` | a `Group` of every device; calls return a list of results |
 | `tpd.show(picture)` | open, show, close |
 | `tpd.Canvas(w, h)` | draw in 16 grays: `rect`, `frame`, `text`, `checker`, `crop` |
@@ -42,7 +41,7 @@ Picture options (`fit`, `border`, `dither`, `depth`, `threshold`, `rotate`) are 
 give the pixels of the site's Picture page (`docs/spec/vectors/picture-prepare.json`). JPEG and other formats need Pillow: `pip install tiny-paper-display[images]`.
 | Example | What it shows |
 |---|---|
-| `examples/quickstart.py` | the short version: find, show a picture, update a rectangle |
+| `examples/quickstart.py` | the short version: find, show a picture, then a page drawn in code |
 | `examples/test_page.py` | the reference: every gray depth and refresh mode, with timings |
 | `examples/pc_stats.py` | live PC stats (psutil optional, else /proc; `--once`, `--png FILE`; pictures in `docs/img/`) |
 | `examples/btc_ticker.py` | live Bitcoin price over 1-minute candles of the last hour, pushed by Kraken's WebSocket, partial updates with an inverse flash every 30 (`pip install websockets`) |

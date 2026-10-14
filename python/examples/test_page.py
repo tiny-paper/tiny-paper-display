@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""A test page drawn in code, then an area update in every refresh mode the device offers, at every gray depth.
+"""A test page drawn in code, then a box changed in every refresh mode the device offers, at every gray depth.
 
     python test_page.py                         (the first device found)
     python test_page.py COM5                    (or /dev/ttyACM0)
@@ -8,7 +8,8 @@
     python test_page.py --depth 1 --keep
 
 Per depth the device reports: the page as a full refresh, then one numbered box per mode (device's choice, partial,
-partial_all, inverse, passes 1 and 2), each sent as a rectangle. At the end the page is drawn once more with every
+partial_all, inverse, passes 1 and 2), each drawn into the page and the whole page sent: the device refreshes what
+changed. At the end the page is drawn once more with every
 timing in it and the same table is printed. The reference example of the API (tiny_paper_display); no Pillow needed."""
 import argparse
 import sys
@@ -83,10 +84,7 @@ def main():
         def send(label, depth, picture, **kw):
             t0 = time.monotonic()
             try:
-                if "x" in kw:
-                    reply = d.area(picture, kw.pop("x"), kw.pop("y"), depth=depth, force=True, **kw)
-                else:
-                    reply = d.show(picture, depth=depth, force=True, **kw)
+                reply = d.show(picture, depth=depth, force=True, **kw)
                 line = display_fw.describe(reply)
                 results[(depth, label)] = f"{reply.get('mode')} {reply.get('ms')} MS"
             except tpd.DisplayError as e:
@@ -116,12 +114,12 @@ def main():
                 c.checker(bx, by, bw // 3 // 8 * 8, bh, 2)
                 c.rect(bx + bw // 3, by, bw // 3, bh, 15 - (n * 3) % 16)
                 c.text(bx + 2 * bw // 3 + 2 * s, by + bh // 3, str(n), 2 * s)
-                kw = {"x": bx, "y": by}
+                kw = {}
                 if name.startswith("PASSES"):
                     kw.update(mode="passes", passes=int(name.split()[1]))
                 elif name != "AUTO":
                     kw["mode"] = name.lower()
-                send(name, depth, c.crop(bx, by, bw, bh), **kw)
+                send(name, depth, c, **kw)
 
         if not args.keep and depths:
             print("summary:")

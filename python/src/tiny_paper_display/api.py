@@ -8,7 +8,7 @@
                                        # Bluetooth: the key from `tiny-paper-display setup --key`, or key_file=
         d.configure(full_every=30)     # stored on the device
         d.show("photo.png", fit="fit", dither="floyd")
-        d.area(canvas, 8, 16)          # a rectangle, x a multiple of 8
+        d.show(canvas)                 # a Canvas drawn in code; only what changed is refreshed
         d.clear()
     tpd.show("photo.png")              # open the first device, show, close
 
@@ -313,20 +313,18 @@ class Device:
             raise DisplayError(f"unknown picture option: {', '.join(sorted(unknown))}")
         return {**self.defaults, **{k: v for k, v in given.items() if v is not None}}
 
-    def _depth(self, wanted, partial=False):
-        depths = self.caps.partial_depths if partial else self.caps.depths
-        if not depths:
-            raise DisplayError(f"{self.board or 'this board'} has no partial refresh: show the whole picture")
+    def _depth(self, wanted):
+        depths = self.caps.depths
         if wanted is None:
             return max(depths)
         if wanted not in depths:
-            raise DisplayError(f"{self.board or 'this board'} does not do {wanted} bit{' partial' if partial else ''} "
+            raise DisplayError(f"{self.board or 'this board'} does not do {wanted} bit "
                                f"(it does {', '.join(map(str, sorted(depths)))})")
         return wanted
 
-    def _levels_png(self, source, w, h, s, partial):
+    def _levels_png(self, source, w, h, s):
         color = bool(self.caps.colors)
-        depth = 2 if color else self._depth(s["depth"], partial)
+        depth = 2 if color else self._depth(s["depth"])
         levels, _ = picture.prepare(source, w, h, fit=s["fit"], border=s["border"], dither=s["dither"], depth=depth,
                                     threshold=s["threshold"], rotate=s["rotate"], color=color)
         return display_fw.write_png(w, h, depth, picture.pack_rows(levels, w, h, depth), indexed=color)
@@ -345,42 +343,9 @@ class Device:
         elif isinstance(pic, (bytes, bytearray)) and s["depth"] is None and display_fw.png_fits(bytes(pic), self.hello):
             png = bytes(pic)
         if png is None:
-            png = self._levels_png(images.load(pic), self.w, self.h, s, False)
+            png = self._levels_png(images.load(pic), self.w, self.h, s)
         return self._send("show", png, started, lambda p, f: display_fw.show_png(
             self.display, p, self.hello, mode=mode, passes=passes, force=f), force)
-
-    def area(self, pic, x, y, mode=None, *, passes=None, force=False, depth=None):
-        """A rectangle of the panel with its top left pixel at x, y: a Canvas, or a picture (path, bytes) shown at its own
-        size. x and the width must be multiples of 8 and all of it inside the panel (checked before anything is sent);
-        the board must have a partial refresh at the depth (default: its deepest partial depth)."""
-        self._need_open()
-        started = time.perf_counter()
-        if isinstance(pic, Canvas):
-            w, h = pic.w, pic.h
-        else:
-            data = pic if isinstance(pic, (bytes, bytearray)) else None
-            size = images.png_size(bytes(data)) if data else None
-            if size is None:
-                pic = images.load(pic)
-                w, h = pic.w, pic.h
-            else:
-                w, h = size
-        if type(x) is not int or type(y) is not int:
-            raise DisplayError("x and y are whole numbers")
-        if x % 8 or w % 8:
-            raise DisplayError(f"x and the width are multiples of 8 (x={x}, width={w})")
-        if x < 0 or y < 0 or x + w > self.w or y + h > self.h:
-            raise DisplayError(f"the rectangle {x},{y} {w}x{h} is not inside the {self.w}x{self.h} panel")
-        d = self._depth(depth, partial=True)
-        if isinstance(pic, Canvas):
-            png = pic.png(d)
-        elif isinstance(pic, (bytes, bytearray)) and depth is None and display_fw.png_fits(bytes(pic), {**self.hello, "w": w, "h": h, "depths": self.caps.partial_depths}):
-            png = bytes(pic)
-        else:
-            s = {**self._settings({}), "fit": "stretch", "rotate": 0, "depth": d}
-            png = self._levels_png(images.load(pic), w, h, s, True)
-        return self._send("area", png, started, lambda p, f: display_fw.show_area(
-            self.display, p, self.hello, x, y, mode, passes, force=f), force)
 
     def clear(self):
         """A white panel (one full refresh)."""
@@ -413,9 +378,6 @@ class Group:
 
     def show(self, pic, **kw):
         return self._each("show", pic, **kw)
-
-    def area(self, pic, x, y, mode=None, **kw):
-        return self._each("area", pic, x, y, mode, **kw)
 
     def clear(self):
         return self._each("clear")

@@ -64,7 +64,7 @@ class Canvas:
                 self.px[yy * self.w + xx] = BLACK if (xx // cell + yy // cell) % 2 else WHITE
 
     def crop(self, x, y, w, h):
-        """A new Canvas of this rectangle (for Device.area)."""
+        """A new Canvas of this rectangle."""
         if x < 0 or y < 0 or w < 1 or h < 1 or x + w > self.w or y + h > self.h:
             raise DisplayError("the rectangle is not inside the canvas")
         out = Canvas(w, h)

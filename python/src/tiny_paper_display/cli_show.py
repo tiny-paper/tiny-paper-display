@@ -12,16 +12,14 @@ from . import display_fw
 from .usb_display import Display, DisplayError, codec, convert, open_port
 
 
-def display_firmware(display, hello, png, started, mode=None, passes=None, at=None, force=False):
+def display_firmware(display, hello, png, started, mode=None, passes=None, force=False):
     """The display firmware (firmware/display): the picture is on the panel when the answer comes. Without a mode
-    the device updates only what changed; at: (x, y), the PNG is sent as it is as a rectangle there."""
+    the device updates only what changed."""
     print(f"{hello['board']} display firmware {hello['fw']}: {hello['w']}x{hello['h']}, "
           f"gray depths {hello['depths']}{', colors ' + ' '.join(hello['colors']) if hello.get('colors') else ''}"
           f", partial at {hello.get('partial_depths', [])} bit, modes {' '.join(hello.get('modes', ['full']))}")
     if png is None:
         reply = display_fw.clear(display)
-    elif at:
-        reply = display_fw.show_area(display, png, hello, at[0], at[1], mode, passes, force=force)
     else:
         reply = display_fw.show_png(display, display_fw.panel_png(png, hello), hello, mode=mode, passes=passes, force=force)
     print(json.dumps(reply, sort_keys=True))
@@ -59,8 +57,6 @@ def main(argv=None):
                         help="display firmware only: the refresh to ask for (default: the device updates only what "
                              "changed and does a full refresh when it has to)")
     parser.add_argument("--passes", type=int, help="with --mode passes: how many drives (1..4)")
-    parser.add_argument("--at", metavar="X,Y", help="display firmware only: the PNG is a rectangle with its top left "
-                                                    "pixel there (x and its width multiples of 8), sent as it is")
     args = parser.parse_args(argv)
     if args.bluetooth and args.picture is None and args.port is not None:
         args.port, args.picture = None, Path(args.port)  # the one positional is the picture
@@ -68,12 +64,6 @@ def main(argv=None):
         parser.error("a port, or --bluetooth NAME_OR_ADDRESS")
     if not args.clear and args.picture is None:
         parser.error("a picture, or --clear")
-    try:
-        at = tuple(int(v) for v in args.at.split(",")) if args.at else None
-    except ValueError:
-        at = ()
-    if at is not None and len(at) != 2:
-        parser.error("--at X,Y")
     started = time.monotonic()
     try:
         if args.clear:
@@ -88,9 +78,9 @@ def main(argv=None):
             display = Display(port)
             hello = display.hello()
             if display_fw.is_display_firmware(hello):
-                return display_firmware(display, hello, png, started, args.mode, args.passes, at, args.force)
-            if args.mode or at:
-                raise DisplayError("--mode and --at need the display firmware (hello has no project: display)")
+                return display_firmware(display, hello, png, started, args.mode, args.passes, args.force)
+            if args.mode:
+                raise DisplayError("--mode needs the display firmware (hello has no project: display)")
             hello, info = display.screen(hello)
             print(f"{hello['board']}: {info['w']}x{info['h']}, {info['depth']}-bit {info['palette']}")
             raster = convert(png, info)

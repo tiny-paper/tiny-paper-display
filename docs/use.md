@@ -81,8 +81,9 @@ with tpd.open() as d:                        # the first device; tpd.open("COM5"
     print(d.caps.depths, d.caps.full_every)  # what the board can do
     d.configure(full_every=30)               # stored on the device; None brings the default back
     d.show("picture.png", fit="fit", dither="floyd")
-    box = tpd.Canvas(8, 4, 0)                # drawn in code: gray levels 0 (black) to 15
-    d.area(box, 8, 0)                        # a rectangle; x and its width multiples of 8
+    page = tpd.Canvas(d.w, d.h)              # drawn in code: gray levels 0 (black) to 15
+    page.rect(8, 0, 8, 4, 0)
+    d.show(page)                             # the device refreshes only what changed
     d.clear()
 ```
 
@@ -90,10 +91,9 @@ with tpd.open() as d:                        # the first device; tpd.open("COM5"
 |---|---|
 | `tpd.devices(bluetooth=False)` | list of `Found(port, address, board, w, h)` |
 | `tpd.open(target=None, bluetooth=None, key_file=None, **defaults)` | a `Device`; no target: the first found |
-| `tpd.open_all()` | a `Group` of every device found; `show`, `area`, `clear`, `configure` return one result per device |
+| `tpd.open_all()` | a `Group` of every device found; `show`, `clear`, `configure` return one result per device |
 | `tpd.show(picture)` | open the first device, show, close |
 | `d.show(picture, fit, border, dither, depth, threshold, rotate, mode)` | any picture: a path, bytes or a `Canvas` |
-| `d.area(picture, x, y, mode=None)` | a rectangle at its own size; refused before sending when `x` or the width is not a multiple of 8 or it leaves the panel |
 | `d.configure(full_every=...)` | a setting that lives on the device; returns the new `d.caps` |
 | `d.clear()` | a white panel |
 
@@ -207,24 +207,6 @@ with open_port("/dev/ttyACM0") as port:
 mode it cannot do: the package checks against what the device reported and says so before sending. See the table of
 boards below.
 
-### Update only part of the screen
-
-Send a small PNG and say where it goes. Its left edge `x` and its width must be multiples of 8, and all of it must lie
-inside the panel. This makes a black 8 x 4 box:
-
-```python test
-from tiny_paper_display import display_fw
-
-open("box.png", "wb").write(display_fw.write_png(8, 4, 1, bytes(4)))
-```
-
-```sh test
-tiny-paper-display show /dev/ttyACM0 box.png --at 8,4
-```
-
-In Python: `display_fw.show_area(display, png, hello, 8, 4)`. The rectangle is sent as it is, not fitted. The device must
-have a partial refresh at the bit depth of the box. Where it does not (a PicPak), it refuses with `MODE`.
-
 ### Ask the device what it can do
 
 ```python test
@@ -293,7 +275,6 @@ refuses 8 and 16 bit gray, RGB, alpha, interlaced files, and an indexed file on 
 | Input files | reads gray or indexed 1 to 8 bit, RGB, gray with alpha and RGBA 8 bit, not interlaced, up to 16 MiB and 4 megapixels; alpha is put on white | convert other kinds (16 bit, interlaced) to PNG first |
 | Already right | a gray PNG of the panel's size and a depth the device takes is sent unchanged | |
 | Sending | checks the size limit and the mode, waits while the panel is busy | |
-| Area updates | sends the rectangle as given | cut the rectangle and give `x` and `y` (multiples of 8) |
 
 A picture the size of the TRMNL X takes about ten seconds to convert in Python (measured once on a desktop computer).
 
@@ -305,9 +286,9 @@ A picture the size of the TRMNL X takes about ten seconds to convert in Python (
 | `No permission to open /dev/ttyACM0` | Linux: your user may not use the port | the message gives the fix (the `dialout` group, or a udev rule); log in again |
 | `no reply for command 0x01 ...` | nothing answered | wrong port, a charge-only cable, or not the display firmware: install it from the Flash page. On battery the device only looks for a computer now and then (by design, not measured): press its button and try again |
 | `... needs the display firmware (hello has no project: display)` | the device answers but runs other firmware | install the display firmware from the Flash page |
-| `display refused: ... (WRONG_SIZE 33)` | the PNG is not the panel's size | use `panel_png`, or `show` without `--at`, so it is fitted |
+| `display refused: ... (WRONG_SIZE 33)` | the PNG is not the panel's size | use `panel_png`, or `show`, so it is fitted |
 | `display refused: ... (DEPTH 34)` | a picture kind this panel does not show | use `panel_png`, or save as a non-interlaced PNG the table above allows |
-| `display refused: ... (MODE 36)` or `(RECT 37)` | the board cannot do that refresh, or the area is not allowed | ask `hello` for `modes` and `partial_depths`; keep `x` and the width at multiples of 8, inside the panel |
+| `display refused: ... (MODE 36)` | the board cannot do that refresh at that depth | ask `hello` for `modes` and `partial_depths` |
 | `display refused: ... (BUSY 3)` | the panel is refreshing | the package already waits up to a minute; try again when the panel has stopped |
 | "This browser cannot reach a USB device (no Web Serial)" | the Sketch or Flash page needs Web Serial | use Chrome or Edge on a computer |
 

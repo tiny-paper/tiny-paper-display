@@ -34,7 +34,7 @@ def blocks():
 
 def test_the_guide_has_samples_to_run():
     kinds = [kind for kind, _ in blocks()]
-    assert kinds.count("python") >= 4 and kinds.count("sh") >= 5, kinds
+    assert kinds.count("python") >= 4 and kinds.count("sh") >= 4, kinds  # 4: the --at sample left with the rectangle calls (2026-10-14)
 
 
 def test_guide_samples_run(tmp_path, monkeypatch, capsys):
