@@ -45,7 +45,7 @@ give the pixels of the site's Picture page (`docs/spec/vectors/picture-prepare.j
 | `examples/quickstart.py` | the short version: find, show a picture, update a rectangle |
 | `examples/test_page.py` | the reference: every gray depth and refresh mode, with timings |
 | `examples/pc_stats.py` | live PC stats (psutil optional, else /proc; `--once`, `--png FILE`; pictures in `docs/img/`) |
-| `examples/btc_ticker.py` | live Bitcoin price over 1-minute candles of the last hour, pushed by Kraken's WebSocket, inverse flash per change (`pip install websockets`) |
+| `examples/btc_ticker.py` | live Bitcoin price over 1-minute candles of the last hour, pushed by Kraken's WebSocket, partial updates with an inverse flash every 30 (`pip install websockets`) |
 | `examples/live_wire/` | live Wikipedia edits and earthquakes (Docker) |
 
 Pictures and videos from the command line: `tiny-paper-display show|clear|movie|setup`.

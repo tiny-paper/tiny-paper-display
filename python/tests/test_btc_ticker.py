@@ -56,6 +56,13 @@ def test_spans():
     assert [bt.span(m) for m in (30, 60, 150, 300, 900)] == ["30M", "60M", "150M", "5H", "15H"]
 
 
+def test_partial_with_a_clean_up_every_n():
+    modes = [bt.refresh_mode(n, 30, "inverse") for n in range(1, 61)]
+    assert modes.count("inverse") == 2 and modes[29] == modes[59] == "inverse"
+    assert set(modes) == {"partial", "inverse"}
+    assert {bt.refresh_mode(n, 0, "full") for n in range(1, 61)} == {"partial"}
+
+
 @pytest.mark.parametrize("prices", [[], series(1)[:1]])
 def test_too_few_prices(drawn, prices):
     bt.render(prices, 800, 480)

@@ -3,14 +3,15 @@
 """Bitcoin price, live, over a candle chart of the last hour, from Kraken's public market data (no account, no key).
 
     python btc_ticker.py                        (the first device found: 1-minute candles, the last hour)
-    python btc_ticker.py COM5 --currency EUR --minutes 5 --refresh partial
+    python btc_ticker.py COM5 --currency EUR --minutes 5 --clean full --clean-every 60
     python btc_ticker.py --bluetooth NAME
     python btc_ticker.py --png page.png --size 800x480 [--demo]     (no device; --demo: fixed fake candles)
 
 The candles come once over HTTP, then Kraken's WebSocket pushes every change of the current one (needs
 `pip install websockets`). The page is redrawn when a price moved, at most every --every seconds (default 1), in 1 bit:
-the device refreshes only what changed, with an inverse flash by default (--refresh partial: no flash). Its full_every
-does the clean-up. Without the network the last page stays up with an OFFLINE mark and the program connects again."""
+the device refreshes only what changed, without a flash. Every --clean-every updates (default 30) one clean-up
+refresh removes the ghosting: an inverse flash by default (--clean full: the full refresh). Without the network the
+last page stays up with an OFFLINE mark and the program connects again."""
 import argparse
 import json
 import math
@@ -132,10 +133,16 @@ def render(candles, w, h, cur="USD", offline=False, clock=None, minutes=1):
     return c
 
 
-def draw(d, page, refresh):
-    """Send the page; the device refreshes only what changed (its full_every cleans up now and then)."""
+def refresh_mode(n, clean_every, clean):
+    """The refresh of update n (1, 2, ...): partial, and every clean_every-th one the clean-up (0: never). A named mode
+    skips the device's own full_every, so the example counts itself."""
+    return clean if clean_every and n % clean_every == 0 else "partial"
+
+
+def draw(d, page, mode):
+    """Send the page; the device refreshes only what changed."""
     try:
-        d.show(page, depth=1, mode=refresh)
+        d.show(page, depth=1, mode=mode)
     except tpd.DisplayError as e:
         print(f"show failed, trying again with the next price: {e}", file=sys.stderr)
 
@@ -146,10 +153,10 @@ def main(argv=None):
     ap.add_argument("--bluetooth", metavar="NAME_OR_ADDRESS")
     ap.add_argument("--currency", default="USD", choices=("USD", "EUR", "GBP", "CAD", "JPY", "CHF", "AUD"))
     ap.add_argument("--minutes", type=int, default=1, choices=(1, 5, 15), help="minutes per candle (default 1: the last hour)")
-    ap.add_argument("--refresh", default="inverse", choices=("inverse", "partial", "full"),
-                    help="how the panel changes: inverse (default) flashes the changed part, partial does not")
+    ap.add_argument("--clean", default="inverse", choices=("inverse", "full"), help="the clean-up refresh (default inverse)")
+    ap.add_argument("--clean-every", type=int, default=30, metavar="N", help="a clean-up every N updates (default 30, 0 never)")
     ap.add_argument("--every", type=float, default=1, help="at most one screen update per this many seconds (default 1)")
-    ap.add_argument("--verbose", action="store_true", help="one line per screen update: price, rectangles, time")
+    ap.add_argument("--verbose", action="store_true", help="one line per screen update: price, refresh, time")
     ap.add_argument("--png", metavar="FILE", help="write the page to a PNG and exit (no device)")
     ap.add_argument("--size", default="800x480", help="PNG size WxH (default 800x480)")
     ap.add_argument("--demo", action="store_true", help="with --png: fixed fake candles instead of the network")
@@ -169,6 +176,7 @@ def main(argv=None):
     candles = []
     try:
         with tpd.open(args.port, args.bluetooth) as d:
+            n = 0
             while True:
                 try:
                     candles = fetch_candles(args.currency, args.minutes)
@@ -183,14 +191,15 @@ def main(argv=None):
                             except TimeoutError:
                                 pass
                             if dirty and time.monotonic() - drawn >= args.every:
-                                t0 = time.monotonic()
-                                draw(d, render(candles, d.w, d.h, args.currency, minutes=args.minutes), args.refresh)
+                                t0, n = time.monotonic(), n + 1
+                                mode = refresh_mode(n, args.clean_every, args.clean)
+                                draw(d, render(candles, d.w, d.h, args.currency, minutes=args.minutes), mode)
                                 if args.verbose:
-                                    print(f"{candles[-1][4]:,.1f} in {round((time.monotonic() - t0) * 1000)} ms", flush=True)
+                                    print(f"{candles[-1][4]:,.1f} {mode} in {round((time.monotonic() - t0) * 1000)} ms", flush=True)
                                 dirty, drawn = False, time.monotonic()
                 except FAILS + (WebSocketException,) as e:
                     print(f"no prices, connecting again in 5 s: {e}", file=sys.stderr)
-                    draw(d, render(candles, d.w, d.h, args.currency, offline=True, minutes=args.minutes), args.refresh)
+                    draw(d, render(candles, d.w, d.h, args.currency, offline=True, minutes=args.minutes), "partial")
                     time.sleep(5)
     except KeyboardInterrupt:
         print()
