@@ -2,7 +2,7 @@
 # The display firmware's path: a PNG of the panel's size, or of a rectangle of it, is shown as it is.
 """Show a picture on a board running the display firmware (firmware/display, docs/spec/usb-display.md).
 
-Unlike the album path of usb_display.py this needs no plugin, account or WiFi on the device, and the answer of
+This needs no plugin, account or WiFi on the device, and the answer of
 show_end comes after the panel's refresh. Requests go through the same link client (usb_display.Display).
 
 The device keeps what it last showed: without a mode it updates only what changed (a partial refresh, no flash) and

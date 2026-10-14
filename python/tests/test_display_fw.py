@@ -261,6 +261,15 @@ def test_clear_needs_the_display_firmware(monkeypatch, capsys):
     assert "needs the display firmware" in capsys.readouterr().err
 
 
+def test_show_picture_refuses_other_firmware(monkeypatch, capsys):
+    port, _ = replay("gray", hello={"proto": 1, "board": "sim", "album": 1, "max_payload": 6144})
+    port.__class__ = Port
+    monkeypatch.setattr(codec, "open_serial", lambda name: port)
+    monkeypatch.setattr(sys, "argv", ["show.py", "port", str(ROOT / "python/tests/data" / "bars.png")])
+    assert show.main() == 1
+    assert "needs the display firmware" in capsys.readouterr().err
+
+
 def test_capabilities_with_and_without_the_new_fields():
     port, state = replay("gray")
     caps = fw.capabilities(Display(port))

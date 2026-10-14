@@ -1,13 +1,11 @@
 # SPDX-License-Identifier: MIT
-# USB album uploads with existing diagnostic framing and host PNG conversion.
-"""USB album upload using the repository's existing Python link codec.
+# The link client for the display firmware (framing via codec) and the host PNG conversion.
+"""The link client of the display firmware: requests, errors, ports, and the PNG fit to the panel.
 
-Keep this example in the tiny-paper checkout: no second CBOR/frame parser.
-See docs/spec/link-protocol.md and docs/spec/album.md, Link commands.
+See docs/spec/usb-display.md.
 """
 import struct
 import time
-import zlib
 from pathlib import Path
 
 from . import codec
@@ -131,37 +129,6 @@ class Display:
         self._display_known = reply.get("fingerprint")
         return reply
 
-    def screen(self, hello=None):
-        hello = hello or self.hello()
-        if hello.get("proto") != 1 or hello.get("album") != 1:
-            raise DisplayError("device has no protocol-1 album upload; no direct screen-show command exists")
-        cap = hello.get("max_payload")
-        if type(cap) is not int or not 64 <= cap <= 6144:
-            raise DisplayError("invalid max_payload in hello")
-        self.max_payload = cap
-        info = self.request(0x28, {})
-        screen_size(info)
-        return hello, info
-
-    def upload(self, raster, info):
-        expected = screen_size(info)
-        # Check before album_put_begin: a failed validation must write no flash.
-        if len(raster) != expected or raster[:10] != raster_header(info)[:10]:
-            raise DisplayError("wrong size or depth for the device's current screen")
-        if (raster[10] & 8) != (info.get("flags", 0) & 8):
-            raise DisplayError("wrong color-panel flag")
-        begin = self.request(0x2A, {"size": len(raster), "crc": zlib.crc32(raster)})
-        chunk = begin.get("chunk")
-        if type(chunk) is not int or not 1 <= chunk <= 4096:
-            raise DisplayError("invalid upload chunk size")
-        chunk = min(chunk, self.max_payload - 32)
-        for off in range(0, len(raster), chunk):
-            data = raster[off:off + chunk]
-            reply = self.request(0x2B, {"off": off, "data": data})
-            if reply.get("next") != off + len(data):
-                raise DisplayError(f"device expected another offset: {reply}")
-        return self.request(0x2C, {}, timeout=10)
-
 
 def screen_size(info):
     w, h, depth = (info.get(k) for k in ("w", "h", "depth"))
@@ -184,7 +151,7 @@ def convert(png, info):
     """Fit with white margins, nearest-neighbour sampling and nearest ink.
 
     Deliberately simple quantization, unlike the web app's photo dithering.
-    Uses album_info (rotation/depth/levels), not hello's native panel size.
+    `info` is the panel: w, h, depth, palette, levels.
     """
     from .png_image import decode_png
 

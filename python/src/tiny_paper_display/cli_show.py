@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# Show a host PNG (the command line; the API is api.py: tpd.show) through the current USB album upload path.
-"""Upload a PNG to the USB album. A Photos album consumer must already be active."""
+# Show a host PNG (the command line; the API is api.py: tpd.show) on the display firmware.
+"""Show a PNG on the display firmware."""
 import argparse
 import json
 import sys
@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 from . import display_fw
-from .usb_display import Display, DisplayError, codec, convert, open_port
+from .usb_display import Display, DisplayError, codec, open_port
 
 
 def display_firmware(display, hello, png, started, mode=None, passes=None, force=False):
@@ -79,18 +79,7 @@ def main(argv=None):
             hello = display.hello()
             if display_fw.is_display_firmware(hello):
                 return display_firmware(display, hello, png, started, args.mode, args.passes, args.force)
-            if args.mode:
-                raise DisplayError("--mode needs the display firmware (hello has no project: display)")
-            hello, info = display.screen(hello)
-            print(f"{hello['board']}: {info['w']}x{info['h']}, {info['depth']}-bit {info['palette']}")
-            raster = convert(png, info)
-            transfer = time.monotonic()
-            reply = display.upload(raster, info)
-            print(json.dumps(reply, sort_keys=True))
-            print(f"Stored {len(raster)} bytes in {time.monotonic() - transfer:.3f}s; "
-                  f"total {time.monotonic() - started:.3f}s")
-            print("An active Photos album consumer picks next; the response does not confirm a panel refresh.")
-        return 0
+            raise DisplayError("this needs the display firmware (hello has no project: display)")
     except (DisplayError, OSError, ValueError, codec.PortError) as exc:
         print(f"show: {exc} ({time.monotonic() - started:.3f}s)", file=sys.stderr)
         return 1
