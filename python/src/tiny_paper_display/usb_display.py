@@ -19,6 +19,10 @@ class DisplayError(Exception):
     """A bounded, user-facing failure, including a device error response."""
 
 
+class Disconnected(DisplayError):
+    """The port is gone, stalled or stopped answering: a transfer was cut."""
+
+
 class NotPaired(DisplayError):
     """AUTH (12): a request over Bluetooth on a link that is not bonded."""
 
@@ -63,19 +67,19 @@ class CheckedPort:
             while off < len(data):
                 n = self.port.write(data[off:])
                 if not isinstance(n, int) or not 0 < n <= len(data) - off:
-                    raise DisplayError("port closed or stalled mid-transfer")
+                    raise Disconnected("port closed or stalled mid-transfer")
                 off += n
                 if time.monotonic() > deadline:
-                    raise DisplayError("port write timed out")
+                    raise Disconnected("port write timed out")
         except OSError as exc:
-            raise DisplayError(f"port closed mid-transfer: {exc}") from exc
+            raise Disconnected(f"port closed mid-transfer: {exc}") from exc
         return off
 
     def read(self, size):
         try:
             return self.port.read(size)
         except OSError as exc:
-            raise DisplayError(f"port closed while waiting for reply: {exc}") from exc
+            raise Disconnected(f"port closed while waiting for reply: {exc}") from exc
 
 
 class Display:
@@ -95,7 +99,7 @@ class Display:
         if not isinstance(reply, dict):
             raise DisplayError("device reply is not a map")
         if reply.get("_timeout"):
-            raise DisplayError(f"no reply for command 0x{cmd:02x} after two bounded attempts")
+            raise Disconnected(f"no reply for command 0x{cmd:02x} after two bounded attempts")
         if "err" in reply:
             if refusal_error(reply):
                 raise refusal_error(reply)

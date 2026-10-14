@@ -216,3 +216,157 @@ def test_the_quickstart_example_runs(bench, monkeypatch, tmp_path):
     monkeypatch.setattr("sys.argv", ["quickstart.py", str(pic)])
     _example("quickstart")
     assert dev.glass_depth and bench.opened[-1][1].closed == 1
+
+
+# ---------------------------------------------------------------------------------------------- failures and logging
+import logging  # noqa: E402
+
+from tiny_paper_display import display_fw  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _quiet_logging():
+    yield
+    tpd.log(None)
+    logging.getLogger("tiny_paper_display").setLevel(logging.NOTSET)
+
+
+def cmds(dev):
+    return [c for c, _ in dev.requests]
+
+
+def test_the_error_classes_are_display_errors():
+    for cls in (tpd.Refused, tpd.Busy, tpd.Disconnected, tpd.PanelFault):
+        assert issubclass(cls, tpd.DisplayError)
+    assert issubclass(tpd.Busy, tpd.Refused)
+
+
+def test_refused_carries_the_device_reason_and_code(bench):
+    bench.devices = {"A": FakeDevice(w=16, h=8)}
+    with tpd.open("A") as d:
+        with pytest.raises(tpd.Refused) as e:
+            d.show(tpd.Canvas(16, 8), depth=2, mode="partial")
+        assert (e.value.err, e.value.name) == (36, "MODE") and "MODE 36" in str(e.value)
+        assert d.show(tpd.Canvas(16, 8))["mode"], "the object is usable after a refusal"
+
+
+def test_busy_longer_than_the_wait(bench, monkeypatch):
+    dev = bench.devices["A"] = FakeDevice(w=16, h=8)
+    real = dev.handle
+
+    def busy(cmd, p):
+        if cmd == display_fw.SHOW_BEGIN:
+            raise __import__("fake_display_fw").Refuse(3, "refreshing", retry_ms=1)
+        return real(cmd, p)
+
+    dev.handle = busy
+    monkeypatch.setattr(display_fw.request, "__defaults__", (None, 3, 0))
+    with tpd.open("A") as d:
+        with pytest.raises(tpd.Busy) as e:
+            d.show(tpd.Canvas(16, 8))
+        assert e.value.err == 3
+        dev.handle = real
+        assert d.show(tpd.Canvas(16, 8))["mode"]
+
+
+def cut_chunks(dev, times):
+    """The device stops answering the first `times` show_chunk requests (a cable pulled mid transfer)."""
+    real = dev.respond
+    state = {"left": times}
+
+    def respond(wire, **kw):
+        if wire[5] == display_fw.SHOW_CHUNK and state["left"] > 0:
+            state["left"] -= 1
+            return b""
+        return real(wire, **kw)
+
+    dev.respond = respond
+    return state
+
+
+def test_a_cut_transfer_is_tried_again_once_on_a_new_link(bench):
+    dev = bench.devices["A"] = FakeDevice(w=16, h=8)
+    state = cut_chunks(dev, 1)
+    with tpd.open("A") as d:
+        first = d.port
+        reply = d.show(tpd.Canvas(16, 8, 0))
+        assert reply["mode"] == "full" and state["left"] == 0
+        assert first.closed == 1 and d.port is not first, "a new link"
+    assert cmds(dev).count(display_fw.SHOW_BEGIN) == 2
+
+
+def test_a_transfer_cut_twice_is_disconnected_and_the_object_stays_usable(bench, caplog):
+    dev = bench.devices["A"] = FakeDevice(w=16, h=8)
+    cut_chunks(dev, 2)
+    with caplog.at_level(logging.WARNING, logger="tiny_paper_display"):
+        with tpd.open("A") as d:
+            with pytest.raises(tpd.Disconnected, match="cut twice"):
+                d.show(tpd.Canvas(16, 8, 0))
+            assert cmds(dev).count(display_fw.SHOW_BEGIN) == 2, "one retry, not more"
+            assert "transfer cut" in caplog.text, "the retry is a warning"
+            before = len(dev.requests)
+            assert d.show(tpd.Canvas(16, 8, 0))["mode"] == "full"
+            assert display_fw.HAVE not in cmds(dev)[before:], "the whole picture, no 'unchanged' shortcut"
+
+
+def test_a_gone_port_is_disconnected(bench, monkeypatch):
+    bench.devices = {"A": FakeDevice(w=16, h=8)}
+    with tpd.open("A") as d:
+        d.port.write = lambda data: (_ for _ in ()).throw(OSError("gone"))
+        monkeypatch.setattr(usb_display.codec, "open_serial", lambda n, ui=None: (_ for _ in ()).throw(OSError("unplugged")))
+        with pytest.raises(tpd.Disconnected):
+            d.show(tpd.Canvas(16, 8))
+
+
+def test_a_wrong_gate_clock_raises_panel_fault(bench):
+    dev = bench.devices["A"] = FakeDevice(w=16, h=8, ckv={"per": 3, "rows": 8, "ok": False})
+    with tpd.open("A") as d:
+        with pytest.raises(tpd.PanelFault) as e:
+            d.show(tpd.Canvas(16, 8, 0))
+        assert e.value.reply["ckv"]["ok"] is False
+        dev.ckv = {"per": 3, "rows": 8, "ok": True}
+        before = len(dev.requests)
+        assert d.show(tpd.Canvas(16, 8, 0))["mode"]
+        assert display_fw.HAVE not in cmds(dev)[before:] and display_fw.SHOW_CHUNK in cmds(dev)[before:], "sent whole again"
+
+
+def test_a_group_goes_on_when_one_device_fails(bench):
+    good, bad = FakeDevice(board="good"), FakeDevice(board="bad", ckv={"per": 1, "rows": 8, "ok": False})
+    bench.devices = {"A": bad, "B": good}
+    with tpd.open_all() as group:
+        results = group.show(tpd.Canvas(16, 8, 0))
+        assert isinstance(results[0], tpd.PanelFault) and results[1]["mode"] == "full"
+        assert good.refreshes == 1
+        assert len(group.clear()) == 2
+
+
+def test_logging_is_silent_by_default(bench, capsys, caplog):
+    import io
+    bench.devices = {"A": FakeDevice(w=16, h=8)}
+    assert any(isinstance(h, logging.NullHandler) for h in logging.getLogger("tiny_paper_display").handlers)
+    with tpd.open("A") as d:
+        d.show(tpd.Canvas(16, 8, 0))
+    out = capsys.readouterr()
+    assert out.err == "" and out.out == ""
+
+
+def test_info_logging_has_the_times_of_a_show(bench, capsys):
+    bench.devices = {"A": FakeDevice(w=16, h=8)}
+    with tpd.open("A", log="info") as d:
+        reply = d.show(tpd.Canvas(16, 8, 0))
+    err = capsys.readouterr().err
+    assert "host prepare" in err and "transfer" in err and "full (depth)" in err
+    assert "prepare_ms" in reply and "transfer_ms" in reply
+    assert "host: prepare" in display_fw.describe(reply)
+    assert "request 0x" not in err, "debug lines are not info"
+
+
+def test_debug_logging_shows_requests_without_picture_bytes(bench, capsys):
+    bench.devices = {"A": FakeDevice(w=16, h=8)}
+    with tpd.open("A", log="debug") as d:
+        d.show(tpd.Canvas(16, 8, 0))
+    err = capsys.readouterr().err
+    assert "request 0x09" in err and "answer 0x09" in err and "<" in err and "bytes>" in err and "\\x89PNG" not in err
+    tpd.log(None)
+    with pytest.raises(tpd.DisplayError):
+        tpd.log("loud")

@@ -14,11 +14,39 @@
 Device settings (full_every) live on the device. Picture preferences (fit, border, dither, depth, threshold, rotate) are
 per call, with the defaults of the connection (`d.defaults`, or keyword arguments of open()); they are never sent.
 """
+import logging
+import sys
+import time
 from dataclasses import dataclass
 
 from . import display_fw, images, picture, usb_display
 from .canvas import Canvas
-from .usb_display import Display, DisplayError
+from .display_fw import Busy, PanelFault, Refused
+from .usb_display import Disconnected, Display, DisplayError
+
+logger = logging.getLogger(__name__)
+ROOT_LOG = "tiny_paper_display"
+_handler = None
+
+
+def set_log(level="info"):
+    """Log to stderr: "debug" (each request and answer, no picture bytes), "info" (each show: host prepare ms, transfer
+    ms, the device's mode, why and ms), "warning" (retries and refusals); None removes it. By default the package is
+    silent (a NullHandler). Your own logging configuration works as well: the logger is "tiny_paper_display"."""
+    global _handler
+    root = logging.getLogger(ROOT_LOG)
+    if _handler is not None:
+        root.removeHandler(_handler)
+        _handler = None
+    if level is None:
+        return
+    number = level if isinstance(level, int) else logging.getLevelName(str(level).upper())
+    if not isinstance(number, int):
+        raise DisplayError("log is debug, info, warning or None")
+    _handler = logging.StreamHandler(sys.stderr)
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
+    root.addHandler(_handler)
+    root.setLevel(number)
 
 ESPRESSIF = 0x303A
 PROBE_TIMEOUT = 1  # seconds a port gets to answer hello while looking
@@ -98,10 +126,13 @@ def devices(bluetooth=False, scan_s=5):
     return out
 
 
-def open(target=None, bluetooth=None, **defaults):  # noqa: A001 (the API's own name)
+def open(target=None, bluetooth=None, log=None, **defaults):  # noqa: A001 (the API's own name)
     """A Device. target: a port ("COM5", "/dev/ttyACM0"); bluetooth: a device name or address; neither: the first
     device found. Keyword arguments are the connection's picture defaults (fit, border, dither, depth, threshold,
-    rotate). Use it in a with block: it is closed at the end, also after an exception."""
+    rotate). log: "debug", "info", "warning" shortcut for tpd.log(level). Use it in a with block: it is closed at the end,
+    also after an exception."""
+    if log is not None:
+        set_log(log)
     if target and bluetooth:
         raise DisplayError("a port or bluetooth, not both")
     if target or bluetooth:
@@ -113,8 +144,10 @@ def open(target=None, bluetooth=None, **defaults):  # noqa: A001 (the API's own 
     raise DisplayError("no device running the display firmware found: is it plugged in with a data cable, and the port free?")
 
 
-def open_all(bluetooth=False, **defaults):
+def open_all(bluetooth=False, log=None, **defaults):
     """A Group of every device found, each open; closed together."""
+    if log is not None:
+        set_log(log)
     opened = []
     try:
         for name in _candidates():
@@ -142,8 +175,9 @@ def show(picture_, target=None, *, bluetooth=None, **options):
 class Device:
     """An open display. d.caps (display_fw.Capabilities), d.hello (the raw answer), d.board, d.w, d.h, d.defaults."""
 
-    def __init__(self, port, display, hello, name="", defaults=None):
-        self.port, self.display, self.name = port, display, name
+    def __init__(self, port, display, hello, name="", defaults=None, bluetooth=False):
+        self.port, self.display, self.name, self.bluetooth = port, display, name, bluetooth
+        self._stale = False  # the last call failed: the next one reconnects first and sends the whole picture
         display.timeout = 3
         self.defaults = {**DEFAULTS, **{k: v for k, v in (defaults or {}).items()}}
         bad = set(self.defaults) - set(DEFAULTS)
@@ -159,7 +193,7 @@ class Device:
             found = _probe(port)
             if found is None:
                 raise DisplayError(f"{target or bluetooth} does not run the display firmware (hello has no project: display)")
-            return cls(port, *found, name=target or bluetooth, defaults=defaults)
+            return cls(port, *found, name=target or bluetooth, defaults=defaults, bluetooth=bool(bluetooth))
         except BaseException:
             port.close()
             raise
@@ -183,18 +217,84 @@ class Device:
         if self.port is None:
             raise DisplayError("the device is closed")
 
+    def _reconnect(self):
+        """A new link to the same device (a cut transfer, a replugged cable); the caches of the old one are gone."""
+        old, self.port = self.port, None
+        try:
+            old.close()
+        except Exception:  # the old port is gone anyway
+            pass
+        try:
+            port = usb_display.open_port(None if self.bluetooth else self.name, self.name if self.bluetooth else None)
+        except (DisplayError, OSError, ValueError, usb_display.codec.PortError) as exc:
+            raise Disconnected(f"cannot reconnect to {self.name}: {exc}") from exc
+        found = None
+        try:
+            found = _probe(port)
+        finally:
+            if found is None:
+                port.close()
+        if found is None:
+            raise Disconnected(f"{self.name} does not answer as the display firmware after reconnecting")
+        self.port, (self.display, hello) = port, found
+        self.display.timeout = 3
+        self._set_hello(hello)
+
+    def _run(self, what, work):
+        """work() with the device's failures made plain: a cut transfer (Disconnected) is retried once on a new link;
+        after any failure the object stays usable and the next show sends the whole picture."""
+        self._need_open()
+        try:
+            if self._stale:
+                self._reconnect()
+                self._stale = False
+            try:
+                return work()
+            except Disconnected as exc:
+                logger.warning("%s: transfer cut (%s): reconnecting and sending again, once", what, exc)
+                self._reconnect()
+                try:
+                    return work()
+                except Disconnected as again:
+                    raise Disconnected(f"{what}: the transfer was cut twice: {again}") from again
+        except DisplayError as exc:
+            self._stale = isinstance(exc, Disconnected)
+            self._next_force = True
+            for key in ("_display_last", "_display_area_last", "_display_known"):
+                setattr(self.display, key, None)  # forget what the device is thought to show
+            if isinstance(exc, Refused):
+                logger.warning("%s: refused by the device: %s", what, exc)
+            raise
+
+    def _send(self, what, png, started, send, force):
+        """A prepared PNG on its way: run (retry, forget), check the panel's gate clock, log the host times (info)."""
+        prepared = time.perf_counter()
+        reply = self._run(what, lambda: send(png, force or self._next_force))
+        sent = time.perf_counter()
+        reply = {**reply, "prepare_ms": round((prepared - started) * 1000), "transfer_ms": round((sent - prepared) * 1000)}
+        if display_fw.gate_clock_wrong(reply):
+            self._next_force = True
+            for key in ("_display_last", "_display_area_last", "_display_known"):
+                setattr(self.display, key, None)
+            logger.warning("%s: the device counted a wrong gate clock", what)
+            raise PanelFault(reply)
+        self._next_force = False
+        logger.info("%s: host prepare %s ms, transfer %s ms; device %s (%s) %s ms", what, reply["prepare_ms"],
+                    reply["transfer_ms"], reply.get("mode"), reply.get("why"), reply.get("ms"))
+        return reply
+
+    _next_force = False
+
     # ------------------------------------------------------------------ settings on the device
     def configure(self, full_every=KEEP):
         """Settings stored on the device. full_every: a full refresh after this many partial ones (0 never); None clears
         the stored value (the default 30 applies again). Returns the new capabilities."""
-        self._need_open()
-        if full_every is not KEEP:
-            if full_every is None:
-                display_fw.full_every(self.display, clear=True)
-            else:
-                display_fw.full_every(self.display, full_every)
-        self._set_hello(display_fw.request(self.display, display_fw.HELLO))
-        return self.caps
+        def work():
+            if full_every is not KEEP:
+                display_fw.full_every(self.display, **({"clear": True} if full_every is None else {"n": full_every}))
+            self._set_hello(display_fw.request(self.display, display_fw.HELLO))
+            return self.caps
+        return self._run("configure", work)
 
     # ------------------------------------------------------------------ drawing
     def _settings(self, given):
@@ -227,6 +327,7 @@ class Device:
         has), threshold (1 bit, with dither none), rotate ("auto", 0, 90, 180, 270). A gray PNG the panel takes as it is
         goes unchanged when no depth is asked. Returns the device's answer (display_fw.describe)."""
         self._need_open()
+        started = time.perf_counter()
         s = self._settings(options)
         png = None
         if isinstance(pic, Canvas) and (pic.w, pic.h) == (self.w, self.h) and not self.caps.colors:
@@ -235,13 +336,15 @@ class Device:
             png = bytes(pic)
         if png is None:
             png = self._levels_png(images.load(pic), self.w, self.h, s, False)
-        return display_fw.show_png(self.display, png, self.hello, mode=mode, passes=passes, force=force)
+        return self._send("show", png, started, lambda p, f: display_fw.show_png(
+            self.display, p, self.hello, mode=mode, passes=passes, force=f), force)
 
     def area(self, pic, x, y, mode=None, *, passes=None, force=False, depth=None):
         """A rectangle of the panel with its top left pixel at x, y: a Canvas, or a picture (path, bytes) shown at its own
         size. x and the width must be multiples of 8 and all of it inside the panel (checked before anything is sent);
         the board must have a partial refresh at the depth (default: its deepest partial depth)."""
         self._need_open()
+        started = time.perf_counter()
         if isinstance(pic, Canvas):
             w, h = pic.w, pic.h
         else:
@@ -266,16 +369,17 @@ class Device:
         else:
             s = {**self._settings({}), "fit": "stretch", "rotate": 0, "depth": d}
             png = self._levels_png(images.load(pic), w, h, s, True)
-        return display_fw.show_area(self.display, png, self.hello, x, y, mode, passes, force=force)
+        return self._send("area", png, started, lambda p, f: display_fw.show_area(
+            self.display, p, self.hello, x, y, mode, passes, force=f), force)
 
     def clear(self):
         """A white panel (one full refresh)."""
-        self._need_open()
-        return display_fw.clear(self.display)
+        return self._run("clear", lambda: display_fw.clear(self.display))
 
 
 class Group:
-    """Several open devices; the same calls, each returning the list of the devices' results."""
+    """Several open devices; the same calls, each returning the list of the devices' results (an exception object
+    in the place of a device that failed)."""
 
     def __init__(self, devices):
         self.devices = list(devices)
@@ -287,7 +391,15 @@ class Group:
         return iter(self.devices)
 
     def _each(self, name, *args, **kw):
-        return [getattr(d, name)(*args, **kw) for d in self.devices]
+        """One entry per device, in order: its result, or the exception it raised (the others go on)."""
+        out = []
+        for d in self.devices:
+            try:
+                out.append(getattr(d, name)(*args, **kw))
+            except Exception as exc:  # one device failing must not stop the others
+                logger.warning("%s on %s failed: %s", name, d.name, exc)
+                out.append(exc)
+        return out
 
     def show(self, pic, **kw):
         return self._each("show", pic, **kw)
