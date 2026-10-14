@@ -107,7 +107,8 @@ def test_hello_show_clear():
     assert fw.is_display_firmware(hello) and (hello["w"], hello["h"], hello["depths"]) == (16, 8, [1, 2])
     assert hello["partial_depths"] == [1] and hello["modes"] == list(fw.MODES) and hello["full_every"] == 20
     whole = {"x": 0, "y": 0, "w": 16, "h": 8}
-    assert fw.show_png(d, picture("gray2"), hello) == {"depth": 2, "ms": 0, "mode": "full", "why": "depth", **whole}
+    zero = dict.fromkeys(("recv", "prep", "inflate", "convert", "diff", "fingerprint", "panel", "total"), 0)
+    assert fw.show_png(d, picture("gray2"), hello) == {"depth": 2, "ms": 0, "mode": "full", "why": "depth", **whole, "steps": zero}
     assert fw.clear(d) == {"depth": 1, "ms": 0, "mode": "full", "why": "asked", **whole}
     assert state["seen"] == [fw.HELLO, fw.SHOW_BEGIN, fw.SHOW_CHUNK, fw.SHOW_END, fw.CLEAR]
 
@@ -122,7 +123,7 @@ def test_partial_is_the_default_and_the_modes():
     rows[5] = 0x0f  # the right byte of row 2
     reply = fw.show_png(d, fw.write_png(16, 8, 1, bytes(rows)), hello)
     assert (reply["mode"], reply["why"], reply["x"], reply["y"], reply["w"], reply["h"]) == ("partial", "changed", 8, 2, 8, 1)
-    assert fw.describe(reply) == "partial (changed) 8,2 8x1 depth 1 0 ms"
+    assert fw.describe(reply) == "partial (changed) 8,2 8x1 depth 1 0 ms [steps recv 0, prep 0, inflate 0, convert 0, diff 0, fingerprint 0, panel 0, total 0]"
     assert fw.show_png(d, fw.write_png(16, 8, 1, bytes(rows)), hello)["mode"] == "none"
     box = fw.write_png(8, 4, 1, bytes(4))
     assert fw.show_area(d, box, hello, 0, 4)["mode"] == "partial"

@@ -91,7 +91,7 @@ cache: after a lost answer send <code>hello</code> and start the picture again.<
 <td>0x0A</td>
 <td>show_end</td>
 <td><code>{}</code></td>
-<td><code>{ depth: uint, ms: uint, mode: tstr, why: tstr, x: uint, y: uint, w: uint, h: uint, passes?: uint, ckv?: map, warn?: tstr, same?: true }</code> after the refresh (&quot;The answer&quot;)</td>
+<td><code>{ depth: uint, ms: uint, mode: tstr, why: tstr, x: uint, y: uint, w: uint, h: uint, passes?: uint, ckv?: map, warn?: tstr, same?: true, steps: map }</code> after the refresh (&quot;The answer&quot;)</td>
 </tr>
 <tr>
 <td>0x0B</td>
@@ -146,11 +146,11 @@ refreshes partially now (empty: none; the tuning key <code>driver</code> takes t
 </tr>
 <tr>
 <td>show_end, first picture</td>
-<td><code>a55a 0100 05 0a a0 8c0a</code> -&gt; <code>a55a 2c00 05 8a a8 65646570746801 626d7300 646d6f64656466756c6c 63776879656669727374 617800 617900 617710 616808 ee39</code> (full, first)</td>
+<td><code>a55a 0100 05 0a a0 8c0a</code> -&gt; <code>a55a 7200 05 8a a9 65646570746801 626d7300 646d6f64656466756c6c 63776879656669727374 617800 617900 617710 616808 657374657073 a8 6472656376 00 6470726570 00 67696e666c617465 00 67636f6e76657274 00 6464696666 00 6b66696e6765727072696e74 00 6570616e656c 00 65746f74616c 00 d9ba</code> (full, first)</td>
 </tr>
 <tr>
 <td>show_end, a corner changed</td>
-<td><code>a55a 0100 33 0a a0 897d</code> -&gt; <code>a55a 3100 33 8a a8 65646570746801 626d7300 646d6f6465677061727469616c 63776879676368616e676564 617808 617902 617708 616802 e451</code> (partial, changed, 8,2 8x2)</td>
+<td><code>a55a 0100 33 0a a0 897d</code> -&gt; <code>a55a 7700 33 8a a9 65646570746801 626d7300 646d6f6465677061727469616c 63776879676368616e676564 617808 617902 617708 616802 657374657073 a8 6472656376 00 6470726570 00 67696e666c617465 00 67636f6e76657274 00 6464696666 00 6b66696e6765727072696e74 00 6570616e656c 00 65746f74616c 00 dac5</code> (partial, changed, 8,2 8x2)</td>
 </tr>
 <tr>
 <td>show_begin, 8 x 4 at 0,4, inverse</td>
@@ -337,6 +337,49 @@ frame. A whole picture without a mode gives up the frame kept when memory is sho
 <td>TRMNL X: <code>{ edges: uint, frames: uint, per: uint, rows: uint, ok: bool }</code>, the gate clock edges the firmware counted over the last refresh of the update, the drive frames, edges a frame, the panel&#39;s rows; <code>ok</code> false when a frame did not clock once per row (the picture is then drawn at the wrong height). Log: <code># display W show ... WRONG</code></td>
 </tr>
 </tbody></table>
+<p><code>steps</code> (a <code>show_end</code> answer, not <code>clear</code>) is the device&#39;s own time for each step, in whole milliseconds on the board&#39;s
+monotonic clock. The steps are disjoint and run one after the other, so their sum is at most <code>total</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Time</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>recv</code></td>
+<td>first <code>show_chunk</code> arriving to the last one (the bytes&#39; transfer without the first chunk&#39;s own flight; 0 for a one-chunk PNG)</td>
+</tr>
+<tr>
+<td><code>prep</code></td>
+<td>from <code>show_end</code> to the start of the decoding: the header check, the frame&#39;s allocation, the copy of the frame kept (a rectangle)</td>
+</tr>
+<tr>
+<td><code>inflate</code></td>
+<td>the PNG decoder minus <code>convert</code>: zlib inflate and the row unfilter</td>
+</tr>
+<tr>
+<td><code>convert</code></td>
+<td>each decoded row into the panel&#39;s packed format (all rows)</td>
+</tr>
+<tr>
+<td><code>diff</code></td>
+<td>the search for the changed rectangle (a partial update only, else 0)</td>
+</tr>
+<tr>
+<td><code>fingerprint</code></td>
+<td>the hash of the new frame</td>
+</tr>
+<tr>
+<td><code>panel</code></td>
+<td>the panel calls (the same as <code>ms</code>)</td>
+</tr>
+<tr>
+<td><code>total</code></td>
+<td>first <code>show_chunk</code> to the answer being built; what is not in a step (the wait between the last chunk and <code>show_end</code>, mode choice, freeing) is the rest</td>
+</tr>
+</tbody></table>
+<p>The device log line <code>show ...</code> ends with <code>steps=recv/prep/inflate/convert/diff/fingerprint/panel/total</code>.</p>
 <p><code>full_every</code> (default 30, <code>set</code>): the count of partial updates since the last full refresh; a named mode is run as
 named and counts, except an unchanged <code>partial</code> which uses no count.</p>
 <h2 id="tuning">Tuning</h2>

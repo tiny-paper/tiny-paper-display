@@ -279,8 +279,9 @@ class Device:
             logger.warning("%s: the device counted a wrong gate clock", what)
             raise PanelFault(reply)
         self._next_force = False
-        logger.info("%s: host prepare %s ms, transfer %s ms; device %s (%s) %s ms", what, reply["prepare_ms"],
-                    reply["transfer_ms"], reply.get("mode"), reply.get("why"), reply.get("ms"))
+        steps = display_fw.steps_text(reply)
+        logger.info("%s: host prepare %s ms, transfer %s ms; device %s (%s) %s ms%s", what, reply["prepare_ms"],
+                    reply["transfer_ms"], reply.get("mode"), reply.get("why"), reply.get("ms"), f" ({steps})" if steps else "")
         return reply
 
     _next_force = False

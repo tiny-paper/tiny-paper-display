@@ -207,6 +207,7 @@ typedef struct {
     uint8_t *png;
     uint32_t size, got;
     uint64_t last_us;           /* the last request of the transfer */
+    uint64_t t_first, t_last;   /* the clock at the first and at the last show_chunk (the `steps.recv` of the answer) */
     /* of the transfer (show_begin) */
     bool area;                  /* x, y given: the PNG is a rectangle there */
     uint16_t x, y;

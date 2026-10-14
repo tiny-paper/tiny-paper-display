@@ -108,6 +108,9 @@ for p in PICS.values():
     p["png"] = png(W, H, p["bits"], p["rows"], p.get("color_type", 0), p.get("palette"))
 
 
+STEP_KEYS = ("recv", "prep", "inflate", "convert", "diff", "fingerprint", "panel", "total")  # usb-display.md "The answer"
+
+
 class Session:
     def __init__(self, name, board, depths, colors, partial_depths=(), partial_all=False, full_every=0):
         self.name, self.seq, self.steps = name, 0, []
@@ -175,6 +178,8 @@ class Session:
         self.fingerprint = fingerprint(W, H, depth, rows, bool(self.panel["colors"]))
         if passes:
             resp["passes"] = passes
+        if cmd == SHOW_END:  # a fixed clock: every step took 0 ms
+            resp["steps"] = {k: 0 for k in STEP_KEYS}
         return self.step(name, cmd, {}, resp, pixels=pixels(rows), depth=depth, refreshes=refreshes)
 
     def show(self, name, data, depth, ran, why, rows, rect=(0, 0, W, H), refreshes=1, **target):

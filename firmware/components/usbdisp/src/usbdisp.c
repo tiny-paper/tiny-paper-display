@@ -425,8 +425,11 @@ static void show_chunk(usbdisp_t *d, const link_frame_t *f)
             return;
         }
     }
+    if (!d->got)
+        d->t_first = d->c.now_us(d->c.ctx);
     memcpy(d->png + d->got, it.ptr, it.len);
     d->got += (uint32_t)it.len;
+    d->t_last = d->c.now_us(d->c.ctx);
     answer_next(d, f, false);
 }
 

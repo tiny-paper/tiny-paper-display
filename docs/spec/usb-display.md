@@ -32,7 +32,7 @@ cache: after a lost answer send `hello` and start the picture again.
 | 0x01 | hello | any map (the app's `{ proto: 1, app: tstr }` is fine) | `{ proto: 1, project: "display", fw: tstr, board: tstr, w: uint, h: uint, depths: [uint], colors?: [tstr], max_payload: 6144, max_png: uint, chunk: 4096, partial_depths: [uint], modes: [tstr], depth_modes: map, full_every: uint, full_every_set: bool, fingerprint_hash: "fnv1a64", fingerprint?: tstr, bt?: tstr, partial_max?: map, tuning?: map, full_area?: [uint] }` (`partial_max`, `full_area`: "Area and refresh mode"; `tuning`: "Tuning") |
 | 0x08 | show_begin | `{ size: uint, x?: uint, y?: uint, mode?: tstr, passes?: uint }`: the PNG's bytes, where it goes and how ("Area and refresh mode") | `{ chunk: 4096, next: 0 }`; replaces an open transfer (which counts as cut) |
 | 0x09 | show_chunk | `{ off: uint, data: bstr }` | `{ next: uint }`. `off` must be `next`; the first chunk holds at least the PNG's first 29 bytes and is checked at once (size, depth) |
-| 0x0A | show_end | `{}` | `{ depth: uint, ms: uint, mode: tstr, why: tstr, x: uint, y: uint, w: uint, h: uint, passes?: uint, ckv?: map, warn?: tstr, same?: true }` after the refresh ("The answer") |
+| 0x0A | show_end | `{}` | `{ depth: uint, ms: uint, mode: tstr, why: tstr, x: uint, y: uint, w: uint, h: uint, passes?: uint, ckv?: map, warn?: tstr, same?: true, steps: map }` after the refresh ("The answer") |
 | 0x0B | clear | `{}` | as show_end: the panel white, `mode: "full"`, `why: "asked"` |
 | 0x0C | set | `{ full_every?: uint or null, tuning?: map or "defaults" }` `full_every` 0 (never) .. 250, null: remove the stored value, the default (30) applies again; "Tuning"; without a key nothing changes | `{ full_every: uint, full_every_set: bool, tuning?: map, refused?: map }` `full_every` as in use (`full_every_set` as in hello), stored on the device, kept over power-off; the others under "Tuning" |
 | 0x0D | bt | `{ on?: bool, pair?: bool, forget?: bool }`, over the USB cable only ("Bluetooth") | `{ on: bool, pairing: uint, name: tstr }`: the setting, the seconds the pairing window stays open (0: closed), the advertised name |
@@ -52,8 +52,8 @@ Example (vector session `gray`, a 16 x 8 test panel, partial at 1 bit):
 | hello | `a55a 1400 01 01 a26570726f746f016361707067766563746f7273 2e7a` |
 | answer | `a55a 1c01 01 81 b06570726f746f016770726f6a65637467646973706c617962667769302e302e302b76656365626f617264687665635f67726179617710616808666465707468738201026b6d61785f7061796c6f6164191800676d61785f706e67191028656368756e6b1910006e7061727469616c5f6465707468738101656d6f646573856466756c6c677061727469616c6b7061727469616c5f616c6c67696e7665727365667061737365736b64657074685f6d6f646573a26131856466756c6c677061727469616c6b7061727469616c5f616c6c67696e7665727365667061737365736132816466756c6c6a66756c6c5f6576657279146e66756c6c5f65766572795f736574f47066696e6765727072696e745f6861736867666e7631613634 9050` |
 | show_begin, 86 bytes | `a55a 0800 31 08 a16473697a651856 e617` -> `a55a 1000 31 88 a2656368756e6b191000646e65787400 2322` |
-| show_end, first picture | `a55a 0100 05 0a a0 8c0a` -> `a55a 2c00 05 8a a8 65646570746801 626d7300 646d6f64656466756c6c 63776879656669727374 617800 617900 617710 616808 ee39` (full, first) |
-| show_end, a corner changed | `a55a 0100 33 0a a0 897d` -> `a55a 3100 33 8a a8 65646570746801 626d7300 646d6f6465677061727469616c 63776879676368616e676564 617808 617902 617708 616802 e451` (partial, changed, 8,2 8x2) |
+| show_end, first picture | `a55a 0100 05 0a a0 8c0a` -> `a55a 7200 05 8a a9 65646570746801 626d7300 646d6f64656466756c6c 63776879656669727374 617800 617900 617710 616808 657374657073 a8 6472656376 00 6470726570 00 67696e666c617465 00 67636f6e76657274 00 6464696666 00 6b66696e6765727072696e74 00 6570616e656c 00 65746f74616c 00 d9ba` (full, first) |
+| show_end, a corner changed | `a55a 0100 33 0a a0 897d` -> `a55a 7700 33 8a a9 65646570746801 626d7300 646d6f6465677061727469616c 63776879676368616e676564 617808 617902 617708 616802 657374657073 a8 6472656376 00 6470726570 00 67696e666c617465 00 67636f6e76657274 00 6464696666 00 6b66696e6765727072696e74 00 6570616e656c 00 65746f74616c 00 dac5` (partial, changed, 8,2 8x2) |
 | show_begin, 8 x 4 at 0,4, inverse | `a55a 1b00 3d 08 a4 6473697a651847 617800 617904 646d6f646567696e7665727365 08b2` |
 | clear | `a55a 0100 0b 0b a0 bc22` -> `a55a 2c00 0b 8b a8 65646570746801 626d7300 646d6f64656466756c6c 637768796561736b6564 617800 617900 617710 616808 8a24` |
 | set | `a55a 0d00 76 0c a16a66756c6c5f657665727902 25e7` -> `a55a 1d00 76 8c a26a66756c6c5f6576657279 02 6e66756c6c5f65766572795f736574 f5 60ac` |
@@ -160,6 +160,22 @@ frame. A whole picture without a mode gives up the frame kept when memory is sho
 | `same` | true with `mode: "none"` |
 | `passes` | with the mode `passes` |
 | `ckv` | TRMNL X: `{ edges: uint, frames: uint, per: uint, rows: uint, ok: bool }`, the gate clock edges the firmware counted over the last refresh of the update, the drive frames, edges a frame, the panel's rows; `ok` false when a frame did not clock once per row (the picture is then drawn at the wrong height). Log: `# display W show ... WRONG` |
+
+`steps` (a `show_end` answer, not `clear`) is the device's own time for each step, in whole milliseconds on the board's
+monotonic clock. The steps are disjoint and run one after the other, so their sum is at most `total`:
+
+| Key | Time |
+|---|---|
+| `recv` | first `show_chunk` arriving to the last one (the bytes' transfer without the first chunk's own flight; 0 for a one-chunk PNG) |
+| `prep` | from `show_end` to the start of the decoding: the header check, the frame's allocation, the copy of the frame kept (a rectangle) |
+| `inflate` | the PNG decoder minus `convert`: zlib inflate and the row unfilter |
+| `convert` | each decoded row into the panel's packed format (all rows) |
+| `diff` | the search for the changed rectangle (a partial update only, else 0) |
+| `fingerprint` | the hash of the new frame |
+| `panel` | the panel calls (the same as `ms`) |
+| `total` | first `show_chunk` to the answer being built; what is not in a step (the wait between the last chunk and `show_end`, mode choice, freeing) is the rest |
+
+The device log line `show ...` ends with `steps=recv/prep/inflate/convert/diff/fingerprint/panel/total`.
 
 `full_every` (default 30, `set`): the count of partial updates since the last full refresh; a named mode is run as
 named and counts, except an unchanged `partial` which uses no count.
