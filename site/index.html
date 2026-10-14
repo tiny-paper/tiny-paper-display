@@ -25,18 +25,24 @@
 <body>
 <nav><a href="index.html" aria-current="page">Flash</a><a href="sketch.html">Sketch</a><a href="picture.html">Picture</a><a href="api.html">Use it</a></nav>
 <h1>tiny-paper display</h1>
-<p>Turns a TRMNL OG, a PicPak or a TRMNL X into a plain e-paper display: plug it into a computer with its USB cable
+<p>Turns a TRMNL X into a plain e-paper display: plug it into a computer with its USB cable
 and send it a picture. <a href="api.html">The guide</a> shows a picture in three commands.</p>
 <p id="nosupport" class="warn" hidden></p>
 
 <section>
+  <h2>Back up this device</h2>
+  <p>Do this before the first install. It reads the whole flash (16 MB) and saves it as a file. It takes several
+  minutes: keep the cable in and the tab open.</p>
+  <button id="backup" disabled>Back up this device</button>
+  <button id="restore" disabled>Restore a backup</button>
+  <input type="file" id="restorefile" accept=".bin" hidden>
+  <progress id="bprog" max="1" value="0"></progress>
+  <div id="bstate" class="mut"></div>
+</section>
+
+<section>
   <h2>Install</h2>
-  <label>Board <select id="board">
-    <option value="">find it for me</option>
-    <option value="trmnl_og">TRMNL OG</option>
-    <option value="picpak">PicPak</option>
-    <option value="trmnl_x">TRMNL X</option>
-  </select></label>
+  <p class="mut">Board: TRMNL X (the only one this release supports).</p>
   <label>Release <select id="release"></select></label>
   <button id="install" disabled>Install</button>
   <progress id="prog" max="1" value="0"></progress>
@@ -72,25 +78,25 @@ and send it a picture. <a href="api.html">The guide</a> shows a picture in three
     No WiFi, no account, no apps, no updates over the air.</li>
     <li>Settings the previous firmware stored are left alone: only the firmware's own files are written. The previous
     firmware itself is gone until you install it again.</li>
-    <li>The device is checked first. If it is not the board you chose, or not one of the three, nothing is written.</li>
-    <li>If the port does not show up: switch the device off, hold its button, switch it on with the cable in, release.</li>
+    <li>The device is checked first. If it is not a TRMNL X, nothing is written.</li>
+    <li>If the port does not show up: <a href="https://help.trmnl.com/en/articles/11936721-put-your-trmnl-in-flashing-mode">TRMNL's instructions to put it in flashing mode</a>.</li>
   </ul>
   <h2>How to go back</h2>
   <ul>
-    <li>Install the firmware the device had, with that firmware's own installer. The display firmware does not stop
-    you: the device can always be flashed again over USB.</li>
-    <li>To be sure you can, read a backup of the whole flash before the first install and keep it:
-    <code>esptool read_flash 0 ALL backup.bin</code> (PicPak: add <code>--no-stub</code> and read the first 16 MB).
-    Writing that file back at 0 restores the device exactly.</li>
+    <li>Use "Back up this device" before the first install, keep the file, and later "Restore a backup" writes it back
+    and the device is as it was.</li>
+    <li>Without this page: <code>esptool read_flash 0 ALL backup.bin</code> reads the backup, and writing that file
+    back at 0 restores the device.</li>
   </ul>
 </section>
 
 <p class="mut">This page loads one library, <a href="https://github.com/espressif/esptool-js">esptool-js</a> 0.7.0 by
-Espressif (Apache License 2.0), from jsDelivr when you press Install. Nothing is sent anywhere: the firmware files are
+Espressif (Apache License 2.0), from jsDelivr when you press Install, Back up or Restore. Nothing is sent anywhere: the firmware files are
 read from this site and written to the device by your browser.</p>
 
 <script type="module">
 import { ESPTOOL_JS, BOARDS, install, supportNote } from './flash.js';
+import { backup, restore } from './backup.js';
 import { BT_WORDS, openBtSetup } from './bt-setup.js';
 
 const $ = (id) => document.getElementById(id);
@@ -106,6 +112,7 @@ try {
   for (const rel of releases) $('release').add(new Option(rel.isPrerelease ? `${rel.tagName} (test build)` : rel.tagName, rel.tagName));
   if (!releases.length) say('No release is published yet.', 'warn');
   else if (!note) $('install').disabled = false;
+if (!note) { $('backup').disabled = false; $('restore').disabled = false; }
 } catch {
   say('The list of releases could not be read.', 'warn');
 }
@@ -119,7 +126,7 @@ $('install').onclick = async () => {
     const esptool = await import(ESPTOOL_JS.url);
     say('Writing. Do not unplug.');
     const done = await install({
-      port, esptool, fetchFn: (u) => fetch(u), base: '', tag: $('release').value, board: $('board').value || null,
+      port, esptool, fetchFn: (u) => fetch(u), base: '', tag: $('release').value, board: 'trmnl_x',
       log, progress: (p) => { $('prog').value = p; },
     });
     say(`Done: ${BOARDS[done.board].title} now runs the display firmware ${done.version}. Send it a picture.`, 'ok');
@@ -130,6 +137,46 @@ $('install').onclick = async () => {
     say(e && e.message ? e.message : String(e), 'warn');
   }
   $('install').disabled = false;
+};
+
+// Backup and restore: the same port choice and loader as the install
+const bsay = (text, cls) => { $('bstate').textContent = text; $('bstate').className = cls || 'mut'; };
+const bbusy = (on) => { for (const id of ['backup', 'restore', 'install']) $(id).disabled = on || !!note; };
+const pick = () => navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] });
+$('backup').onclick = async () => {
+  bbusy(true);
+  try {
+    const port = await pick();
+    bsay('Loading the flasher...');
+    const esptool = await import(ESPTOOL_JS.url);
+    bsay('Reading the 16 MB flash. This takes several minutes. Do not unplug.');
+    const out = await backup({ port, esptool, log, progress: (p) => { $('bprog').value = p; } });
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([out.data], { type: 'application/octet-stream' })), download: out.name });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    bsay(`Saved as ${out.name}. Keep it: it is the only copy of what was on the device.`, 'ok');
+  } catch (e) {
+    bsay(e && e.message ? e.message : String(e), 'warn');
+  }
+  bbusy(false);
+};
+$('restore').onclick = () => { $('restorefile').value = ''; $('restorefile').click(); };
+$('restorefile').onchange = async () => {
+  const file = $('restorefile').files[0];
+  if (!file) return;
+  bbusy(true);
+  try {
+    const data = new Uint8Array(await file.arrayBuffer());
+    const port = await pick();
+    bsay('Loading the flasher...');
+    const esptool = await import(ESPTOOL_JS.url);
+    bsay('Writing the backup. This takes several minutes. Do not unplug.');
+    await restore({ port, esptool, data, log, progress: (p) => { $('bprog').value = p; } });
+    bsay('Done: the backup is on the device and it restarted.', 'ok');
+  } catch (e) {
+    bsay(e && e.message ? e.message : String(e), 'warn');
+  }
+  bbusy(false);
 };
 
 // Bluetooth setup over the cable: the port of the install when there is one (the device restarted), else ask

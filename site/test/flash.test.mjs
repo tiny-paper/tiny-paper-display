@@ -78,7 +78,7 @@ function fakeDevice(board) {
 
 const run = (board, rel, dev, extra = {}) => install({ port: dev.port, esptool: dev.esptool, fetchFn: site(board, rel), base: '', tag: 'v1', board: null, wait: async () => {}, ...extra });
 
-for (const board of Object.keys(BOARDS)) {
+for (const board of ['trmnl_x']) {
   test(`${board}: the separate files at the offsets of its partition table, and nothing else`, async () => {
     const rel = release(board);
     const dev = fakeDevice(board);
@@ -123,18 +123,28 @@ test('a device that is not the chosen board: nothing written', async () => {
   assert.equal(dev.seen.closed, 1);
 });
 
+for (const board of ['trmnl_og', 'picpak']) {
+  test(`a ${board} is refused with a plain sentence, nothing written`, async () => {
+    const dev = fakeDevice(board);
+    await assert.rejects(run(board, release(board), dev), /This device is a .*works on the TRMNL X only\. Nothing was written/);
+    assert.deepEqual(dev.seen.writes, []);
+    assert.deepEqual(dev.seen.regs, []);
+    assert.equal(dev.seen.closed, 1);
+  });
+}
+
 test('a device that is none of the three: nothing written', async () => {
   const dev = fakeDevice('trmnl_og');
   dev.esptool.ESPLoader.prototype.readFlashId = async () => 0x17 << 16; // 8 MB
-  await assert.rejects(run('trmnl_og', release('trmnl_og'), dev), /none of the three boards/);
+  await assert.rejects(run('trmnl_og', release('trmnl_og'), dev), /not a TRMNL X/);
   assert.deepEqual(dev.seen.writes, []);
 });
 
 test('a damaged file: nothing written', async () => {
-  const rel = release('picpak');
+  const rel = release('trmnl_x');
   rel.files[3].data = rel.files[3].data.slice().fill(9);
-  const dev = fakeDevice('picpak');
-  await assert.rejects(run('picpak', rel, dev), /tiny_display.bin of release v1 is damaged/);
+  const dev = fakeDevice('trmnl_x');
+  await assert.rejects(run('trmnl_x', rel, dev), /tiny_display.bin of release v1 is damaged/);
   assert.deepEqual(dev.seen.writes, []);
 });
 
@@ -148,8 +158,8 @@ test('a missing file or release: nothing written', async () => {
 
 test('files of another board under this board\'s name: nothing written', async () => {
   const rel = release('picpak');
-  const dev = fakeDevice('trmnl_og');
-  await assert.rejects(run('trmnl_og', rel, dev), /say picpak/);
+  const dev = fakeDevice('trmnl_x');
+  await assert.rejects(run('trmnl_x', rel, dev), /say picpak/);
   assert.deepEqual(dev.seen.writes, []);
 });
 
@@ -184,5 +194,17 @@ test('the page says which library it loads, its version and licence', () => {
   assert.equal(ESPTOOL_JS.url, `https://cdn.jsdelivr.net/npm/esptool-js@${ESPTOOL_JS.version}/bundle.js`);
   assert.ok(page.includes(`esptool-js</a> ${ESPTOOL_JS.version}`));
   assert.ok(page.includes('Apache License 2.0'));
-  assert.equal(page.match(/https?:\/\/[^"'\s<)]+/g).filter((u) => !u.startsWith('https://github.com/espressif/esptool-js')).length, 0);
+  assert.equal(page.match(/https?:\/\/[^"'\s<)]+/g).filter((u) => !u.startsWith('https://github.com/espressif/esptool-js') && !u.startsWith('https://help.trmnl.com/en/articles/11936721-put-your-trmnl-in-flashing-mode')).length, 0);
+});
+
+test('the user pages name only the TRMNL X, and the flash page links TRMNL\'s flashing-mode help and the backup', () => {
+  for (const f of ['index.html', 'api.html', 'sketch.html', 'picture.html']) {
+    const page = readFileSync(join(ROOT, 'site', f), 'utf8');
+    assert.doesNotMatch(page, /PicPak|TRMNL OG|trmnl_og|mock=og|mock=picpak/i, f);
+  }
+  const page = readFileSync(join(ROOT, 'site/index.html'), 'utf8');
+  assert.match(page, /id="backup"/);
+  assert.match(page, /id="restore"/);
+  assert.match(page, /href="https:\/\/help\.trmnl\.com\/en\/articles\/11936721-put-your-trmnl-in-flashing-mode"/);
+  assert.doesNotMatch(page, /hold its button/);
 });

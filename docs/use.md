@@ -1,6 +1,6 @@
 # Use it
 
-tiny-paper display turns a TRMNL X, a TRMNL OG or a PicPak into a plain e-paper display. A computer sends it a PNG
+tiny-paper display turns a TRMNL X into a plain e-paper display. A computer sends it a PNG
 over the USB cable and it shows the picture. No WiFi, no account, no app. Bluetooth is there too, off until you switch it on.
 
 You need:
@@ -20,7 +20,7 @@ else has been tried on a device. Where a section below depends on that, it says 
 |---|---|
 | [Sketch page](../site/sketch.html) | Plug the device in, press Connect, pick its port. Draw: each stroke goes to the panel as a partial update of the area that changed |
 | [Picture page](../site/picture.html) | Connect, then drop, pick or paste a picture, or use a test picture. The preview shows the exact pixels that will be sent. Choose fit, rotation, depth and dithering, then Send. The picture stays in the browser |
-| Without a device | [TRMNL X](../site/sketch.html?mock=x), [TRMNL OG](../site/sketch.html?mock=og) or [PicPak](../site/sketch.html?mock=picpak): a pretend device answers, nothing reaches a panel. The same on the [Picture page](../site/picture.html?mock=x) |
+| Without a device | [TRMNL X](../site/sketch.html?mock=x): a pretend device answers, nothing reaches a panel. The same on the [Picture page](../site/picture.html?mock=x) |
 
 ### Picture page
 
@@ -28,7 +28,7 @@ else has been tried on a device. Where a section below depends on that, it says 
 |---|---|
 | Fit | whole picture with a border, fill and crop, stretch |
 | Rotate | 0, 90, 180, 270, auto (turns it when that fills more of the panel) |
-| Depth | each depth the device takes (1, 2, 4 bit gray), on the PicPak its four colours |
+| Depth | each depth the device takes (1, 2, 4 bit gray) |
 | Dithering | none (nearest level; at 1 bit a threshold), Floyd-Steinberg, ordered 4x4 |
 | Refresh | auto, partial (only what changed; the device compares with the frame it keeps), full |
 
@@ -105,7 +105,7 @@ sent to the device. They are the Picture page's settings and give the same pixel
 | `fit` | `fit` (whole picture, border round it), `fill` (crop), `stretch` |
 | `border` | `white`, `black` |
 | `rotate` | `auto`, `0`, `90`, `180`, `270` |
-| `depth` | `1`, `2`, `4`; none: the deepest the board has (a colour panel: its four inks) |
+| `depth` | `1`, `2`, `4`; none: the deepest the board has |
 | `dither` | `floyd`, `ordered`, `none` |
 | `threshold` | 0 to 255, for 1 bit with `dither="none"` (128) |
 
@@ -223,7 +223,7 @@ tiny-paper-display show /dev/ttyACM0 box.png --at 8,4
 ```
 
 In Python: `display_fw.show_area(display, png, hello, 8, 4)`. The rectangle is sent as it is, not fitted. The device must
-have a partial refresh at the bit depth of the box. Where it does not (a PicPak), it refuses with `MODE`.
+have a partial refresh at the bit depth of the box. Where it does not, it refuses with `MODE`.
 
 ### Ask the device what it can do
 
@@ -241,7 +241,7 @@ the refreshes it can do, and `depth_modes` (`{"1": [...], "2": [...]}`) which of
 and `partial` at 2 and 4 bit. `full_every` is the full refresh after that many partial ones (default 30; `full_every_set`
 false while the default applies). In Python, `display_fw.capabilities(display)` returns all of it (canvas, depths,
 partial_depths, depth_modes, colors, max_png, full_every), `display_fw.full_every(display, 50)` stores a value and
-`display_fw.full_every(display, clear=True)` brings the default back. A PicPak also has `colors`.
+`display_fw.full_every(display, clear=True)` brings the default back.
 
 ### Bluetooth
 
@@ -280,8 +280,6 @@ is only listening now and then, so finding it can take up to about 22 seconds. `
 | Board | Panel | The device takes | Partial refresh (by design) |
 |---|---|---|---|
 | TRMNL X (`trmnl_x`) | 1872 x 1404 | gray PNG, 1, 2 or 4 bit | 1, 2 and 4 bit; the grays are not judged on a device |
-| TRMNL OG (`trmnl_og`) | 800 x 480 | gray PNG, 1 or 2 bit | 1 bit |
-| PicPak (`picpak`) | 400 x 300, four inks | gray 1 bit, or indexed with exactly black, white, red, yellow | none |
 
 The device takes a PNG of exactly the panel's size and shows it as given: no scaling, no dithering, no rotation. It
 refuses 8 and 16 bit gray, RGB, alpha, interlaced files, and an indexed file on a gray panel.
@@ -289,7 +287,7 @@ refuses 8 and 16 bit gray, RGB, alpha, interlaced files, and an indexed file on 
 | What | The Python package | You |
 |---|---|---|
 | Size | fits the picture on white, centered, keeping its proportions | choose the picture; crop or rotate it first if you want that |
-| Colors | gray panels: the nearest gray level (no dithering). PicPak: the nearest of the four inks | dither or adjust contrast first if the result looks flat |
+| Colors | the nearest gray level (no dithering) | dither or adjust contrast first if the result looks flat |
 | Input files | reads gray or indexed 1 to 8 bit, RGB, gray with alpha and RGBA 8 bit, not interlaced, up to 16 MiB and 4 megapixels; alpha is put on white | convert other kinds (16 bit, interlaced) to PNG first |
 | Already right | a gray PNG of the panel's size and a depth the device takes is sent unchanged | |
 | Sending | checks the size limit and the mode, waits while the panel is busy | |

@@ -11,6 +11,9 @@ export const ESPTOOL_JS = {
   url: 'https://cdn.jsdelivr.net/npm/esptool-js@0.7.0/bundle.js',
 };
 
+/** Boards this release installs on. The others are still recognised, to refuse them with a plain sentence. */
+export const SUPPORTED = ['trmnl_x'];
+
 export const BOARDS = {
   trmnl_og: { title: 'TRMNL OG', chip: 'esp32c3', panel: '800 x 480, 4 grays' },
   picpak: { title: 'PicPak', chip: 'esp32c3', panel: '400 x 300, black white red yellow' },
@@ -20,8 +23,6 @@ export const BOARDS = {
 const MB = 0x100000;
 // Flash size from the JEDEC capacity byte (esptool DETECTED_FLASH_SIZES)
 const CAP = { 0x14: 1, 0x15: 2, 0x16: 4, 0x17: 8, 0x18: 16, 0x19: 32, 0x34: 1, 0x35: 2, 0x36: 4, 0x37: 8, 0x38: 16, 0x39: 32 };
-// PicPak: the loader writes reliably only below 4 MB on its 32 MB chip; the display firmware ends far below
-const PICPAK_WRITE_LIMIT = 4 * MB;
 
 /** esptool-js chip description ("ESP32-C3 (QFN32) (revision v0.4)") to "esp32c3". */
 export const normChip = (name) => (name.match(/esp32-?\w*/i)?.[0] ?? name).toLowerCase().replace(/-/g, '');
@@ -88,27 +89,38 @@ export async function loadRelease(fetchFn, base, tag, board) {
   return { layout, files };
 }
 
+/** Throws the plain sentence for a device that is not a TRMNL X (`found`: detectBoard's answer). */
+export function refuseUnsupported(found, desc, bytes) {
+  if (!found) throw new Error(`This device is not a TRMNL X (${desc}, ${bytes / MB} MB flash). Nothing was written.`);
+  if (!SUPPORTED.includes(found)) throw new Error(`This device is a ${BOARDS[found].title}. This release works on the TRMNL X only. Nothing was written.`);
+}
+
+/** The loader on `port` (not yet started: `loader.main()` does that). `esptool`: { ESPLoader, Transport }. */
+export function connect(port, esptool, log = () => {}) {
+  const transport = new esptool.Transport(port, false);
+  const terminal = { clean() {}, writeLine: log, write: log };
+  return { transport, loader: new esptool.ESPLoader({ transport, baudrate: 460800, romBaudrate: 460800, terminal }) };
+}
+
 /**
  * Put release `tag` on the device behind `port`. `board`: the one the person chose, or null to take the one found.
  * `esptool`: { ESPLoader, Transport } of esptool-js. Returns what was written. Throws before the first byte is written
  * when the device is not the board, a file is missing or damaged, or something would not fit.
  */
 export async function install({ port, esptool, fetchFn, base, tag, board, log = () => {}, progress = () => {}, wait }) {
-  const transport = new esptool.Transport(port, false);
-  const terminal = { clean() {}, writeLine: log, write: log };
-  const loader = new esptool.ESPLoader({ transport, baudrate: 460800, romBaudrate: 460800, terminal });
+  const { transport, loader } = connect(port, esptool, log);
   try {
     const desc = await loader.main('default_reset');
     const chip = normChip(desc);
     const bytes = flashBytes(await loader.readFlashId());
     const found = detectBoard(desc, bytes);
-    if (!found) throw new Error(`This device is none of the three boards (${desc}, ${bytes / MB} MB flash). Nothing was written.`);
+    refuseUnsupported(found, desc, bytes);
     if (board && board !== found) {
       throw new Error(`You chose ${BOARDS[board].title}, but this device looks like a ${BOARDS[found].title}. Nothing was written.`);
     }
     const { layout, files } = await loadRelease(fetchFn, base, tag, found);
     if (layout.chip !== chip) throw new Error(`release ${tag} for ${found} is built for ${layout.chip}, the device is ${chip}. Nothing was written.`);
-    const limit = found === 'picpak' ? PICPAK_WRITE_LIMIT : bytes;
+    const limit = bytes;
     for (const f of files) {
       if (f.address % 4096 || f.address + f.data.length > limit) throw new Error(`${f.name} does not fit at 0x${f.address.toString(16)}. Nothing was written.`);
     }

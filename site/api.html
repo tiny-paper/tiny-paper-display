@@ -9,7 +9,7 @@
 <body>
 <nav><a href="index.html">Flash</a><a href="sketch.html">Sketch</a><a href="picture.html">Picture</a><a href="api.html" aria-current="page">Use it</a></nav>
 <h1 id="use-it">Use it</h1>
-<p>tiny-paper display turns a TRMNL X, a TRMNL OG or a PicPak into a plain e-paper display. A computer sends it a PNG
+<p>tiny-paper display turns a TRMNL X into a plain e-paper display. A computer sends it a PNG
 over the USB cable and it shows the picture. No WiFi, no account, no app. Bluetooth is there too, off until you switch it on.</p>
 <p>You need:</p>
 <ul>
@@ -39,7 +39,7 @@ else has been tried on a device. Where a section below depends on that, it says 
 </tr>
 <tr>
 <td>Without a device</td>
-<td><a href="sketch.html?mock=x">TRMNL X</a>, <a href="sketch.html?mock=og">TRMNL OG</a> or <a href="sketch.html?mock=picpak">PicPak</a>: a pretend device answers, nothing reaches a panel. The same on the <a href="picture.html?mock=x">Picture page</a></td>
+<td><a href="sketch.html?mock=x">TRMNL X</a>: a pretend device answers, nothing reaches a panel. The same on the <a href="picture.html?mock=x">Picture page</a></td>
 </tr>
 </tbody></table>
 <h3 id="picture-page">Picture page</h3>
@@ -60,7 +60,7 @@ else has been tried on a device. Where a section below depends on that, it says 
 </tr>
 <tr>
 <td>Depth</td>
-<td>each depth the device takes (1, 2, 4 bit gray), on the PicPak its four colours</td>
+<td>each depth the device takes (1, 2, 4 bit gray)</td>
 </tr>
 <tr>
 <td>Dithering</td>
@@ -192,7 +192,7 @@ sent to the device. They are the Picture page&#39;s settings and give the same p
 </tr>
 <tr>
 <td><code>depth</code></td>
-<td><code>1</code>, <code>2</code>, <code>4</code>; none: the deepest the board has (a colour panel: its four inks)</td>
+<td><code>1</code>, <code>2</code>, <code>4</code>; none: the deepest the board has</td>
 </tr>
 <tr>
 <td><code>dither</code></td>
@@ -334,7 +334,7 @@ open(&quot;box.png&quot;, &quot;wb&quot;).write(display_fw.write_png(8, 4, 1, by
 <pre><code class="language-sh">tiny-paper-display show /dev/ttyACM0 box.png --at 8,4
 </code></pre>
 <p>In Python: <code>display_fw.show_area(display, png, hello, 8, 4)</code>. The rectangle is sent as it is, not fitted. The device must
-have a partial refresh at the bit depth of the box. Where it does not (a PicPak), it refuses with <code>MODE</code>.</p>
+have a partial refresh at the bit depth of the box. Where it does not, it refuses with <code>MODE</code>.</p>
 <h3 id="ask-the-device-what-it-can-do">Ask the device what it can do</h3>
 <pre><code class="language-python">from tiny_paper_display.usb_display import Display, open_port
 
@@ -348,7 +348,7 @@ the refreshes it can do, and <code>depth_modes</code> (<code>{&quot;1&quot;: [..
 and <code>partial</code> at 2 and 4 bit. <code>full_every</code> is the full refresh after that many partial ones (default 30; <code>full_every_set</code>
 false while the default applies). In Python, <code>display_fw.capabilities(display)</code> returns all of it (canvas, depths,
 partial_depths, depth_modes, colors, max_png, full_every), <code>display_fw.full_every(display, 50)</code> stores a value and
-<code>display_fw.full_every(display, clear=True)</code> brings the default back. A PicPak also has <code>colors</code>.</p>
+<code>display_fw.full_every(display, clear=True)</code> brings the default back.</p>
 <h3 id="bluetooth">Bluetooth</h3>
 <p><strong>Not tried on a device yet.</strong> The radio has never been run on a real board. Everything here is how it is built to work,
 and the battery cost is an estimate that has not been measured.</p>
@@ -385,18 +385,6 @@ is only listening now and then, so finding it can take up to about 22 seconds. <
 <td>gray PNG, 1, 2 or 4 bit</td>
 <td>1, 2 and 4 bit; the grays are not judged on a device</td>
 </tr>
-<tr>
-<td>TRMNL OG (<code>trmnl_og</code>)</td>
-<td>800 x 480</td>
-<td>gray PNG, 1 or 2 bit</td>
-<td>1 bit</td>
-</tr>
-<tr>
-<td>PicPak (<code>picpak</code>)</td>
-<td>400 x 300, four inks</td>
-<td>gray 1 bit, or indexed with exactly black, white, red, yellow</td>
-<td>none</td>
-</tr>
 </tbody></table>
 <p>The device takes a PNG of exactly the panel&#39;s size and shows it as given: no scaling, no dithering, no rotation. It
 refuses 8 and 16 bit gray, RGB, alpha, interlaced files, and an indexed file on a gray panel.</p>
@@ -415,7 +403,7 @@ refuses 8 and 16 bit gray, RGB, alpha, interlaced files, and an indexed file on 
 </tr>
 <tr>
 <td>Colors</td>
-<td>gray panels: the nearest gray level (no dithering). PicPak: the nearest of the four inks</td>
+<td>the nearest gray level (no dithering)</td>
 <td>dither or adjust contrast first if the result looks flat</td>
 </tr>
 <tr>
