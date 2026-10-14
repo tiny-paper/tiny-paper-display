@@ -9,6 +9,7 @@ The device keeps what it last showed: without a mode it updates only what change
 does a full refresh by itself when it must. The answer says which ran and why: {"mode": .., "why": .., "x", "y", "w",
 "h", "ms", "ckv"?}.
 """
+from dataclasses import dataclass
 import struct
 import time
 import zlib
@@ -161,9 +162,43 @@ def clear(display):
     return request(display, CLEAR, timeout=90)
 
 
-def full_every(display, n=None):
-    """The device's setting: a full refresh after this many partial ones (0: never). n: store a new value."""
-    return request(display, SET, {} if n is None else {"full_every": n})["full_every"]
+def full_every(display, n=None, clear=False):
+    """The device's setting: a full refresh after this many partial ones (0: never; the default is 30).
+    n: store a new value. clear=True: remove the stored value, the default applies again. Returns the value in use."""
+    if clear and n is not None:
+        raise DisplayError("full_every: n or clear, not both")
+    return request(display, SET, {"full_every": None} if clear else {} if n is None else {"full_every": n})["full_every"]
+
+
+@dataclass(frozen=True)
+class Capabilities:
+    """What hello says the board can do. depth_modes: {depth: [modes]}, None on a firmware from before the field
+    (then try a mode and read the refusal). full_every_set: False while the default is in use, None when unknown."""
+    w: int
+    h: int
+    depths: list
+    partial_depths: list
+    depth_modes: dict
+    colors: list
+    max_png: int
+    full_every: int
+    full_every_set: bool = None
+    modes: list = None
+
+
+def capabilities(display):
+    """Ask the board (hello) for its canvas, bit depths, refresh modes per depth and the full_every setting."""
+    h = request(display, HELLO)
+    return parse_capabilities(h)
+
+
+def parse_capabilities(h):
+    dm = h.get("depth_modes")
+    return Capabilities(
+        w=h["w"], h=h["h"], depths=list(h["depths"]), partial_depths=list(h.get("partial_depths") or []),
+        depth_modes=None if dm is None else {int(k): list(v) for k, v in dm.items()},
+        colors=list(h.get("colors") or []), max_png=h["max_png"], full_every=h.get("full_every"),
+        full_every_set=h.get("full_every_set"), modes=list(h["modes"]) if "modes" in h else None)
 
 
 def bluetooth(hello):

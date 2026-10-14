@@ -258,3 +258,28 @@ def test_clear_needs_the_display_firmware(monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["show.py", "port", "--clear"])
     assert show.main() == 1
     assert "needs the display firmware" in capsys.readouterr().err
+
+
+def test_capabilities_with_and_without_the_new_fields():
+    port, state = replay("gray")
+    caps = fw.capabilities(Display(port))
+    assert (caps.w, caps.h, caps.depths, caps.partial_depths) == (16, 8, [1, 2], [1])
+    assert caps.depth_modes == {1: ["full", "partial", "partial_all", "inverse", "passes"], 2: ["full"]}
+    assert caps.max_png == state["device"].max_png and caps.colors == []
+    assert caps.full_every == 20 and caps.full_every_set is False
+    # an older firmware: no depth_modes, no full_every_set; nothing invented
+    old = {k: v for k, v in state["device"].hello().items() if k not in ("depth_modes", "full_every_set")}
+    caps = fw.parse_capabilities(old)
+    assert caps.depth_modes is None and caps.full_every_set is None and caps.modes == list(fw.MODES)
+    assert fw.parse_capabilities({k: v for k, v in old.items() if k != "full_every"}).full_every is None
+
+
+def test_full_every_clear():
+    port, state = replay("gray")
+    d, dev = Display(port), state["device"]
+    assert fw.full_every(d, 7) == 7 and dev.every_set
+    assert fw.full_every(d, clear=True) == 20 and not dev.every_set  # the board's default again
+    begin = [p for c, p in dev.requests if c == fw.SET][-1]
+    assert begin == {"full_every": None}
+    with pytest.raises(DisplayError):
+        fw.full_every(d, 3, clear=True)

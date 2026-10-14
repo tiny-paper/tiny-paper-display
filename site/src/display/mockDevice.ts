@@ -83,7 +83,7 @@ export class MockDisplayDevice {
     tuning?: Record<string, number | string> } = {
       proto: 1, project: 'display', fw: 'test', board: 'trmnl_og', w: 16, h: 8,
       depths: [1, 2], partial_depths: [1], modes: ['full', 'partial', 'inverse', 'passes'],
-      full_every: 20, max_png: 8192, max_payload: 6144, chunk: 4096 };
+      full_every: 30, max_png: 8192, max_payload: 6144, chunk: 4096 };
   /** Every finished show: what was asked and the PNG's header. */
   readonly shows: { mode?: string; x?: number; y?: number; w: number; h: number; bits: number; png: Uint8Array }[] = [];
   /** One answer as after a lost frame: a full refresh nobody asked for. */

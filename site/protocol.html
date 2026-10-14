@@ -73,7 +73,7 @@ cache: after a lost answer send <code>hello</code> and start the picture again.<
 <td>0x01</td>
 <td>hello</td>
 <td>any map (the app&#39;s <code>{ proto: 1, app: tstr }</code> is fine)</td>
-<td><code>{ proto: 1, project: &quot;display&quot;, fw: tstr, board: tstr, w: uint, h: uint, depths: [uint], colors?: [tstr], max_payload: 6144, max_png: uint, chunk: 4096, partial_depths: [uint], modes: [tstr], full_every: uint, fingerprint_hash: &quot;fnv1a64&quot;, fingerprint?: tstr, bt?: tstr, partial_max?: map, tuning?: map, full_area?: [uint] }</code> (<code>partial_max</code>, <code>full_area</code>: &quot;Area and refresh mode&quot;; <code>tuning</code>: &quot;Tuning&quot;)</td>
+<td><code>{ proto: 1, project: &quot;display&quot;, fw: tstr, board: tstr, w: uint, h: uint, depths: [uint], colors?: [tstr], max_payload: 6144, max_png: uint, chunk: 4096, partial_depths: [uint], modes: [tstr], depth_modes: map, full_every: uint, full_every_set: bool, fingerprint_hash: &quot;fnv1a64&quot;, fingerprint?: tstr, bt?: tstr, partial_max?: map, tuning?: map, full_area?: [uint] }</code> (<code>partial_max</code>, <code>full_area</code>: &quot;Area and refresh mode&quot;; <code>tuning</code>: &quot;Tuning&quot;)</td>
 </tr>
 <tr>
 <td>0x08</td>
@@ -102,8 +102,8 @@ cache: after a lost answer send <code>hello</code> and start the picture again.<
 <tr>
 <td>0x0C</td>
 <td>set</td>
-<td><code>{ full_every?: uint, tuning?: map or &quot;defaults&quot; }</code> <code>full_every</code> 0 (never) .. 250; &quot;Tuning&quot;; without a key nothing changes</td>
-<td><code>{ full_every: uint, tuning?: map, refused?: map }</code> <code>full_every</code> as in use, stored on the device, kept over power-off; the others under &quot;Tuning&quot;</td>
+<td><code>{ full_every?: uint or null, tuning?: map or &quot;defaults&quot; }</code> <code>full_every</code> 0 (never) .. 250, null: remove the stored value, the default (30) applies again; &quot;Tuning&quot;; without a key nothing changes</td>
+<td><code>{ full_every: uint, full_every_set: bool, tuning?: map, refused?: map }</code> <code>full_every</code> as in use (<code>full_every_set</code> as in hello), stored on the device, kept over power-off; the others under &quot;Tuning&quot;</td>
 </tr>
 <tr>
 <td>0x0D</td>
@@ -122,7 +122,7 @@ cache: after a lost answer send <code>hello</code> and start the picture again.<
 <code>UNKNOWN_CMD</code>. <code>board</code>: <code>trmnl_og</code>, <code>picpak</code>, <code>trmnl_x</code>. <code>depths</code>: the gray bit depths taken. <code>colors</code>
 (<code>[&quot;black&quot;,&quot;white&quot;,&quot;red&quot;,&quot;yellow&quot;]</code>, PicPak): the panel&#39;s own colors. <code>warn</code>: the driver reported a refresh in less
 time than the panel needs (SPI panels: under 300 ms): look at the panel. <code>partial_depths</code>: the depths the board
-refreshes partially now (empty: none; the tuning key <code>driver</code> takes the gray depths away while it is <code>plain</code>). <code>modes</code>: the modes it does at some depth. <code>full_every</code>: the setting. <code>bt</code>: <code>&quot;off&quot;</code> or
+refreshes partially now (empty: none; the tuning key <code>driver</code> takes the gray depths away while it is <code>plain</code>). <code>modes</code>: the modes it does at some depth. <code>depth_modes</code>: <code>{ &quot;1&quot;: [tstr], &quot;2&quot;: [tstr], &quot;4&quot;: [tstr] }</code>, a key for each of <code>depths</code> (text keys), the modes a <code>show</code> of a whole picture at that depth is accepted with, from the same check that refuses the others with MODE 36 (a TRMNL X at 2 and 4 bit lists <code>full</code> and <code>partial</code> only, <code>partial_all</code>, <code>inverse</code> and <code>passes</code> need a 1 bit picture; a firmware from before this field lacks it: try the mode and read the refusal). <code>full_every</code>: the setting in use (default 30); <code>full_every_set</code>: true when it is a stored value, false while the default applies (<code>set</code> with <code>full_every: null</code> makes it false again). <code>bt</code>: <code>&quot;off&quot;</code> or
 <code>&quot;on&quot;</code>, the Bluetooth setting; absent on a build without Bluetooth, which answers <code>bt</code> with <code>UNKNOWN_CMD</code>.</p>
 <p>Example (vector session <code>gray</code>, a 16 x 8 test panel, partial at 1 bit):</p>
 <table>
@@ -138,7 +138,7 @@ refreshes partially now (empty: none; the tuning key <code>driver</code> takes t
 </tr>
 <tr>
 <td>answer</td>
-<td><code>a55a b300 01 81 ad 6570726f746f01 6770726f6a65637467646973706c6179 62667769302e302e302b766563 65626f617264687665635f67726179 617710 616808 6664657074687382 0102 6b6d61785f7061796c6f6164191800 676d61785f706e67191028 656368756e6b191000 6e7061727469616c5f6465707468738101 656d6f64657385 6466756c6c 677061727469616c 6b7061727469616c5f616c6c 67696e7665727365 66706173736573 6a66756c6c5f657665727914 31d2</code></td>
+<td><code>a55a 1c01 01 81 b06570726f746f016770726f6a65637467646973706c617962667769302e302e302b76656365626f617264687665635f67726179617710616808666465707468738201026b6d61785f7061796c6f6164191800676d61785f706e67191028656368756e6b1910006e7061727469616c5f6465707468738101656d6f646573856466756c6c677061727469616c6b7061727469616c5f616c6c67696e7665727365667061737365736b64657074685f6d6f646573a26131856466756c6c677061727469616c6b7061727469616c5f616c6c67696e7665727365667061737365736132816466756c6c6a66756c6c5f6576657279146e66756c6c5f65766572795f736574f47066696e6765727072696e745f6861736867666e7631613634 9050</code></td>
 </tr>
 <tr>
 <td>show_begin, 86 bytes</td>
@@ -162,7 +162,7 @@ refreshes partially now (empty: none; the tuning key <code>driver</code> takes t
 </tr>
 <tr>
 <td>set</td>
-<td><code>a55a 0d00 70 0c a16a66756c6c5f657665727902 4e31</code> -&gt; <code>a55a 0d00 70 8c a16a66756c6c5f657665727902 3066</code></td>
+<td><code>a55a 0d00 76 0c a16a66756c6c5f657665727902 25e7</code> -&gt; <code>a55a 1d00 76 8c a26a66756c6c5f6576657279 02 6e66756c6c5f65766572795f736574 f5 60ac</code></td>
 </tr>
 </tbody></table>
 <h2 id="fingerprint-and-duplicate-pictures">Fingerprint and duplicate pictures</h2>
@@ -337,7 +337,7 @@ frame. A whole picture without a mode gives up the frame kept when memory is sho
 <td>TRMNL X: <code>{ edges: uint, frames: uint, per: uint, rows: uint, ok: bool }</code>, the gate clock edges the firmware counted over the last refresh of the update, the drive frames, edges a frame, the panel&#39;s rows; <code>ok</code> false when a frame did not clock once per row (the picture is then drawn at the wrong height). Log: <code># display W show ... WRONG</code></td>
 </tr>
 </tbody></table>
-<p><code>full_every</code> (default 20, <code>set</code>): the count of partial updates since the last full refresh; a named mode is run as
+<p><code>full_every</code> (default 30, <code>set</code>): the count of partial updates since the last full refresh; a named mode is run as
 named and counts, except an unchanged <code>partial</code> which uses no count.</p>
 <h2 id="tuning">Tuning</h2>
 <p>For comparing how the panel is driven without reflashing. Only the TRMNL X has knobs: <code>hello.tuning</code> is a map of every
@@ -745,7 +745,7 @@ drives only the pixels that changed, so there is no such step.</p>
 </tr>
 <tr>
 <td><code>full_every</code></td>
-<td>0..250, default 20</td>
+<td>0..250, default 30</td>
 </tr>
 <tr>
 <td>Quiet transfer</td>
