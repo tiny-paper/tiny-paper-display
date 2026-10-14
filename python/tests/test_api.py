@@ -190,3 +190,29 @@ def test_canvas_png_is_what_the_old_example_made():
     assert c.crop(4, 0, 4, 2).px == bytearray([15] * 8)
     with pytest.raises(tpd.DisplayError):
         c.crop(6, 0, 4, 2)
+
+
+def _example(name):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(name, usb_display.ROOT / "python/examples" / f"{name}.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_test_page_example_runs_on_the_api(bench, monkeypatch, capsys):
+    dev = bench.devices["A"] = FakeDevice(w=800, h=480)
+    monkeypatch.setattr("sys.argv", ["test_page.py", "--depth", "1"])
+    _example("test_page").main()
+    out = capsys.readouterr().out
+    assert "| 1 | PARTIAL |" in out and "| 1 | SUMMARY |" in out and "refused" not in out
+    assert dev.requests, "it talked to the device"
+
+
+def test_the_quickstart_example_runs(bench, monkeypatch, tmp_path):
+    dev = bench.devices["A"] = FakeDevice(w=64, h=48)
+    pic = tmp_path / "p.png"
+    pic.write_bytes(tpd.Canvas(64, 48, 8).png(2))
+    monkeypatch.setattr("sys.argv", ["quickstart.py", str(pic)])
+    _example("quickstart")
+    assert dev.glass_depth and bench.opened[-1][1].closed == 1
