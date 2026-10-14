@@ -23,7 +23,7 @@ is unproven until a person has tried it.
 ```python
 import tiny_paper_display as tpd
 with tpd.open() as d:                                        # the first device found; closed at the end
-    d.configure(full_every=30)                               # a setting on the device (None: default)
+    d.configure(cleanup={"screen": 30})                      # a setting on the device, see below
     d.show("photo.png", fit="fit", dither="floyd")           # path, bytes or tpd.Canvas
     d.area(tpd.Canvas(48, 24, 0), 8, 8)                      # a rectangle, x a multiple of 8
 ```
@@ -35,6 +35,17 @@ with tpd.open() as d:                                        # the first device 
 | `tpd.open_all()` | a `Group` of every device; calls return a list of results |
 | `tpd.show(picture)` | open, show, close |
 | `tpd.Canvas(w, h)` | draw in 16 grays: `rect`, `frame`, `text`, `checker`, `crop` |
+
+Ghosting builds up in a live page when partial updates repeat. `configure(cleanup=...)` (stored on the device,
+`d.caps.cleanup` reads it): `areas` cleans the changed parts every N updates (default 15, 0 never), `screen` refreshes the
+whole screen every M updates (default 0, never). A key left out keeps its value.
+
+| `cleanup` | Means |
+|---|---|
+| `None` | the defaults: `{"areas": 15, "screen": 0}` |
+| `{"screen": 30}` | a whole-screen refresh every 30 updates, as before |
+| `{"areas": 5}` | clean the changed parts every 5 updates |
+| `{"areas": 0, "screen": 0}` | no cleaning (the device still does a full refresh when it must) |
 
 Picture options (`fit`, `border`, `dither`, `depth`, `threshold`, `rotate`) are per call, never sent to the device, and
 give the pixels of the site's Picture page (`docs/spec/vectors/picture-prepare.json`). JPEG and other formats need Pillow: `pip install tiny-paper-display[images]`.

@@ -108,7 +108,7 @@ for p in PICS.values():
     p["png"] = png(W, H, p["bits"], p["rows"], p.get("color_type", 0), p.get("palette"))
 
 
-STEP_KEYS = ("recv", "prep", "inflate", "convert", "diff", "fingerprint", "panel", "total")  # usb-display.md "The answer"
+STEP_KEYS = ("recv", "prep", "inflate", "convert", "diff", "fingerprint", "panel", "clean", "total")  # usb-display.md "The answer"
 
 
 class Session:
@@ -117,7 +117,7 @@ class Session:
         deep = 8 if colors else max(depths)
         self.panel = {"board": board, "fw": FW, "w": W, "h": H, "depths": depths, "colors": colors,
                       "max_png": bound(W, H, deep), "partial_depths": list(partial_depths),
-                      "partial_all": partial_all, "full_every": full_every}
+                      "partial_all": partial_all, "full_every": full_every, "clean_every": 0}
         self.full_every = full_every
         self.default_every = full_every
         self.full_every_set = False
@@ -153,7 +153,8 @@ class Session:
                 ok += (["partial_all"] if p["partial_all"] else []) + ["inverse"] + (["passes"] if p["partial_all"] else [])
             depth_modes[str(d)] = ok
         r.update({"partial_depths": pd, "modes": modes, "depth_modes": depth_modes, "full_every": self.full_every,
-                  "full_every_set": self.full_every_set, "fingerprint_hash": "fnv1a64"})
+                  "full_every_set": self.full_every_set, "clean_every": 0,
+                  "clean_every_set": False, "fingerprint_hash": "fnv1a64"})
         if self.fingerprint:
             r["fingerprint"] = self.fingerprint
         return r
@@ -344,11 +345,11 @@ def area_session(s, glass):
     s.show("to_gray2", g2["png"], 2, "full", "depth", g2["rows"])
     s.show("back_to_gray1", gray1(corner), 1, "full", "depth", corner)
     # the setting: a full refresh every N updates
-    s.step("set_get", SET, {}, {"full_every": 20, "full_every_set": False})
+    s.step("set_get", SET, {}, {"full_every": 20, "full_every_set": False, "clean_every": 0, "clean_every_set": False})
     s.step("set_bad", SET, {"full_every": 251}, {"err": 2, "msg": "full_every is 0 (never) to 250"})
-    s.step("set_7", SET, {"full_every": 7}, {"full_every": 7, "full_every_set": True})
-    s.step("set_clear", SET, {"full_every": None}, {"full_every": 20, "full_every_set": False})
-    s.step("set_2", SET, {"full_every": 2}, {"full_every": 2, "full_every_set": True})
+    s.step("set_7", SET, {"full_every": 7}, {"full_every": 7, "full_every_set": True, "clean_every": 0, "clean_every_set": False})
+    s.step("set_clear", SET, {"full_every": None}, {"full_every": 20, "full_every_set": False, "clean_every": 0, "clean_every_set": False})
+    s.step("set_2", SET, {"full_every": 2}, {"full_every": 2, "full_every_set": True, "clean_every": 0, "clean_every_set": False})
     s.full_every, s.full_every_set = 2, True
     a, b = glass, corner
     s.show("tick_1", gray1(a), 1, "partial", "changed", a, rect=changed(a, b))

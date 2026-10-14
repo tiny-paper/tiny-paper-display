@@ -195,7 +195,7 @@ def test_vectors_bluetooth_session(monkeypatch):
     b = V["bluetooth"]
     p = b["panel"]
     dev = FakeDevice(p["w"], p["h"], p["depths"], p["partial_depths"], p["partial_all"], p["full_every"], p["board"],
-                     p["fw"], bt="off", name=b["name"])
+                     p["fw"], bt="off", name=b["name"], clean_every=p.get("clean_every", 15))
     for st in b["steps"]:
         assert codec.build_frame(st["seq"], st["cmd"], plain(st["req"])).hex() == st["tx"], st["name"]
         got = dev.respond(bytes.fromhex(st["tx"]), link=st["link"], secure=st.get("secure", False))

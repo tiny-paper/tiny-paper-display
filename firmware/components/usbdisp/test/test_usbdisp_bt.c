@@ -686,7 +686,7 @@ static void test_build_without_bluetooth(void)
     usbdisp_bt_stop(&D);
     device_partial(16, 8, 3, 1, true, 20);
     TEST_ASSERT_EQUAL_INT(0, req_err(USBDISP_CMD_HELLO, NULL, 0));
-    TEST_ASSERT_EQUAL_HEX8(0xB0, s_ans[0]); /* 16 keys: fingerprint_hash, depth_modes and full_every_set are three */
+    TEST_ASSERT_EQUAL_HEX8(0xB2, s_ans[0]); /* 18 keys: fingerprint_hash, depth_modes, full_every_set, clean_every and clean_every_set are five */
     TEST_ASSERT_EQUAL_INT(USBDISP_E_UNKNOWN_CMD, req_err(USBDISP_CMD_BT, NULL, 0));
     TEST_ASSERT_FALSE(usbdisp_bt_button(&D));
     TEST_ASSERT_FALSE(usbdisp_bt_on(&D));

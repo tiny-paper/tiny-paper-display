@@ -29,12 +29,12 @@ cache: after a lost answer send `hello` and start the picture again.
 
 | cmd | Name | Request | Answer |
 |---|---|---|---|
-| 0x01 | hello | any map (the app's `{ proto: 1, app: tstr }` is fine) | `{ proto: 1, project: "display", fw: tstr, board: tstr, w: uint, h: uint, depths: [uint], colors?: [tstr], max_payload: 6144, max_png: uint, chunk: 4096, partial_depths: [uint], modes: [tstr], depth_modes: map, full_every: uint, full_every_set: bool, fingerprint_hash: "fnv1a64", fingerprint?: tstr, bt?: tstr, partial_max?: map, tuning?: map, full_area?: [uint] }` (`partial_max`, `full_area`: "Area and refresh mode"; `tuning`: "Tuning") |
+| 0x01 | hello | any map (the app's `{ proto: 1, app: tstr }` is fine) | `{ proto: 1, project: "display", fw: tstr, board: tstr, w: uint, h: uint, depths: [uint], colors?: [tstr], max_payload: 6144, max_png: uint, chunk: 4096, partial_depths: [uint], modes: [tstr], depth_modes: map, full_every: uint, full_every_set: bool, clean_every: uint, clean_every_set: bool, fingerprint_hash: "fnv1a64", fingerprint?: tstr, bt?: tstr, partial_max?: map, tuning?: map, full_area?: [uint] }` (`partial_max`, `full_area`: "Area and refresh mode"; `tuning`: "Tuning") |
 | 0x08 | show_begin | `{ size: uint, x?: uint, y?: uint, mode?: tstr, passes?: uint }`: the PNG's bytes, where it goes and how ("Area and refresh mode") | `{ chunk: 4096, next: 0 }`; replaces an open transfer (which counts as cut) |
 | 0x09 | show_chunk | `{ off: uint, data: bstr }` | `{ next: uint }`. `off` must be `next`; the first chunk holds at least the PNG's first 29 bytes and is checked at once (size, depth) |
 | 0x0A | show_end | `{}` | `{ depth: uint, ms: uint, mode: tstr, why: tstr, x: uint, y: uint, w: uint, h: uint, passes?: uint, ckv?: map, warn?: tstr, same?: true, steps: map }` after the refresh ("The answer") |
 | 0x0B | clear | `{}` | as show_end: the panel white, `mode: "full"`, `why: "asked"` |
-| 0x0C | set | `{ full_every?: uint or null, tuning?: map or "defaults" }` `full_every` 0 (never) .. 250, null: remove the stored value, the default (30) applies again; "Tuning"; without a key nothing changes | `{ full_every: uint, full_every_set: bool, tuning?: map, refused?: map }` `full_every` as in use (`full_every_set` as in hello), stored on the device, kept over power-off; the others under "Tuning" |
+| 0x0C | set | `{ full_every?: uint or null, clean_every?: uint or null, tuning?: map or "defaults" }` `full_every`, `clean_every` 0 (never) .. 250, null: remove the stored value, the default (0 and 15) applies again; "Tuning"; without a key nothing changes | `{ full_every: uint, full_every_set: bool, clean_every: uint, clean_every_set: bool, tuning?: map, refused?: map }` `full_every`, `clean_every` as in use (the `_set` flags as in hello), each stored on the device under its own key, kept over power-off; the others under "Tuning" |
 | 0x0D | bt | `{ on?: bool, pair?: bool, forget?: bool }`, over the USB cable only ("Bluetooth") | `{ on: bool, pairing: uint, name: tstr }`: the setting, the seconds the pairing window stays open (0: closed), the advertised name |
 | 0x0E | have | `{ fingerprint: tstr }` | `{ same: true }` when known and equal, else `{ send: true }`; no PNG bytes, refresh or counter change |
 
@@ -42,7 +42,7 @@ cache: after a lost answer send `hello` and start the picture again.
 `UNKNOWN_CMD`. `board`: `trmnl_og`, `picpak`, `trmnl_x`. `depths`: the gray bit depths taken. `colors`
 (`["black","white","red","yellow"]`, PicPak): the panel's own colors. `warn`: the driver reported a refresh in less
 time than the panel needs (SPI panels: under 300 ms): look at the panel. `partial_depths`: the depths the board
-refreshes partially now (empty: none; the tuning key `driver` takes the gray depths away while it is `plain`). `modes`: the modes it does at some depth. `depth_modes`: `{ "1": [tstr], "2": [tstr], "4": [tstr] }`, a key for each of `depths` (text keys), the modes a `show` of a whole picture at that depth is accepted with, from the same check that refuses the others with MODE 36 (a TRMNL X at 2 and 4 bit lists `full` and `partial` only, `partial_all`, `inverse` and `passes` need a 1 bit picture; a firmware from before this field lacks it: try the mode and read the refusal). `full_every`: the setting in use (default 30); `full_every_set`: true when it is a stored value, false while the default applies (`set` with `full_every: null` makes it false again). `bt`: `"off"` or
+refreshes partially now (empty: none; the tuning key `driver` takes the gray depths away while it is `plain`). `modes`: the modes it does at some depth. `depth_modes`: `{ "1": [tstr], "2": [tstr], "4": [tstr] }`, a key for each of `depths` (text keys), the modes a `show` of a whole picture at that depth is accepted with, from the same check that refuses the others with MODE 36 (a TRMNL X at 2 and 4 bit lists `full` and `partial` only, `partial_all`, `inverse` and `passes` need a 1 bit picture; a firmware from before this field lacks it: try the mode and read the refusal). `full_every`: the setting in use (default 0, never); `full_every_set`: true when it is a stored value, false while the default applies (`set` with `full_every: null` makes it false again). `clean_every`, `clean_every_set`: the same for the clean of the changed area (default 15; "Clean of the changed area"). `bt`: `"off"` or
 `"on"`, the Bluetooth setting; absent on a build without Bluetooth, which answers `bt` with `UNKNOWN_CMD`.
 
 Example (vector session `gray`, a 16 x 8 test panel, partial at 1 bit):
@@ -159,6 +159,7 @@ frame. A whole picture without a mode gives up the frame kept when memory is sho
 | `x`, `y`, `w`, `h` | the area driven (all 0 with `none`) |
 | `same` | true with `mode: "none"` |
 | `passes` | with the mode `passes` |
+| `clean` | when a clean ran after this update: `{ x, y, w, h, mode, ms }`, the area cleaned, the mode used and its time ("Clean of the changed area") |
 | `ckv` | TRMNL X: `{ edges: uint, frames: uint, per: uint, rows: uint, ok: bool }`, the gate clock edges the firmware counted over the last refresh of the update, the drive frames, edges a frame, the panel's rows; `ok` false when a frame did not clock once per row (the picture is then drawn at the wrong height). Log: `# display W show ... WRONG` |
 
 `steps` (a `show_end` answer, not `clear`) is the device's own time for each step, in whole milliseconds on the board's
@@ -173,12 +174,30 @@ monotonic clock. The steps are disjoint and run one after the other, so their su
 | `diff` | the search for the changed rectangle (a partial update only, else 0) |
 | `fingerprint` | the hash of the new frame |
 | `panel` | the panel calls (the same as `ms`) |
+| `clean` | the clean of the changed area after the update (0: none ran); not in `panel` |
 | `total` | first `show_chunk` to the answer being built; what is not in a step (the wait between the last chunk and `show_end`, mode choice, freeing) is the rest |
 
 The device log line `show ...` ends with `steps=recv/prep/inflate/convert/diff/fingerprint/panel/total`.
 
-`full_every` (default 30, `set`): the count of partial updates since the last full refresh; a named mode is run as
+`full_every` (default 0: never, `set`): the count of partial updates since the last full refresh; a named mode is run as
 named and counts, except an unchanged `partial` which uses no count.
+
+### Clean of the changed area
+
+A 1 bit partial update turns black back to white only weakly, so light ghosting builds up in a page that redraws every few
+seconds. Instead of a flash of the whole screen the device cleans only the area that changed. `clean_every` (`set`, 0..250,
+0 = off, default 15): the device keeps the union rectangle of all partial updates since the last clean or full refresh.
+After `clean_every` partial updates it drives that rectangle once with the strongest area mode the depth offers
+(order: `inverse`, `passes` twice, `partial_all`; from `depth_modes`), redrawing the frame kept there, then starts a new
+union. The answer of that `show_end` carries `clean: { x, y, w, h, mode, ms }`, and `steps.clean` its time.
+
+| Rule | |
+|---|---|
+| Counting | each update that drove a partial refresh counts and adds its rectangle; a full refresh of the whole panel resets the count and the union; a rectangle's full refresh (`why: "area"`) counts like a partial one |
+| Both due | `full_every` reached: the next update is the full refresh and no clean runs; the full resets both |
+| Mode | at 1 bit `inverse` (every pixel goes through its opposite and back, so black turns white fully; `passes` leaves a pixel driven twice towards the value it already has). A depth with none of the modes (the TRMNL X at 2 and 4 bit lists `full` and `partial` only) is not cleaned: it is left to `full_every` |
+| No memory, panel refusal | no memory for the negative: no clean now, tried again at the next update; a panel failure: refused `IO` and the frame kept is forgotten, as for any update |
+| Default 15 | a pc_stats-style page at 1 bit shows the first light ghost after about 10 to 20 partial updates; 15 cleans before it is seen, and the clean (one area, about a partial update twice) costs far less than the full flash. This is an estimate, not measured on the glass |
 
 ## Tuning
 
@@ -278,7 +297,7 @@ drives only the pixels that changed, so there is no such step.
 | err | Name | When |
 |---|---|---|
 | 1 | UNKNOWN_CMD | any other cmd 0x01..0x3F |
-| 2 | BAD_REQUEST | payload not one CBOR map, a key missing or of the wrong type, a first chunk under 29 bytes, `passes` without the mode `passes` or outside 1..4, `full_every` over 250 |
+| 2 | BAD_REQUEST | payload not one CBOR map, a key missing or of the wrong type, a first chunk under 29 bytes, `passes` without the mode `passes` or outside 1..4, `full_every` or `clean_every` over 250 |
 | 3 | BUSY | the panel is refreshing: `detail { retry_ms: 2000 }`; `hello` is still answered. `trmnl_x`: requests wait for the refresh instead |
 | 10 | IO | the panel driver failed (`msg` says at which step; the panel may show the old or the new picture), or `set` could not store |
 | 11 | SEQUENCE | no transfer open, `off` not the next offset, or show_end before all bytes: `detail { next: uint }` |
@@ -301,7 +320,8 @@ drives only the pixels that changed, so there is no such step.
 | Memory | the PNG, then the frame (`w * depth / 8 * h`) and the decoder (<= 32 KiB window, two rows); the PNG is freed before the refresh. At a depth in `partial_depths` one more frame is kept between updates; `inverse` adds the rectangle's rows |
 | Rectangle | 8 x 1 up to the panel; the PNG's size bound is `max_png` as for a whole picture |
 | `passes` | 1..4 |
-| `full_every` | 0..250, default 30 |
+| `full_every` | 0..250, default 0 |
+| `clean_every` | 0..250, default 15 |
 | Quiet transfer | dropped 10 s after its last request, memory freed |
 | Cable pulled | the device restarts from deep sleep: no transfer state and no frame kept survive (the next update is a full refresh); the panel keeps the last picture shown |
 
