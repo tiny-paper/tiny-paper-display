@@ -40,6 +40,27 @@ Picture options (`fit`, `border`, `dither`, `depth`, `threshold`, `rotate`) are 
 give the pixels of the site's Picture page (`docs/spec/vectors/picture-prepare.json`). JPEG and other formats need Pillow.
 `examples/quickstart.py` is the short version, `examples/test_page.py` the reference.
 
+| Error (all subclasses of `DisplayError`) | When |
+|---|---|
+| `Refused` | the device said no: `.err` code, `.name` (e.g. `MODE` 36), `.msg`, `.detail` |
+| `Busy` | a kind of `Refused`: busy for longer than the wait |
+| `Disconnected` | port gone, or a transfer cut twice (a cut one is retried once on a new link) |
+| `PanelFault` | the answer's gate clock count is wrong (`.reply`); not returned silently |
+
+After any failure the `Device` stays usable and the next `show` sends the whole picture. `group.show(...)` returns, per
+device, the answer or the exception; the other devices go on.
+
+| Logging (standard `logging`, logger `tiny_paper_display`, silent by default) | What |
+|---|---|
+| `tpd.open(log="info")` or `tpd.log("info")` | one stderr handler; `tpd.log(None)` removes it |
+| `info` | per show: host prepare ms, transfer ms, the device's mode, why and ms |
+| `debug` | each request and answer (command, keys, bytes by length only) |
+| `warning` | retries and refusals |
+
+`show` results carry `prepare_ms` and `transfer_ms` (the host's time) next to the device's `ms`. Measured on this machine
+for 1872x1404 (`pytest -s python/tests/test_speed.py`): fit + 4 bit without dither 0.5 s, Floyd-Steinberg 2.6 s, Canvas to
+PNG under 0.05 s, PNG decode 0.03 s (filter none) to 3 s (Paeth rows; install Pillow for any PNG or JPEG).
+
 | Module | What |
 |---|---|
 | `tiny_paper_display.picture` | the Picture page's preparation: `prepare`, `pack_rows` |

@@ -59,3 +59,13 @@ def test_fingerprint_without_decoding_equals_the_slow_path(monkeypatch, depth, w
     assert fp._gray_rows(data) is not None
     monkeypatch.setattr(fp, "_gray_rows", lambda png: None)
     assert fp.fingerprint(data, {}) == fast
+
+
+def test_fingerprint_of_a_filtered_gray_png_is_still_right():
+    from tiny_paper_display import display_fingerprint as fp, display_fw
+    rows = bytes([0x0F, 0xF0, 0xAA, 0x55, 0x12, 0x34])
+    plain = display_fw.write_png(8, 6, 1, rows)
+    stride = 1
+    data = png(8, 6, filtered([rows[i:i + 1] for i in range(6)], stride, 1, 2), color=0, bits=1)
+    assert fp._gray_rows(data) is None, "a filtered row is not taken as packed rows"
+    assert fp.fingerprint(data, {}) == fp.fingerprint(plain, {})
