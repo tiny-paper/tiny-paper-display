@@ -11,9 +11,9 @@ sent are written there.
 shown (the whole panel when most of it changed), without a flash, and a full refresh every --full-every frames as
 clean-up. --mode full: every frame whole at the panel's deepest gray, with a full refresh.
 
-  movie.py /dev/ttyACM0 film.mp4 --every 5 --duration 60
-  movie.py --bluetooth tp-display-1A2B film.mp4 --every 5 --duration 60
-  movie.py - film.mp4 --every 5 --dry-run frames/
+  tiny-paper-display movie /dev/ttyACM0 film.mp4 --every 5 --duration 60
+  tiny-paper-display movie --bluetooth tp-display-1A2B film.mp4 --every 5 --duration 60
+  tiny-paper-display movie - film.mp4 --every 5 --dry-run frames/
 """
 import argparse
 import json

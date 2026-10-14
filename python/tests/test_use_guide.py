@@ -41,7 +41,7 @@ def test_guide_samples_run(tmp_path, monkeypatch, capsys):
     device = FakeDevice(bt="off")
     monkeypatch.setattr(codec, "open_serial", lambda name, ui=None: Port(device.respond))
     monkeypatch.setattr(api, "list_ports", lambda: [("/dev/ttyACM0", None)])
-    (tmp_path / "picture.png").write_bytes((ROOT / "python/examples/bars.png").read_bytes())
+    (tmp_path / "picture.png").write_bytes((ROOT / "python/tests/data/bars.png").read_bytes())
     monkeypatch.chdir(tmp_path)
     for kind, code in blocks():
         if kind == "python":

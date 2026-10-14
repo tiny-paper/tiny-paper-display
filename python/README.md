@@ -40,8 +40,15 @@ with tpd.open() as d:                                        # the first device 
 
 Picture options (`fit`, `border`, `dither`, `depth`, `threshold`, `rotate`) are per call, never sent to the device, and
 give the pixels of the site's Picture page (`docs/spec/vectors/picture-prepare.json`). JPEG and other formats need Pillow: `pip install tiny-paper-display[images]`.
-`examples/quickstart.py` is the short version, `examples/test_page.py` the reference, `examples/pc_stats.py` live PC stats
-(CPU, memory, disks, network, processes; psutil optional, else /proc; `--once`, `--png FILE`; pictures in `docs/img/`).
+| Example | What it shows |
+|---|---|
+| `examples/quickstart.py` | the short version: find, show a picture, update a rectangle |
+| `examples/test_page.py` | the reference: every gray depth and refresh mode, with timings |
+| `examples/pc_stats.py` | live PC stats (psutil optional, else /proc; `--once`, `--png FILE`; pictures in `docs/img/`) |
+| `examples/btc_ticker.py` | Bitcoin price every 2 s over a 24-hour candle chart, only changed rectangles sent (Kraken, no key) |
+| `examples/live_wire/` | live Wikipedia edits and earthquakes (Docker) |
+
+Pictures and videos from the command line: `tiny-paper-display show|clear|movie|setup`.
 
 | Error (all subclasses of `DisplayError`) | When |
 |---|---|

@@ -246,7 +246,7 @@ def test_show_command_on_the_display_firmware(monkeypatch, capsys, argv, want):
     port.__class__ = Port
     monkeypatch.setattr(codec, "open_serial", lambda name: port)
     monkeypatch.setattr(fw, "panel_png", lambda data, hello: picture("gray1"))
-    monkeypatch.setattr(sys, "argv", ["show.py", "port"] + [str(ROOT / "python/examples" / a) if a[0] != "-" else a for a in argv])
+    monkeypatch.setattr(sys, "argv", ["show.py", "port"] + [str(ROOT / "python/tests/data" / a) if a[0] != "-" else a for a in argv])
     assert show.main() == 0
     out = capsys.readouterr().out
     assert "vec_gray display firmware" in out and '"ms": 0' in out and state["seen"] == want
