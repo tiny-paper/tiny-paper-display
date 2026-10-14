@@ -1,28 +1,30 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Bitcoin price, live, over a 24-hour candle chart, from Kraken's public market data (no account, no key, standard
-library only).
+"""Bitcoin price, live, over a 24-hour candle chart, from Kraken's public market data (no account, no key).
 
     python btc_ticker.py                        (the first device found)
-    python btc_ticker.py COM5 --currency EUR --every 2
+    python btc_ticker.py COM5 --currency EUR
     python btc_ticker.py --bluetooth NAME
     python btc_ticker.py --png page.png --size 800x480 [--demo]     (no device; --demo: fixed fake candles)
 
-The price is asked every --every seconds (default 2) and moves the last candle; the candles are fetched again every
-minute. Only the rectangles that changed are sent, in 1 bit, so an update is a fast partial refresh (the device's
-full_every does the clean-up). Without the network the last page stays up with an OFFLINE mark."""
+The last 24 hours come once over HTTP, then Kraken's WebSocket pushes every change of the current candle (needs
+`pip install websockets`). The page is redrawn when a price moved, at most every --every seconds (default 1). Only the
+rectangles that changed are sent, in 1 bit, so an update is a fast partial refresh (the device's full_every does the
+clean-up). Without the network the last page stays up with an OFFLINE mark and the program connects again."""
 import argparse
 import json
 import math
 import sys
 import time
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 import tiny_paper_display as tpd
 
 BLACK, WHITE = 0, 15
 API = "https://api.kraken.com/0/public/"
+WS = "wss://ws.kraken.com/v2"
 CANDLES = 96  # 24 hours of 15-minute candles
 CANDLES_EVERY = 60  # seconds between candle fetches
 FAILS = (OSError, ValueError, KeyError, IndexError, TypeError, AttributeError, StopIteration)  # network down, odd answers
@@ -42,16 +44,24 @@ def fetch_candles(cur):
     return [(int(r[0]), *(float(v) for v in r[1:5])) for r in rows][-CANDLES:]
 
 
-def fetch_price(cur):
-    return float(ask(f"Ticker?pair=XBT{cur}")["c"][0])
+def subscribe(cur):
+    return json.dumps({"method": "subscribe", "params": {"channel": "ohlc", "symbol": [f"BTC/{cur}"], "interval": 15}})
 
 
-def with_price(candles, price):
-    """The candles with the live price as the close of the last one (its high and low widened to it)."""
-    if not candles:
+def apply(candles, msg):
+    """The candles after one WebSocket message: an ohlc update replaces the current candle or starts the next one;
+    anything else (heartbeat, status, the subscribe answer) leaves them as they are."""
+    if not isinstance(msg, dict) or msg.get("channel") != "ohlc" or msg.get("type") != "update":
         return candles
-    t, o, h, lo, _ = candles[-1]
-    return candles[:-1] + [(t, o, max(h, price), min(lo, price), price)]
+    out = list(candles)
+    for m in msg["data"]:
+        k = (int(datetime.fromisoformat(m["interval_begin"][:19] + "+00:00").timestamp()),
+             float(m["open"]), float(m["high"]), float(m["low"]), float(m["close"]))
+        if out and out[-1][0] == k[0]:
+            out[-1] = k
+        elif not out or k[0] > out[-1][0]:
+            out.append(k)
+    return out[-CANDLES:]
 
 
 def demo_candles(now=1791400000):
@@ -142,12 +152,26 @@ def changes(old, new, gap=8):
     return out
 
 
+def draw(d, page, shown):
+    """Send what changed since `shown` (the whole page the first time); the page now on the panel, None after a failure."""
+    try:
+        if shown is None:
+            d.show(page, depth=1)
+        else:
+            for x, y, rw, rh in changes(shown, page):
+                d.area(page.crop(x, y, rw, rh), x, y, depth=1)
+        return page
+    except tpd.DisplayError as e:
+        print(f"show failed, the whole page goes next time: {e}", file=sys.stderr)
+        return None
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("port", nargs="?", help="/dev/ttyACM0 or COM5 (default: the first device found)")
     ap.add_argument("--bluetooth", metavar="NAME_OR_ADDRESS")
     ap.add_argument("--currency", default="USD", choices=("USD", "EUR", "GBP", "CAD", "JPY", "CHF", "AUD"))
-    ap.add_argument("--every", type=float, default=2, help="seconds between price updates (default 2)")
+    ap.add_argument("--every", type=float, default=1, help="at most one screen update per this many seconds (default 1)")
     ap.add_argument("--png", metavar="FILE", help="write the page to a PNG and exit (no device)")
     ap.add_argument("--size", default="800x480", help="PNG size WxH (default 800x480)")
     ap.add_argument("--demo", action="store_true", help="with --png: fixed fake candles instead of the network")
@@ -158,30 +182,35 @@ def main(argv=None):
         Path(args.png).write_bytes(render(candles, w, h, args.currency, clock=candles[-1][0]).png(1))
         print(f"wrote {args.png} ({w}x{h})")
         return 0
-    candles, fetched, shown = [], 0.0, None
+    try:
+        from websockets.exceptions import WebSocketException
+        from websockets.sync.client import connect
+    except ImportError:
+        print("needs the websockets package: pip install websockets", file=sys.stderr)
+        return 1
+    candles, shown = [], None
     try:
         with tpd.open(args.port, args.bluetooth) as d:
             while True:
-                started, offline = time.monotonic(), False
                 try:
-                    if time.monotonic() - fetched >= CANDLES_EVERY or not candles:
-                        candles, fetched = fetch_candles(args.currency), time.monotonic()
-                    candles = with_price(candles, fetch_price(args.currency))
-                except FAILS as e:
-                    print(f"no prices, keeping the last ones: {e}", file=sys.stderr)
-                    offline = True
-                page = render(candles, d.w, d.h, args.currency, offline)
-                try:
-                    if shown is None:
-                        d.show(page, depth=1)
-                    else:
-                        for x, y, rw, rh in changes(shown, page):
-                            d.area(page.crop(x, y, rw, rh), x, y, depth=1)
-                    shown = page
-                except tpd.DisplayError as e:
-                    print(f"show failed, the whole page goes next time: {e}", file=sys.stderr)
-                    shown = None
-                time.sleep(max(0.0, args.every - (time.monotonic() - started)))
+                    candles = fetch_candles(args.currency)
+                    with connect(WS, open_timeout=10) as ws:
+                        ws.send(subscribe(args.currency))
+                        dirty, drawn = True, 0.0
+                        while True:
+                            wait = max(0.0, args.every - (time.monotonic() - drawn)) if dirty else 30
+                            try:
+                                new = apply(candles, json.loads(ws.recv(timeout=wait)))
+                                dirty, candles = dirty or new != candles, new
+                            except TimeoutError:
+                                pass
+                            if dirty and time.monotonic() - drawn >= args.every:
+                                shown = draw(d, render(candles, d.w, d.h, args.currency), shown)
+                                dirty, drawn = False, time.monotonic()
+                except FAILS + (WebSocketException,) as e:
+                    print(f"no prices, connecting again in 5 s: {e}", file=sys.stderr)
+                    shown = draw(d, render(candles, d.w, d.h, args.currency, offline=True), shown)
+                    time.sleep(5)
     except KeyboardInterrupt:
         print()
         return 0

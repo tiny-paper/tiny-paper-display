@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 """examples/btc_ticker.py without a device or a network: every text drawn has its letters in the font, the page at
-both panel sizes for rising, falling, flat and missing prices, the live price on the last candle, the changed
+both panel sizes for rising, falling, flat and missing prices, the WebSocket updates, the changed
 rectangles, and the Kraken answer parsing (data, error, bad data)."""
 import importlib.util
 import io
@@ -74,20 +74,40 @@ def test_fetch_takes_the_last_day(monkeypatch):
     assert len(got) == bt.CANDLES and got[-1] == (rows[-1][0], 1.0, 2.0, 0.0, 819.0)
 
 
-def test_fetch_price(monkeypatch):
-    answer(monkeypatch, {"error": [], "result": {"XXBTZEUR": {"c": ["73443.6", "0.1"]}}})
-    assert bt.fetch_price("EUR") == 73443.6
+def update(*rows):
+    return {"channel": "ohlc", "type": "update", "data": [
+        {"interval_begin": f"2026-10-14T15:{m:02d}:00.000000000Z", "open": 1, "high": 3, "low": 0.5, "close": c}
+        for m, c in rows]}
 
 
-def test_live_price_moves_the_last_candle():
-    got = bt.with_price(series(1), 90000.0)
-    assert got[-1][2:] == (90000.0, series(1)[-1][3], 90000.0) and got[:-1] == series(1)[:-1]
-    assert bt.with_price([], 1.0) == []
+def test_websocket_updates_move_the_candles():
+    start = [(int(bt.datetime.fromisoformat("2026-10-14T15:30:00+00:00").timestamp()), 1.0, 2.0, 1.0, 2.0)]
+    got = bt.apply(start, update((30, 2.5)))
+    assert got == [(start[0][0], 1.0, 3.0, 0.5, 2.5)]  # the current candle replaced
+    got = bt.apply(got, update((45, 4.0)))
+    assert len(got) == 2 and got[-1][0] == start[0][0] + 900 and got[-1][4] == 4.0  # the next one started
+    assert bt.apply(got, update((15, 9.0))) == got  # an older candle is ignored
+    full = bt.apply(series(1), update((59, 1.0)))
+    assert len(full) == bt.CANDLES  # still 24 hours
+
+
+@pytest.mark.parametrize("msg", [{"channel": "heartbeat"}, {"method": "subscribe", "success": True},
+                                 {"channel": "ohlc", "type": "snapshot", "data": []}, [], None, "x"])
+def test_other_messages_change_nothing(msg):
+    assert bt.apply(series(1), msg) == series(1)
+
+
+@pytest.mark.parametrize("msg", [{"channel": "ohlc", "type": "update"}, {"channel": "ohlc", "type": "update", "data": [{}]},
+                                 update((30, "x")), {"channel": "ohlc", "type": "update", "data": [{"interval_begin": "no"}]}])
+def test_bad_updates_end_in_a_known_error(msg):
+    with pytest.raises(bt.FAILS):
+        bt.apply(series(1), msg)
 
 
 def test_changes_cover_every_changed_pixel():
     a = bt.render(series(1), 800, 480, clock=0)
-    b = bt.render(bt.with_price(series(1), series(1)[-1][4] + 3), 800, 480, clock=1)
+    last = series(1)[-1]
+    b = bt.render(series(1)[:-1] + [last[:4] + (last[4] + 3,)], 800, 480, clock=1)
     rects = bt.changes(a, b)
     assert bt.changes(a, a) == [] and 1 < len(rects) <= 4
     for x, y, w, h in rects:
@@ -103,6 +123,5 @@ def test_changes_cover_every_changed_pixel():
 def test_bad_answers_end_in_a_known_error(monkeypatch, body):
     """main keeps the last page on these (FAILS); anything else would end the program."""
     answer(monkeypatch, body)
-    for call in (bt.fetch_candles, bt.fetch_price):
-        with pytest.raises(bt.FAILS):
-            call("USD")
+    with pytest.raises(bt.FAILS):
+        bt.fetch_candles("USD")
