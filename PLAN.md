@@ -29,7 +29,7 @@ Work lands on `testing` first; `main` moves by promoting a state that was tried 
 | Scope | Done | To do |
 |---|---|---|
 | 1 Flash, backup, restore | a flash page | backup and restore; one page with the tabs Flash and Test, switching to Test after an install; a plain warning that installing erases the firmware on the device |
-| 2 USB and Bluetooth | the firmware and its protocol; Bluetooth off by default with a setup step | the first run on a real device, on each board, cable and Bluetooth |
+| 2 USB and Bluetooth | the firmware and its protocol; Bluetooth off by default with a setup step; on the TRMNL X over the cable (2026-10-14, build 010272a): a full 1 bit picture, the 16 gray wedge in order, partial rectangles at 4 and 1 bit in place | Bluetooth; OG and PicPak; the tool refuses an 8 bit PNG for `--at` while it converts one for a full picture |
 | 3 Packages | a Python package that installs from the git URL; a guide page ("Use it") | the JavaScript package; first releases, version 0.1.0 |
 | 4 Sketch in the browser | a sketch page, black and white at 1 bit by default (looked best on the X), optional 16 grays (seen on a device, slower); Clear is a full refresh and leaves the panel clean (seen) | erasing in grays judged; the painting by a drawing library; into the Test tab |
 | 5 Sketch in Python | a first version exists | later |
@@ -56,6 +56,18 @@ order (mid looks mid, light looks light). Grays on the TRMNL X are even and in t
 the same shade on a computer screen; accepted as the panel's character, not being worked on.
 
 Device result, TRMNL X: 16 grey levels in order on the X by partial and by one full refresh (stock table, build 5c0ec75).
+
+### Cable run, TRMNL X, 2026-10-14 (build 010272a, FastEPD pin of the main project)
+
+| Send | Panel | Whole command |
+|---|---|---|
+| full 1 bit picture | 1898 ms | 5.7 s |
+| full 4 bit wedge (8 bit PNG converted) | 2552 ms | 13.6 s |
+| partial 600x240 at 4 bit | 2623 ms | 3.4 s |
+| partial 600x240 at 1 bit (after a 4 bit picture: a full first, why=refused) | 1909 ms full, then 1462 ms partial | 2.4 s, 2.0 s |
+| clear | 1114 ms | 1.3 s |
+
+Seen by camera: the wedge in 16 steps in order, both partial rectangles in place with no traces around them. A partial at an x that is not a multiple of 8 is refused (RECT 37).
 
 ### Known limits (TRMNL X, seen on a device, 2026-10-08)
 
