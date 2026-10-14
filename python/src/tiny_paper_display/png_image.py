@@ -18,7 +18,8 @@ def _paeth(a, b, c):
     return a if pa <= pb and pa <= pc else b if pb <= pc else c
 
 
-def decode_png(data, *, gray_transparency=True):
+def decode_png(data, *, gray_transparency=True, keep_alpha=False):
+    """(w, h, pixels): RGB tuples with alpha put on white; keep_alpha=True: (r, g, b, a) tuples as stored."""
     if len(data) > MAX_BYTES or data[:8] != b"\x89PNG\r\n\x1a\n":
         raise ValueError("not a PNG or over 16 MiB")
     off, header, palette, transparency = 8, None, None, b""
@@ -117,6 +118,9 @@ def decode_png(data, *, gray_transparency=True):
                     alpha = sample[-1]
                 elif sample == transparent:
                     alpha = 0
+            if keep_alpha:
+                pixels.append((*rgb, alpha))
+                continue
             pixels.append(tuple((v * alpha + 255 * (255 - alpha) + 127) // 255 for v in rgb))
         prior = row
     return w, h, pixels
