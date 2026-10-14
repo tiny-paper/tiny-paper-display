@@ -18,10 +18,11 @@ class Refuse(Exception):
 
 
 class FakeDevice:
-    def __init__(self, w=16, h=8, depths=(1, 2), partial_depths=(1,), partial_all=True, full_every=20,
+    def __init__(self, w=16, h=8, depths=(1, 2), partial_depths=(1,), partial_all=True, full_every=30,
                  board="fake", fw_version="0.0.0+fake", ckv=None, hello=None, bt=None, name="tp-display-FAKE"):
         self.w, self.h, self.depths, self.partial_depths = w, h, list(depths), list(partial_depths)
         self.partial_all, self.full_every, self.board, self.fw = partial_all, full_every, board, fw_version
+        self.default_every, self.every_set = full_every, False
         self.max_png = ((w * max(depths) + 7) // 8 + 1) * h + 4096
         self.ckv, self.hello_override = ckv, hello  # ckv: the gate clock map of every answer (a TRMNL X)
         self.png = None                # the open transfer: [size, bytes, target]
@@ -60,11 +61,20 @@ class FakeDevice:
         return (["full"] + ["partial"] * bool(self.partial_depths) + ["partial_all"] * (self.partial_all and one)
                 + ["inverse"] * one + ["passes"] * (self.partial_all and one))
 
+    def depth_modes(self):
+        out = {}
+        for d in self.depths:
+            one = d == 1 and 1 in self.partial_depths
+            out[str(d)] = (["full"] + ["partial"] * (d in self.partial_depths) + ["partial_all"] * (self.partial_all and one)
+                           + ["inverse"] * one + ["passes"] * (self.partial_all and one))
+        return out
+
     def hello(self):
         base = self.hello_override or {
             "proto": 1, "project": "display", "fw": self.fw, "board": self.board, "w": self.w, "h": self.h,
             "depths": self.depths, "max_payload": 6144, "max_png": self.max_png, "chunk": 4096,
-            "partial_depths": self.partial_depths, "modes": self.modes(), "full_every": self.full_every,
+            "partial_depths": self.partial_depths, "modes": self.modes(), "depth_modes": self.depth_modes(),
+            "full_every": self.full_every, "full_every_set": self.every_set,
             "fingerprint_hash": "fnv1a64", **({"fingerprint": self.fingerprint} if self.fingerprint else {})}
         return {**base, "bt": self.bt} if self.bt and not self.hello_override else base
 
@@ -95,11 +105,13 @@ class FakeDevice:
             self.refreshes += 1
             return self.answer(1, "full", "asked", (0, 0, self.w, self.h))
         if cmd == fw.SET:
-            if "full_every" in p:
+            if "full_every" in p and p["full_every"] is None:
+                self.full_every, self.every_set = self.default_every, False
+            elif "full_every" in p:
                 if type(p["full_every"]) is not int or not 0 <= p["full_every"] <= 250:
                     raise Refuse(2, "full_every is 0 (never) to 250")
-                self.full_every = p["full_every"]
-            return {"full_every": self.full_every}
+                self.full_every, self.every_set = p["full_every"], True
+            return {"full_every": self.full_every, "full_every_set": self.every_set}
         if cmd == fw.BT and self.bt:
             return self.set_bt(p)
         raise Refuse(1, "this is the display firmware: hello, show, clear, set")

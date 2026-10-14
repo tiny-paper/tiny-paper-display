@@ -90,7 +90,7 @@ def frame_rows(video, at, w, h, fill=False):
 class Partial:
     """What to send for each frame of packed 1 bit rows: the rectangle that changed against the last frame sent."""
 
-    def __init__(self, w, h, full_every=20):
+    def __init__(self, w, h, full_every=30):
         self.w, self.h, self.full_every, self.last, self.since_full = w, h, full_every, None, 0
 
     def next(self, rows):
@@ -167,8 +167,8 @@ def main():
     p.add_argument("--mode", choices=("partial", "full"), default="partial",
                    help="partial (default): black and white, only the changed rectangle, no flash; full: gray, a full "
                         "refresh every frame")
-    p.add_argument("--full-every", type=int, default=20, metavar="N",
-                   help="with partial: a full refresh every N frames as clean-up (default 20, 0 never)")
+    p.add_argument("--full-every", type=int, default=30, metavar="N",
+                   help="with partial: a full refresh every N frames as clean-up (default 30, 0 never)")
     a = p.parse_args()
     if a.bluetooth and a.video is None and a.port is not None:
         a.port, a.video = None, Path(a.port)  # the one positional is the film

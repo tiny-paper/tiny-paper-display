@@ -132,6 +132,7 @@ def main():
         hello = display.hello()
         if not display_fw.is_display_firmware(hello):
             raise SystemExit("this device does not run the display firmware")
+        caps = display_fw.parse_capabilities(hello)
         w, h = hello["w"], hello["h"]
         modes = [m for m in display_fw.MODES if m in (hello.get("modes") or ["full"])]
         partial = sorted(hello.get("partial_depths") or [])
@@ -163,7 +164,13 @@ def main():
             if depth not in partial:
                 print("  no partial refresh at this depth")
                 continue
+            # depth_modes (newer firmware): only the modes this depth does; without it try and report the refusal
+            can = caps.depth_modes.get(depth) if caps.depth_modes else None
             for n, (name, x, y, sw, sh) in enumerate(slots, 1):
+                mode = "passes" if name.startswith("PASSES") else name.lower()
+                if can is not None and name != "AUTO" and mode not in can:
+                    print(f"  {depth} bit  {name:<12} not at this depth (depth_modes)")
+                    continue
                 s = max(2, w // 400)
                 bx, by, bw, bh = x + 8, y + 12 * s, (sw - 16) // 8 * 8, sh - 24 * s
                 c.rect(bx, by, bw, bh, WHITE)

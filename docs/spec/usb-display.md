@@ -29,12 +29,12 @@ cache: after a lost answer send `hello` and start the picture again.
 
 | cmd | Name | Request | Answer |
 |---|---|---|---|
-| 0x01 | hello | any map (the app's `{ proto: 1, app: tstr }` is fine) | `{ proto: 1, project: "display", fw: tstr, board: tstr, w: uint, h: uint, depths: [uint], colors?: [tstr], max_payload: 6144, max_png: uint, chunk: 4096, partial_depths: [uint], modes: [tstr], full_every: uint, fingerprint_hash: "fnv1a64", fingerprint?: tstr, bt?: tstr, partial_max?: map, tuning?: map, full_area?: [uint] }` (`partial_max`, `full_area`: "Area and refresh mode"; `tuning`: "Tuning") |
+| 0x01 | hello | any map (the app's `{ proto: 1, app: tstr }` is fine) | `{ proto: 1, project: "display", fw: tstr, board: tstr, w: uint, h: uint, depths: [uint], colors?: [tstr], max_payload: 6144, max_png: uint, chunk: 4096, partial_depths: [uint], modes: [tstr], depth_modes: map, full_every: uint, full_every_set: bool, fingerprint_hash: "fnv1a64", fingerprint?: tstr, bt?: tstr, partial_max?: map, tuning?: map, full_area?: [uint] }` (`partial_max`, `full_area`: "Area and refresh mode"; `tuning`: "Tuning") |
 | 0x08 | show_begin | `{ size: uint, x?: uint, y?: uint, mode?: tstr, passes?: uint }`: the PNG's bytes, where it goes and how ("Area and refresh mode") | `{ chunk: 4096, next: 0 }`; replaces an open transfer (which counts as cut) |
 | 0x09 | show_chunk | `{ off: uint, data: bstr }` | `{ next: uint }`. `off` must be `next`; the first chunk holds at least the PNG's first 29 bytes and is checked at once (size, depth) |
 | 0x0A | show_end | `{}` | `{ depth: uint, ms: uint, mode: tstr, why: tstr, x: uint, y: uint, w: uint, h: uint, passes?: uint, ckv?: map, warn?: tstr, same?: true }` after the refresh ("The answer") |
 | 0x0B | clear | `{}` | as show_end: the panel white, `mode: "full"`, `why: "asked"` |
-| 0x0C | set | `{ full_every?: uint, tuning?: map or "defaults" }` `full_every` 0 (never) .. 250; "Tuning"; without a key nothing changes | `{ full_every: uint, tuning?: map, refused?: map }` `full_every` as in use, stored on the device, kept over power-off; the others under "Tuning" |
+| 0x0C | set | `{ full_every?: uint or null, tuning?: map or "defaults" }` `full_every` 0 (never) .. 250, null: remove the stored value, the default (30) applies again; "Tuning"; without a key nothing changes | `{ full_every: uint, full_every_set: bool, tuning?: map, refused?: map }` `full_every` as in use (`full_every_set` as in hello), stored on the device, kept over power-off; the others under "Tuning" |
 | 0x0D | bt | `{ on?: bool, pair?: bool, forget?: bool }`, over the USB cable only ("Bluetooth") | `{ on: bool, pairing: uint, name: tstr }`: the setting, the seconds the pairing window stays open (0: closed), the advertised name |
 | 0x0E | have | `{ fingerprint: tstr }` | `{ same: true }` when known and equal, else `{ send: true }`; no PNG bytes, refresh or counter change |
 
@@ -42,7 +42,7 @@ cache: after a lost answer send `hello` and start the picture again.
 `UNKNOWN_CMD`. `board`: `trmnl_og`, `picpak`, `trmnl_x`. `depths`: the gray bit depths taken. `colors`
 (`["black","white","red","yellow"]`, PicPak): the panel's own colors. `warn`: the driver reported a refresh in less
 time than the panel needs (SPI panels: under 300 ms): look at the panel. `partial_depths`: the depths the board
-refreshes partially now (empty: none; the tuning key `driver` takes the gray depths away while it is `plain`). `modes`: the modes it does at some depth. `full_every`: the setting. `bt`: `"off"` or
+refreshes partially now (empty: none; the tuning key `driver` takes the gray depths away while it is `plain`). `modes`: the modes it does at some depth. `depth_modes`: `{ "1": [tstr], "2": [tstr], "4": [tstr] }`, a key for each of `depths` (text keys), the modes a `show` of a whole picture at that depth is accepted with, from the same check that refuses the others with MODE 36 (a TRMNL X at 2 and 4 bit lists `full` and `partial` only, `partial_all`, `inverse` and `passes` need a 1 bit picture; a firmware from before this field lacks it: try the mode and read the refusal). `full_every`: the setting in use (default 30); `full_every_set`: true when it is a stored value, false while the default applies (`set` with `full_every: null` makes it false again). `bt`: `"off"` or
 `"on"`, the Bluetooth setting; absent on a build without Bluetooth, which answers `bt` with `UNKNOWN_CMD`.
 
 Example (vector session `gray`, a 16 x 8 test panel, partial at 1 bit):
@@ -50,13 +50,13 @@ Example (vector session `gray`, a 16 x 8 test panel, partial at 1 bit):
 | | Bytes |
 |---|---|
 | hello | `a55a 1400 01 01 a26570726f746f016361707067766563746f7273 2e7a` |
-| answer | `a55a b300 01 81 ad 6570726f746f01 6770726f6a65637467646973706c6179 62667769302e302e302b766563 65626f617264687665635f67726179 617710 616808 6664657074687382 0102 6b6d61785f7061796c6f6164191800 676d61785f706e67191028 656368756e6b191000 6e7061727469616c5f6465707468738101 656d6f64657385 6466756c6c 677061727469616c 6b7061727469616c5f616c6c 67696e7665727365 66706173736573 6a66756c6c5f657665727914 31d2` |
+| answer | `a55a 1c01 01 81 b06570726f746f016770726f6a65637467646973706c617962667769302e302e302b76656365626f617264687665635f67726179617710616808666465707468738201026b6d61785f7061796c6f6164191800676d61785f706e67191028656368756e6b1910006e7061727469616c5f6465707468738101656d6f646573856466756c6c677061727469616c6b7061727469616c5f616c6c67696e7665727365667061737365736b64657074685f6d6f646573a26131856466756c6c677061727469616c6b7061727469616c5f616c6c67696e7665727365667061737365736132816466756c6c6a66756c6c5f6576657279146e66756c6c5f65766572795f736574f47066696e6765727072696e745f6861736867666e7631613634 9050` |
 | show_begin, 86 bytes | `a55a 0800 31 08 a16473697a651856 e617` -> `a55a 1000 31 88 a2656368756e6b191000646e65787400 2322` |
 | show_end, first picture | `a55a 0100 05 0a a0 8c0a` -> `a55a 2c00 05 8a a8 65646570746801 626d7300 646d6f64656466756c6c 63776879656669727374 617800 617900 617710 616808 ee39` (full, first) |
 | show_end, a corner changed | `a55a 0100 33 0a a0 897d` -> `a55a 3100 33 8a a8 65646570746801 626d7300 646d6f6465677061727469616c 63776879676368616e676564 617808 617902 617708 616802 e451` (partial, changed, 8,2 8x2) |
 | show_begin, 8 x 4 at 0,4, inverse | `a55a 1b00 3d 08 a4 6473697a651847 617800 617904 646d6f646567696e7665727365 08b2` |
 | clear | `a55a 0100 0b 0b a0 bc22` -> `a55a 2c00 0b 8b a8 65646570746801 626d7300 646d6f64656466756c6c 637768796561736b6564 617800 617900 617710 616808 8a24` |
-| set | `a55a 0d00 70 0c a16a66756c6c5f657665727902 4e31` -> `a55a 0d00 70 8c a16a66756c6c5f657665727902 3066` |
+| set | `a55a 0d00 76 0c a16a66756c6c5f657665727902 25e7` -> `a55a 1d00 76 8c a26a66756c6c5f6576657279 02 6e66756c6c5f65766572795f736574 f5 60ac` |
 
 ## Fingerprint and duplicate pictures
 
@@ -161,7 +161,7 @@ frame. A whole picture without a mode gives up the frame kept when memory is sho
 | `passes` | with the mode `passes` |
 | `ckv` | TRMNL X: `{ edges: uint, frames: uint, per: uint, rows: uint, ok: bool }`, the gate clock edges the firmware counted over the last refresh of the update, the drive frames, edges a frame, the panel's rows; `ok` false when a frame did not clock once per row (the picture is then drawn at the wrong height). Log: `# display W show ... WRONG` |
 
-`full_every` (default 20, `set`): the count of partial updates since the last full refresh; a named mode is run as
+`full_every` (default 30, `set`): the count of partial updates since the last full refresh; a named mode is run as
 named and counts, except an unchanged `partial` which uses no count.
 
 ## Tuning
@@ -285,7 +285,7 @@ drives only the pixels that changed, so there is no such step.
 | Memory | the PNG, then the frame (`w * depth / 8 * h`) and the decoder (<= 32 KiB window, two rows); the PNG is freed before the refresh. At a depth in `partial_depths` one more frame is kept between updates; `inverse` adds the rectangle's rows |
 | Rectangle | 8 x 1 up to the panel; the PNG's size bound is `max_png` as for a whole picture |
 | `passes` | 1..4 |
-| `full_every` | 0..250, default 20 |
+| `full_every` | 0..250, default 30 |
 | Quiet transfer | dropped 10 s after its last request, memory freed |
 | Cable pulled | the device restarts from deep sleep: no transfer state and no frame kept survive (the next update is a full refresh); the panel keeps the last picture shown |
 

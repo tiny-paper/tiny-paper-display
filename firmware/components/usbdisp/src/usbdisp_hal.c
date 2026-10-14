@@ -90,6 +90,12 @@ static int h_kv_get(void *ctx, const char *key, void *buf, size_t cap)
     return hal_kv_get(key, buf, cap);
 }
 
+static int h_kv_erase(void *ctx, const char *key)
+{
+    (void)ctx;
+    return hal_kv_erase(key);
+}
+
 static int h_kv_set(void *ctx, const char *key, const void *buf, size_t len)
 {
     (void)ctx;
@@ -163,5 +169,6 @@ void usbdisp_hal_cfg(usbdisp_cfg_t *cfg, const char *fw)
     cfg->gray_rows_get = h_gray_rows_get;
     cfg->kv_get = h_kv_get;
     cfg->kv_set = h_kv_set;
+    cfg->kv_erase = h_kv_erase;
     cfg->log = h_log;
 }

@@ -1232,7 +1232,7 @@ var MockDisplayDevice = class {
     depths: [1, 2],
     partial_depths: [1],
     modes: ["full", "partial", "inverse", "passes"],
-    full_every: 20,
+    full_every: 30,
     max_png: 8192,
     max_payload: 6144,
     chunk: 4096

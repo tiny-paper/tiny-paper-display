@@ -46,6 +46,11 @@ int hal_kv_set(const char *key, const void *buf, size_t len) {
     kv[free_i].len = len;
     return (int)len;
 }
+int hal_kv_erase(const char *key) {
+    for (int i = 0; i < KV_N; i++)
+        if (kv[i].len && !strcmp(kv[i].key, key)) kv[i].len = 0;
+    return 0;
+}
 
 long hal_link_read(hal_link_t t, uint8_t *buf, size_t cap, uint32_t timeout_ms) {
     (void)t; (void)buf; (void)cap; (void)timeout_ms;

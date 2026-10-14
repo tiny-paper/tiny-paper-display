@@ -25,6 +25,8 @@ def head(major, n):
 
 
 def cbor(v):
+    if v is None:
+        return b"\xf6"
     if isinstance(v, bool):
         return b"\xf5" if v else b"\xf4"
     if isinstance(v, int):
@@ -114,6 +116,8 @@ class Session:
                       "max_png": bound(W, H, deep), "partial_depths": list(partial_depths),
                       "partial_all": partial_all, "full_every": full_every}
         self.full_every = full_every
+        self.default_every = full_every
+        self.full_every_set = False
         self.fingerprint = None
 
     def pair(self, cmd, req, resp):
@@ -138,7 +142,15 @@ class Session:
         r.update({"max_payload": 6144, "max_png": p["max_png"], "chunk": 4096})
         modes = ["full"] + (["partial"] if p["partial_depths"] else []) + (["partial_all"] if p["partial_all"] else [])
         modes += (["inverse"] if 1 in p["partial_depths"] else []) + (["passes"] if p["partial_all"] else [])
-        r.update({"partial_depths": p["partial_depths"], "modes": modes, "full_every": self.full_every, "fingerprint_hash": "fnv1a64"})
+        pd = p["partial_depths"]
+        depth_modes = {}
+        for d in p["depths"]:  # a mode at a depth: the firmware's usbdisp_mode_check, written out once more here
+            ok = ["full"] + (["partial"] if d in pd else [])
+            if 1 in pd and d == 1:
+                ok += (["partial_all"] if p["partial_all"] else []) + ["inverse"] + (["passes"] if p["partial_all"] else [])
+            depth_modes[str(d)] = ok
+        r.update({"partial_depths": pd, "modes": modes, "depth_modes": depth_modes, "full_every": self.full_every,
+                  "full_every_set": self.full_every_set, "fingerprint_hash": "fnv1a64"})
         if self.fingerprint:
             r["fingerprint"] = self.fingerprint
         return r
@@ -327,10 +339,12 @@ def area_session(s, glass):
     s.show("to_gray2", g2["png"], 2, "full", "depth", g2["rows"])
     s.show("back_to_gray1", gray1(corner), 1, "full", "depth", corner)
     # the setting: a full refresh every N updates
-    s.step("set_get", SET, {}, {"full_every": 20})
+    s.step("set_get", SET, {}, {"full_every": 20, "full_every_set": False})
     s.step("set_bad", SET, {"full_every": 251}, {"err": 2, "msg": "full_every is 0 (never) to 250"})
-    s.step("set_2", SET, {"full_every": 2}, {"full_every": 2})
-    s.full_every = 2
+    s.step("set_7", SET, {"full_every": 7}, {"full_every": 7, "full_every_set": True})
+    s.step("set_clear", SET, {"full_every": None}, {"full_every": 20, "full_every_set": False})
+    s.step("set_2", SET, {"full_every": 2}, {"full_every": 2, "full_every_set": True})
+    s.full_every, s.full_every_set = 2, True
     a, b = glass, corner
     s.show("tick_1", gray1(a), 1, "partial", "changed", a, rect=changed(a, b))
     s.show("tick_2", gray1(b), 1, "partial", "changed", b, rect=changed(a, b))
