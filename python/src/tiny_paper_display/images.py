@@ -48,18 +48,29 @@ def _pillow(data):
     return Source(im.width, im.height, im.tobytes())
 
 
+def have_pillow():
+    try:
+        import PIL  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 def from_bytes(data):
+    """Pillow decodes when it is installed (much faster on big pictures); the package's own PNG reader otherwise."""
     if len(data) > MAX_BYTES:
         raise DisplayError("the picture exceeds 16 MiB")
+    if have_pillow():
+        return _pillow(data)
     if data[:8] == PNG_SIGNATURE:
         try:
-            w, h, pixels = png_image.decode_png(data, keep_alpha=True)
+            w, h, rgba = png_image.decode_rgba(data)
         except ValueError as exc:
             try:
                 return _pillow(data)
             except DisplayError as pil:
                 raise DisplayError(f"{exc} ({pil})") from exc
-        return Source(w, h, bytes(v for p in pixels for v in p))
+        return Source(w, h, rgba)
     return _pillow(data)
 
 

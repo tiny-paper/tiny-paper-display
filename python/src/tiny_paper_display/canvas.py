@@ -2,6 +2,7 @@
 # Gray-level drawing in code, moved from examples/test_page.py.
 """Canvas: draw rectangles, frames, text and checkers in 16 gray levels, show it on a display (Device.show / .area)."""
 from . import display_fw
+from .picture import pack_rows
 from .usb_display import DisplayError
 
 # 5x7 glyphs, one byte per column, low bit at the top (the classic LCD font).
@@ -67,16 +68,12 @@ class Canvas:
         """The area as a gray PNG of `depth` bits (levels rounded to what the depth has)."""
         w, h = w or self.w, h or self.h
         top = (1 << depth) - 1
-        per = 8 // depth
-        rows = bytearray()
-        for yy in range(y, y + h):
-            line = self.px[yy * self.w + x:yy * self.w + x + w]
-            for i in range(0, w, per):
-                byte = 0
-                for v in line[i:i + per]:
-                    byte = byte << depth | (v * top + 7) // 15
-                rows.append(byte << depth * (per - len(line[i:i + per])))
-        return display_fw.write_png(w, h, depth, bytes(rows))
+        table = bytes((v * top + 7) // 15 if v < 16 else 0 for v in range(256))
+        if (x, y, w, h) == (0, 0, self.w, self.h):
+            levels = bytes(self.px).translate(table)
+        else:
+            levels = b"".join(bytes(self.px[(y + j) * self.w + x:(y + j) * self.w + x + w]).translate(table) for j in range(h))
+        return display_fw.write_png(w, h, depth, pack_rows(levels, w, h, depth))
 
     def rgba(self):
         """The canvas as RGBA bytes (level * 17 on each channel), for the picture preparation."""
